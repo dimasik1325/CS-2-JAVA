@@ -90,10 +90,20 @@ public class GameSettings {
         }
     }
 
+    public enum MapTheme {
+        DUST_II("Dust II (Пески)"),
+        MIRAGE("Mirage (Дворец)"),
+        NUKE("Nuke (Комплекс)");
+
+        public final String label;
+        MapTheme(String label) { this.label = label; }
+    }
+
     public enum GameMode {
         BOMB_DEFUSAL("Операция C4 (Пленты A/B)"),
         ELIMINATION("Классика: Зачистка"),
-        DEATHMATCH("Бой насмерть (DM)");
+        DEATHMATCH("Бой насмерть (DM)"),
+        ARMS_RACE("Гонка вооружений");
 
         public final String label;
         GameMode(String label) { this.label = label; }
@@ -104,7 +114,8 @@ public class GameSettings {
         ASIIMOV("Asiimov (Азимов)", 0xEEF2F7, 0xFF6B1A, 0x1D222B),
         GOLD_FADE("Золотой Градиент (Fade)", 0xF4C438, 0xE6397A, 0x622B96),
         REDLINE("Redline (Карбон)", 0x1B1F26, 0xE82C3C, 0x343B46),
-        PRINTSTREAM("Printstream (Кибер-Неон)", 0xE8EEF6, 0x2CE8FF, 0x1C2536);
+        PRINTSTREAM("Printstream (Кибер-Неон)", 0xE8EEF6, 0x2CE8FF, 0x1C2536),
+        HYPER_BEAST("Неоновый Зверь", 0x202A68, 0xFF3E8E, 0x2EFFB4);
 
         public final String label;
         public final int primary;
@@ -144,10 +155,12 @@ public class GameSettings {
     public boolean showDamageNumbers = true;
 
     // --- ПАРАМЕТРЫ МАТЧА И АРСЕНАЛА ---
+    public MapTheme mapTheme = MapTheme.DUST_II;
     public GameMode gameMode = GameMode.BOMB_DEFUSAL;
     public WeaponSkin weaponSkin = WeaponSkin.STANDARD;
     public BotDifficulty botDifficulty = BotDifficulty.NORMAL;
     public int botCount = 5;
+    public int allyCount = 2;
     public int roundsToWin = 5;
 
     // --- НАСТРОЙКИ АУДИО ---
@@ -221,10 +234,12 @@ public class GameSettings {
             leftHandedModel = Boolean.parseBoolean(p.getProperty("leftHandedModel", String.valueOf(leftHandedModel)));
             showDamageNumbers = Boolean.parseBoolean(p.getProperty("showDamageNumbers", String.valueOf(showDamageNumbers)));
 
+            mapTheme = parseEnum(p.getProperty("mapTheme"), MapTheme.class, mapTheme);
             gameMode = parseEnum(p.getProperty("gameMode"), GameMode.class, gameMode);
             weaponSkin = parseEnum(p.getProperty("weaponSkin"), WeaponSkin.class, weaponSkin);
             botDifficulty = parseEnum(p.getProperty("botDifficulty"), BotDifficulty.class, botDifficulty);
             botCount = clampInt(p.getProperty("botCount"), 2, 8, botCount);
+            allyCount = clampInt(p.getProperty("allyCount"), 0, 4, allyCount);
             roundsToWin = clampInt(p.getProperty("roundsToWin"), 2, 10, roundsToWin);
 
             masterVolume = clampDouble(p.getProperty("masterVolume"), 0.0, 1.0, masterVolume);
@@ -254,10 +269,12 @@ public class GameSettings {
         p.setProperty("leftHandedModel", String.valueOf(leftHandedModel));
         p.setProperty("showDamageNumbers", String.valueOf(showDamageNumbers));
 
+        p.setProperty("mapTheme", mapTheme.name());
         p.setProperty("gameMode", gameMode.name());
         p.setProperty("weaponSkin", weaponSkin.name());
         p.setProperty("botDifficulty", botDifficulty.name());
         p.setProperty("botCount", String.valueOf(botCount));
+        p.setProperty("allyCount", String.valueOf(allyCount));
         p.setProperty("roundsToWin", String.valueOf(roundsToWin));
 
         p.setProperty("masterVolume", String.valueOf(masterVolume));

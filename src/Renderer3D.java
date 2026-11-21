@@ -20,6 +20,10 @@ public class Renderer3D {
     public static final int TEX_METAL_DOOR = 5;
     public static final int TEX_SOLID = 6;
     public static final int TEX_BOMBSITE = 7;
+    public static final int TEX_MIRAGE_PLASTER = 8;
+    public static final int TEX_MIRAGE_TILE = 9;
+    public static final int TEX_NUKE_PANEL = 10;
+    public static final int TEX_NUKE_FLOOR = 11;
 
     private static final int TEX_SIZE = 128;
     private static final int TEX_MASK = TEX_SIZE - 1;
@@ -81,7 +85,7 @@ public class Renderer3D {
     private final double[] projVZ = new double[8];
 
     public Renderer3D(int width, int height, double verticalFovDegrees) {
-        this.textures = new int[8][TEX_SIZE * TEX_SIZE];
+        this.textures = new int[12][TEX_SIZE * TEX_SIZE];
         generateRealisticTextures();
         generateCloudLut();
         ensureViewport(width, height, verticalFovDegrees);
@@ -537,6 +541,62 @@ public class Renderer3D {
             p2.x, p2.y, p2.z, 1, 0,
             p3.x, p3.y, p3.z, 0, 0,
             TEX_SOLID, d.color, false, fogEnabled, 0
+        );
+    }
+
+    /**
+     * Рисует яркое 3D-граффити CS2 (Корона / Прицел / Молния) на стене, ящике или полу.
+     */
+    public void drawGraffiti(Vec3.Graffiti gr) {
+        Vec3 n = gr.normal;
+        Vec3 tangent;
+        if (Math.abs(n.y) > 0.8) {
+            tangent = new Vec3(1.0, 0.0, 0.0);
+        } else {
+            tangent = new Vec3(-n.z, 0.0, n.x).normalize();
+        }
+        Vec3 bitan = n.cross(tangent).normalize();
+        if (bitan.y < -0.2) {
+            bitan = bitan.scale(-1.0);
+        }
+
+        // Темная подложка аэрозольного пятна + узор эмблемы
+        drawDecalRect(gr.pos, tangent, bitan, 0.0, 0.0, 0.72, 0.72, 0x161A22);
+        Vec3 front = gr.pos.add(n.scale(0.006));
+
+        if (gr.style == 0) {
+            // Золотая корона CS2
+            drawDecalRect(front, tangent, bitan, 0.0, -0.16, 0.54, 0.14, gr.primaryColor);
+            drawDecalRect(front, tangent, bitan, -0.18, 0.04, 0.13, 0.28, gr.primaryColor);
+            drawDecalRect(front, tangent, bitan,  0.00, 0.08, 0.14, 0.34, gr.accentColor);
+            drawDecalRect(front, tangent, bitan,  0.18, 0.04, 0.13, 0.28, gr.primaryColor);
+        } else if (gr.style == 1) {
+            // Кибер-прицел Headshot
+            drawDecalRect(front, tangent, bitan, 0.0, 0.0, 0.52, 0.10, gr.primaryColor);
+            drawDecalRect(front, tangent, bitan, 0.0, 0.0, 0.10, 0.52, gr.primaryColor);
+            drawDecalRect(front, tangent, bitan, 0.0, 0.0, 0.20, 0.20, gr.accentColor);
+        } else {
+            // Неоновая молния Zeus
+            drawDecalRect(front, tangent, bitan,  0.06,  0.14, 0.30, 0.13, gr.primaryColor);
+            drawDecalRect(front, tangent, bitan,  0.00,  0.00, 0.34, 0.12, gr.accentColor);
+            drawDecalRect(front, tangent, bitan, -0.06, -0.14, 0.30, 0.13, gr.primaryColor);
+        }
+    }
+
+    private void drawDecalRect(Vec3 center, Vec3 tangent, Vec3 bitan,
+                               double offU, double offV, double w, double h, int color) {
+        double hw = w * 0.5, hh = h * 0.5;
+        Vec3 c = center.add(tangent.scale(offU)).add(bitan.scale(offV));
+        Vec3 p0 = c.sub(tangent.scale(hw)).sub(bitan.scale(hh));
+        Vec3 p1 = c.add(tangent.scale(hw)).sub(bitan.scale(hh));
+        Vec3 p2 = c.add(tangent.scale(hw)).add(bitan.scale(hh));
+        Vec3 p3 = c.sub(tangent.scale(hw)).add(bitan.scale(hh));
+        drawWorldQuad(
+            p0.x, p0.y, p0.z, 0, 1,
+            p1.x, p1.y, p1.z, 1, 1,
+            p2.x, p2.y, p2.z, 1, 0,
+            p3.x, p3.y, p3.z, 0, 0,
+            TEX_SOLID, color, false, fogEnabled, 0
         );
     }
 
@@ -1257,6 +1317,78 @@ public class Renderer3D {
                 } else {
                     site[y * TEX_SIZE + x] = base;
                 }
+            }
+        }
+
+        // 8. Mirage: теплая марокканская терракотовая штукатурка с резным сине-золотым бордюром
+        int[] mirWall = textures[TEX_MIRAGE_PLASTER];
+        for (int y = 0; y < TEX_SIZE; y++) {
+            for (int x = 0; x < TEX_SIZE; x++) {
+                double stucco = Math.sin(x * 0.16) * 5.0 + Math.cos(y * 0.19) * 5.0;
+                int grain = rng.nextInt(13) - 6;
+                boolean mosaicBand = (y >= 10 && y <= 20);
+                boolean lowerPlinth = (y >= 112);
+                int r = 228 + (int) stucco + grain;
+                int g = 178 + (int) stucco + grain;
+                int b = 138 + (int) stucco + grain;
+                if (mosaicBand) {
+                    boolean pat = (((x / 8) + (y / 4)) % 2 == 0);
+                    r = pat ? 44 : 232;
+                    g = pat ? 122 : 186;
+                    b = pat ? 158 : 88;
+                } else if (lowerPlinth) {
+                    r = 168 + grain; g = 122 + grain; b = 94 + grain;
+                }
+                mirWall[y * TEX_SIZE + x] = packRgb(r, g, b);
+            }
+        }
+
+        // 9. Mirage: каменная мозаичная плитка дворцовой площади
+        int[] mirTile = textures[TEX_MIRAGE_TILE];
+        for (int y = 0; y < TEX_SIZE; y++) {
+            for (int x = 0; x < TEX_SIZE; x++) {
+                int tx = x & 31, ty = y & 31;
+                boolean grout = tx < 2 || ty < 2;
+                int checker = (((x >> 5) + (y >> 5)) & 1);
+                int grain = rng.nextInt(11) - 5;
+                int r = (checker == 0 ? 214 : 198) + grain;
+                int g = (checker == 0 ? 190 : 172) + grain;
+                int b = (checker == 0 ? 156 : 138) + grain;
+                if (grout) { r -= 38; g -= 34; b -= 28; }
+                mirTile[y * TEX_SIZE + x] = packRgb(r, g, b);
+            }
+        }
+
+        // 10. Nuke: индустриальные стальные панели комплекса с синей технической полосой
+        int[] nukeWall = textures[TEX_NUKE_PANEL];
+        for (int y = 0; y < TEX_SIZE; y++) {
+            for (int x = 0; x < TEX_SIZE; x++) {
+                boolean seam = (x < 3 || x >= 125 || y < 3 || y >= 125 || x == 64);
+                boolean blueStripe = (y >= 78 && y <= 92);
+                boolean hazardLine = (y >= 93 && y <= 98) && (((x + y) / 8) % 2 == 0);
+                int grain = rng.nextInt(9) - 4;
+                int r = 186 + grain, g = 194 + grain, b = 204 + grain;
+                if (seam) {
+                    r = 98; g = 108; b = 120;
+                } else if (blueStripe) {
+                    r = 46 + grain; g = 106 + grain; b = 168 + grain;
+                } else if (hazardLine) {
+                    r = 236; g = 188; b = 34;
+                }
+                nukeWall[y * TEX_SIZE + x] = packRgb(r, g, b);
+            }
+        }
+
+        // 11. Nuke: армированный бетонный пол бункера с технической разметкой
+        int[] nukeFloor = textures[TEX_NUKE_FLOOR];
+        for (int y = 0; y < TEX_SIZE; y++) {
+            for (int x = 0; x < TEX_SIZE; x++) {
+                int gx = x & 63, gy = y & 63;
+                boolean joint = gx < 2 || gy < 2;
+                int grain = rng.nextInt(11) - 5;
+                int r = 122 + grain, g = 128 + grain, b = 136 + grain;
+                if (joint) { r -= 26; g -= 26; b -= 26; }
+                nukeFloor[y * TEX_SIZE + x] = packRgb(r, g, b);
             }
         }
     }

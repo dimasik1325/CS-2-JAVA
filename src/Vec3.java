@@ -548,4 +548,29 @@ public class Vec3 {
             this.siteName = siteName;
         }
     }
+
+    /**
+     * Яркое 3D-граффити CS2 на стене, ящике или полу (наносится баллончиком по клавише Y).
+     */
+    public static class Graffiti {
+        public final Vec3 pos;
+        public final Vec3 normal;
+        public final int primaryColor;
+        public final int accentColor;
+        public final int style; // 0 = Корона, 1 = Прицел, 2 = Молния
+        public double life = 45.0;
+
+        public Graffiti(Vec3 pos, Vec3 normal, int primaryColor, int accentColor, int style) {
+            this.pos = pos.copy().add(normal.scale(0.025));
+            this.normal = normal.copy();
+            this.primaryColor = primaryColor;
+            this.accentColor = accentColor;
+            this.style = style;
+        }
+
+        public boolean update(double dt) {
+            life -= dt;
+            return life > 0.0;
+        }
+    }
 }

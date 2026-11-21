@@ -35,22 +35,30 @@ public class Player {
     private int armor = 100;
     private boolean alive = true;
 
-    // Слоты: 0 = Основное (AK-47 / M4A1-S / AWP / XM1014), 1 = Пистолет (Glock / Deagle), 2 = Нож
+    // Слоты: 0 = Основное, 1 = Пистолет, 2 = Нож, 3 = Электрошокер Zeus x27
     private final Weapon[] weapons = new Weapon[]{
         new Weapon(Weapon.Type.AK47),
         new Weapon(Weapon.Type.GLOCK),
-        new Weapon(Weapon.Type.KNIFE)
+        new Weapon(Weapon.Type.KNIFE),
+        new Weapon(Weapon.Type.ZEUS)
     };
     private int currentWeaponIndex = 0;
 
-    // Экономика, тактические гранаты, набор сапера и фонарик
+    // Экономика, тактические гранаты, Zeus x27, набор сапера и фонарик
     private int money = 2400;
     private int heGrenades = 1;
     private int smokeGrenades = 1;
     private int flashGrenades = 1;
     private int molotovGrenades = 1;
     private boolean hasDefuseKit = false;
+    private boolean hasZeus = true;
     private boolean flashlightOn = false;
+    private double graffitiCooldown = 0.0;
+
+    // Прогресс режима «Гонка вооружений» (Arms Race: 0..7) и звезды MVP
+    private int armsRaceTier = 0;
+    private int armsRaceTierKills = 0;
+    private int mvpStars = 0;
 
     // Анимации камеры, шагов и эффекты боя
     private double walkBobPhase = 0.0;
@@ -98,11 +106,13 @@ public class Player {
             this.weapons[0] = new Weapon(Weapon.Type.AK47);
             this.weapons[1] = new Weapon(Weapon.Type.GLOCK);
             this.weapons[2] = new Weapon(Weapon.Type.KNIFE);
+            this.weapons[3] = new Weapon(Weapon.Type.ZEUS);
             this.heGrenades = 1;
             this.smokeGrenades = 1;
             this.flashGrenades = 1;
             this.molotovGrenades = 1;
             this.hasDefuseKit = false;
+            this.hasZeus = true;
         } else {
             for (Weapon w : weapons) {
                 w.resetAmmo();
@@ -114,6 +124,27 @@ public class Player {
 
         this.alive = true;
         this.currentWeaponIndex = 0;
+    }
+
+    public void applyArmsRaceTierLoadout() {
+        int clamped = Math.max(0, Math.min(Weapon.ARMS_RACE_LADDER.length - 1, armsRaceTier));
+        Weapon.Type tierType = Weapon.ARMS_RACE_LADDER[clamped];
+        this.weapons[2] = new Weapon(Weapon.Type.KNIFE);
+        this.weapons[3] = new Weapon(Weapon.Type.ZEUS);
+        this.hasZeus = true;
+        if (tierType == Weapon.Type.KNIFE) {
+            // Финальный 8-й уровень: Золотой Нож!
+            this.currentWeaponIndex = 2;
+            this.weapons[2].onEquip();
+        } else if (tierType == Weapon.Type.DEAGLE || tierType == Weapon.Type.GLOCK) {
+            this.weapons[1] = new Weapon(tierType);
+            this.currentWeaponIndex = 1;
+            this.weapons[1].onEquip();
+        } else {
+            this.weapons[0] = new Weapon(tierType);
+            this.currentWeaponIndex = 0;
+            this.weapons[0].onEquip();
+        }
     }
 
     public void respawn(Vec3 spawnPos) {
@@ -131,12 +162,17 @@ public class Player {
         this.weapons[0] = new Weapon(Weapon.Type.AK47);
         this.weapons[1] = new Weapon(Weapon.Type.GLOCK);
         this.weapons[2] = new Weapon(Weapon.Type.KNIFE);
+        this.weapons[3] = new Weapon(Weapon.Type.ZEUS);
         this.heGrenades = 1;
         this.smokeGrenades = 1;
         this.flashGrenades = 1;
         this.molotovGrenades = 1;
         this.hasDefuseKit = false;
+        this.hasZeus = true;
         this.flashlightOn = false;
+        this.armsRaceTier = 0;
+        this.armsRaceTierKills = 0;
+        this.mvpStars = 0;
     }
 
     public void addMoney(int delta) {
@@ -150,6 +186,12 @@ public class Player {
     }
 
     public void equipPurchasedWeapon(Weapon.Type type) {
+        if (type == Weapon.Type.ZEUS) {
+            this.hasZeus = true;
+            this.weapons[3] = new Weapon(Weapon.Type.ZEUS);
+            selectWeaponSlot(3);
+            return;
+        }
         Weapon nw = new Weapon(type);
         int slot = nw.getSlotNumber() - 1;
         if (slot >= 0 && slot < weapons.length) {
@@ -204,6 +246,9 @@ public class Player {
         if (!alive || index < 0 || index >= weapons.length || index == currentWeaponIndex) {
             return;
         }
+        if (index == 3 && !hasZeus) {
+            return;
+        }
         weapons[currentWeaponIndex].cancelZoom();
         currentWeaponIndex = index;
         weapons[currentWeaponIndex].onEquip();
@@ -211,8 +256,9 @@ public class Player {
 
     public void cycleWeapon(int delta) {
         if (!alive) return;
-        int next = (currentWeaponIndex + delta) % weapons.length;
-        if (next < 0) next += weapons.length;
+        int count = hasZeus ? weapons.length : 3;
+        int next = (currentWeaponIndex + delta) % count;
+        if (next < 0) next += count;
         selectWeaponSlot(next);
     }
 
@@ -229,6 +275,7 @@ public class Player {
                        boolean jumpRequested, boolean crouchHeld, boolean walkShiftHeld) {
         if (damageFlash > 0.0) damageFlash = Math.max(0.0, damageFlash - dt * 2.4);
         if (flashBlindTimer > 0.0) flashBlindTimer = Math.max(0.0, flashBlindTimer - dt);
+        if (graffitiCooldown > 0.0) graffitiCooldown = Math.max(0.0, graffitiCooldown - dt);
         if (cameraShake > 0.0) {
             cameraShake = Math.max(0.0, cameraShake - dt * 2.6);
             shakePhase += dt * 46.0;
@@ -243,6 +290,9 @@ public class Player {
 
         this.silentWalking = walkShiftHeld;
         getCurrentWeapon().update(dt);
+        if (hasZeus && currentWeaponIndex != 3) {
+            weapons[3].update(dt);
+        }
 
         if (crouchHeld) {
             crouching = true;
@@ -449,6 +499,16 @@ public class Player {
     public void addMolotovGrenade() { molotovGrenades = Math.min(2, molotovGrenades + 1); }
     public void setHasDefuseKit(boolean v) { this.hasDefuseKit = v; }
     public boolean hasDefuseKit() { return hasDefuseKit; }
+    public void setHasZeus(boolean v) { this.hasZeus = v; }
+    public boolean hasZeus() { return hasZeus; }
+    public boolean canSprayGraffiti() { return graffitiCooldown <= 0.0; }
+    public void triggerGraffitiCooldown() { this.graffitiCooldown = 1.25; }
+    public int getArmsRaceTier() { return armsRaceTier; }
+    public void setArmsRaceTier(int t) { this.armsRaceTier = Math.max(0, Math.min(Weapon.ARMS_RACE_LADDER.length - 1, t)); }
+    public int getArmsRaceTierKills() { return armsRaceTierKills; }
+    public void setArmsRaceTierKills(int k) { this.armsRaceTierKills = k; }
+    public int getMvpStars() { return mvpStars; }
+    public void addMvpStar() { this.mvpStars++; }
     public void toggleFlashlight() { this.flashlightOn = !this.flashlightOn; }
     public void setFlashlightOn(boolean v) { this.flashlightOn = v; }
     public boolean isFlashlightOn() { return flashlightOn; }

@@ -14,8 +14,14 @@ public class Weapon {
         MP9,
         GLOCK,
         DEAGLE,
+        ZEUS,
         KNIFE
     }
+
+    public static final Type[] ARMS_RACE_LADDER = {
+        Type.MP9, Type.XM1014, Type.M4A1S, Type.AK47,
+        Type.AWP, Type.DEAGLE, Type.GLOCK, Type.KNIFE
+    };
 
     private final Type type;
     private final String displayName;
@@ -214,6 +220,28 @@ public class Weapon {
                 this.moveSpeedMultiplier = 1.00;
                 break;
 
+            case ZEUS:
+                this.displayName = "Zeus x27";
+                this.slotNumber = 4;
+                this.price = 200;
+                this.killReward = 300;
+                this.automatic = false;
+                this.melee = false;
+                this.silenced = false;
+                this.sniperScope = false;
+                this.pelletsPerShot = 1;
+                this.maxMagAmmo = 1;
+                this.initialReserveAmmo = 0;
+                this.fireInterval = 0.85;
+                this.reloadDuration = 10.0;
+                this.bodyDamage = 195;
+                this.headDamage = 240;
+                this.maxRange = 5.2;
+                this.baseSpread = 0.002;
+                this.recoilPerShot = 0.004;
+                this.moveSpeedMultiplier = 1.08;
+                break;
+
             case KNIFE:
             default:
                 this.displayName = "Боевой нож";
@@ -312,13 +340,22 @@ public class Weapon {
         recoilBloom = Math.max(0.0, recoilBloom - dt * 0.058);
         recoilKick = Math.max(0.0, recoilKick - dt * (type == Type.AWP ? 3.5 : 6.5));
 
+        if (type == Type.ZEUS && magAmmo == 0 && !reloading) {
+            reloading = true;
+            reloadTimer = reloadDuration;
+        }
+
         if (reloading) {
             reloadTimer -= dt;
             if (reloadTimer <= 0.0) {
-                int needed = maxMagAmmo - magAmmo;
-                int transfer = Math.min(needed, reserveAmmo);
-                magAmmo += transfer;
-                reserveAmmo -= transfer;
+                if (type == Type.ZEUS) {
+                    magAmmo = 1;
+                } else {
+                    int needed = maxMagAmmo - magAmmo;
+                    int transfer = Math.min(needed, reserveAmmo);
+                    magAmmo += transfer;
+                    reserveAmmo -= transfer;
+                }
                 reloading = false;
                 reloadTimer = 0.0;
             }
@@ -477,6 +514,7 @@ public class Weapon {
             case MP9:    renderMp9Model(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case DEAGLE: renderDeagleModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case GLOCK:  renderGlockModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
+            case ZEUS:   renderZeusModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case KNIFE:  renderKnifeModel(renderer, ox, oy, oz, 0, 0, 0, skin, drawHands); break;
         }
     }
@@ -687,6 +725,37 @@ public class Weapon {
         if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, gx, gy + 0.028, gz + 0.21, 0.10);
     }
 
+    private void renderZeusModel(Renderer3D r, double ox, double oy, double oz,
+                                 double rotX, double rotY, double rotZ,
+                                 GameSettings.WeaponSkin skin, boolean drawHands) {
+        boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
+        int bodyDark = custom ? skin.trim : 0x1E2228;
+        int hazardYellow = custom ? skin.accent : 0xF2BE22;
+        int steel = custom ? skin.primary : 0x8A96A4;
+        int chargeLed = (magAmmo > 0) ? 0x2AF2FF : 0xFF4436;
+        int sleeve = 0x2C3E54, glove = 0x1E2228;
+
+        double zx = ox - 0.02, zy = oy + 0.01, zz = oz - 0.04;
+        if (drawHands) {
+            r.drawViewModelBox(zx - 0.03, zy - 0.11, zz - 0.12, 0.072, 0.070, 0.25, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, sleeve);
+            r.drawViewModelBox(zx, zy - 0.06, zz - 0.01, 0.064, 0.068, 0.075, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, glove);
+        }
+
+        // Эргономичная рукоятка + черно-желтый корпус электрошокера Zeus x27
+        r.drawViewModelBox(zx, zy - 0.055, zz + 0.00, 0.040, 0.105, 0.052, rotX + 0.22, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, bodyDark);
+        r.drawViewModelBox(zx, zy + 0.018, zz + 0.065, 0.052, 0.064, 0.19, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, bodyDark);
+        r.drawViewModelBox(zx, zy + 0.024, zz + 0.085, 0.056, 0.026, 0.13, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, hazardYellow);
+        // Верхний цифровой индикатор заряда батареи
+        r.drawViewModelBox(zx, zy + 0.054, zz + 0.045, 0.028, 0.010, 0.075, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, chargeLed);
+        // Два высоковольтных электрода спереди
+        r.drawViewModelBox(zx - 0.014, zy + 0.026, zz + 0.18, 0.009, 0.012, 0.055, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, steel);
+        r.drawViewModelBox(zx + 0.014, zy + 0.026, zz + 0.18, 0.009, 0.012, 0.055, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, steel);
+
+        if (muzzleFlashTimer > 0.0 && drawHands) {
+            r.drawViewModelBox(zx, zy + 0.026, zz + 0.21, 0.09, 0.09, 0.04, 0.0, 0.0, 0.4, zx, zy, zz, Renderer3D.TEX_SOLID, 0x48F5FF);
+        }
+    }
+
     private void renderKnifeModel(Renderer3D r, double ox, double oy, double oz,
                                   double overrideRotX, double overrideRotY, double overrideRotZ,
                                   GameSettings.WeaponSkin skin, boolean drawHands) {
@@ -758,4 +827,19 @@ public class Weapon {
     public double getMaxRange() { return maxRange; }
     public double getMoveSpeedMultiplier() { return moveSpeedMultiplier; }
     public boolean hasMuzzleFlash() { return muzzleFlashTimer > 0.0; }
+
+    public boolean canWallbang() {
+        return type == Type.AWP || type == Type.AK47 || type == Type.M4A1S
+            || type == Type.DEAGLE || type == Type.MP9 || type == Type.GLOCK;
+    }
+
+    public double getWallbangDamageFactor() {
+        switch (type) {
+            case AWP:    return 0.78;
+            case AK47:   return 0.60;
+            case DEAGLE: return 0.62;
+            case M4A1S:  return 0.54;
+            default:     return 0.38;
+        }
+    }
 }

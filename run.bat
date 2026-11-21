@@ -1,12 +1,12 @@
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
-title CS-2 JAVA — Сборка и запуск
+title CS-2 JAVA 4.0 — Сборка и запуск
 
 cd /d "%~dp0"
 
 echo ================================================================
-echo   CS-2 JAVA : Dust II 3D Tactical Arena (Build ^& Launch)
+echo   CS-2 JAVA 4.0 : Dust II • Mirage • Nuke 3D Arena
 echo ================================================================
 echo.
 

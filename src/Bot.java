@@ -2,17 +2,30 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Тактический ИИ-противник (Бот) CS-2 JAVA 2.0:
- * - Поддержка 3 уровней сложности (Новичок / Спецназ / Global Elite)
- * - Слепота сквозь облака дымовых гранат CS2 и учет глушителя M4A1-S
- * - Детализированная составная 3D-модель с рюкзаком, разгрузкой, хитбоксами головы/тела и анимацией смерти
+ * Тактический ИИ-боец (Террорист T или Союзник Спецназа CT) в CS-2 JAVA 4.0:
+ * - Поддержка двух команд: вражеский отряд T и союзный отряд спецназа CT
+ * - Выполнение радиокоманд игрока (За мной! / Держать позицию! / Штурм плента!)
+ * - Перестрелки «стенка на стенку» (CT против T), учет дымовых гранат CS2, флешек и глушителя
+ * - Установка C4 террористами и помощь спецназа CT в разминировании заложенной бомбы
  */
 public class Bot {
+
+    public enum Team {
+        TERRORIST,
+        COUNTER_TERRORIST
+    }
 
     public enum State {
         PATROL,
         ENGAGE,
         SEARCH
+    }
+
+    public enum RadioOrder {
+        PATROL_FREE,
+        FOLLOW_PLAYER,
+        HOLD_POSITION,
+        RUSH_SITE
     }
 
     public static class HitResult {
@@ -31,12 +44,14 @@ public class Bot {
         public final Vec3 muzzlePos;
         public final Vec3 endPos;
         public final boolean hitPlayer;
+        public final Bot hitBot;
         public final int damage;
 
-        public ShotEvent(Vec3 muzzlePos, Vec3 endPos, boolean hitPlayer, int damage) {
+        public ShotEvent(Vec3 muzzlePos, Vec3 endPos, boolean hitPlayer, Bot hitBot, int damage) {
             this.muzzlePos = muzzlePos;
             this.endPos = endPos;
             this.hitPlayer = hitPlayer;
+            this.hitBot = hitBot;
             this.damage = damage;
         }
     }
@@ -44,10 +59,11 @@ public class Bot {
     private static final double RADIUS = 0.35;
     private static final double HEIGHT = 1.78;
     private static final double EYE_HEIGHT = 1.58;
-    private static final double PATROL_SPEED = 3.25;
+    private static final double PATROL_SPEED = 3.35;
     private static final double GRAVITY = 20.0;
 
     private final String name;
+    private final Team team;
     private final Random rng;
 
     private final Vec3 position = new Vec3();
@@ -57,8 +73,10 @@ public class Bot {
     private boolean alive = true;
 
     private State state = State.PATROL;
+    private RadioOrder radioOrder = RadioOrder.PATROL_FREE;
+    private final Vec3 holdAnchorPos = new Vec3();
     private int currentWaypointIndex = 0;
-    private final Vec3 lastSeenPlayerPos = new Vec3();
+    private final Vec3 lastSeenEnemyPos = new Vec3();
     private double searchTimer = 0.0;
     private double stuckTimer = 0.0;
     private final Vec3 lastProgressPos = new Vec3();
@@ -77,7 +95,11 @@ public class Bot {
     private double blindTimer = 0.0;
     private double respawnTimer = 0.0;
 
-    // Миссия установки взрывчатки C4 (для режима Операция C4)
+    // Статистика бойца для таблицы счета Tab
+    private int kills = 0;
+    private int deaths = 0;
+
+    // Миссия установки взрывчатки C4 (для T-ботов в режиме Операция C4)
     private boolean carryingC4 = false;
     private Vec3 c4TargetSpot = null;
     private String c4SiteName = "A";
@@ -85,7 +107,12 @@ public class Bot {
     private boolean c4PlantCompleted = false;
 
     public Bot(String name, Vec3 spawnPos, int initialWaypoint, long seed) {
+        this(name, Team.TERRORIST, spawnPos, initialWaypoint, seed);
+    }
+
+    public Bot(String name, Team team, Vec3 spawnPos, int initialWaypoint, long seed) {
         this.name = name;
+        this.team = team;
         this.rng = new Random(seed);
         respawn(spawnPos, initialWaypoint);
     }
@@ -93,11 +120,13 @@ public class Bot {
     public void respawn(Vec3 spawnPos, int initialWaypoint) {
         this.position.set(spawnPos);
         this.lastProgressPos.set(spawnPos);
+        this.holdAnchorPos.set(spawnPos);
         this.velocityY = 0.0;
-        this.yaw = Math.PI + (rng.nextDouble() - 0.5) * 0.6;
+        this.yaw = (team == Team.COUNTER_TERRORIST ? 0.0 : Math.PI) + (rng.nextDouble() - 0.5) * 0.5;
         this.health = 100;
         this.alive = true;
         this.state = State.PATROL;
+        this.radioOrder = RadioOrder.PATROL_FREE;
         this.currentWaypointIndex = initialWaypoint;
         this.searchTimer = 0.0;
         this.stuckTimer = 0.0;
@@ -118,7 +147,28 @@ public class Bot {
         this.c4PlantCompleted = false;
     }
 
+    public void resetMatchStats() {
+        this.kills = 0;
+        this.deaths = 0;
+    }
+
+    public void recordKill() {
+        this.kills++;
+    }
+
+    public void setRadioOrder(RadioOrder order) {
+        this.radioOrder = order;
+        if (order == RadioOrder.HOLD_POSITION) {
+            this.holdAnchorPos.set(this.position);
+        }
+    }
+
+    public RadioOrder getRadioOrder() {
+        return radioOrder;
+    }
+
     public void assignBombCarrier(Vec3 siteSpot, String siteName) {
+        if (team != Team.TERRORIST) return;
         this.carryingC4 = true;
         this.c4TargetSpot = siteSpot.copy();
         this.c4SiteName = siteName;
@@ -142,10 +192,10 @@ public class Bot {
     }
 
     public void notifyPlayerGunshot(Vec3 shotPos, boolean silenced) {
-        if (!alive) return;
+        if (!alive || team == Team.COUNTER_TERRORIST) return;
         double hearRadius = silenced ? 6.5 : 24.0;
         if (position.dist(shotPos) < hearRadius && state == State.PATROL) {
-            lastSeenPlayerPos.set(shotPos);
+            lastSeenEnemyPos.set(shotPos);
             state = State.SEARCH;
             searchTimer = 5.2;
         }
@@ -153,6 +203,12 @@ public class Bot {
 
     public ShotEvent update(double dt, Map map, Player player, List<Bot> allBots,
                             List<Vec3.SmokeCloud> smokes, GameSettings.BotDifficulty difficulty) {
+        return update(dt, map, player, allBots, smokes, difficulty, null);
+    }
+
+    public ShotEvent update(double dt, Map map, Player player, List<Bot> allBots,
+                            List<Vec3.SmokeCloud> smokes, GameSettings.BotDifficulty difficulty,
+                            Vec3.BombC4 plantedC4) {
         if (hitFlashTimer > 0.0) hitFlashTimer = Math.max(0.0, hitFlashTimer - dt);
         if (muzzleFlashTimer > 0.0) muzzleFlashTimer = Math.max(0.0, muzzleFlashTimer - dt);
         if (healthBarTimer > 0.0) healthBarTimer = Math.max(0.0, healthBarTimer - dt);
@@ -169,7 +225,6 @@ public class Bot {
             return null;
         }
 
-        // Если бот ослеплен светошумовой гранатой Flashbang — теряет ориентацию и отступает вслепую!
         if (blindTimer > 0.15) {
             c4PlantTimer = 0.0;
             yaw += Math.sin(blindTimer * 7.0) * dt * 2.4;
@@ -182,9 +237,39 @@ public class Bot {
             return null;
         }
 
-        boolean seesPlayer = canSeePlayer(map, player, smokes);
-        if (seesPlayer) {
-            lastSeenPlayerPos.set(player.getPosition());
+        // Поиск ближайшего видимого противника (для T: игрок + союзники CT; для CT: враги T)
+        boolean targetIsPlayer = false;
+        Bot targetBot = null;
+        Vec3 targetFeetPos = null;
+        Vec3 targetAimPos = null;
+        double bestTargetDist = Double.MAX_VALUE;
+
+        if (team == Team.TERRORIST && player != null && canSeePlayer(map, player, smokes)) {
+            double d = position.dist(player.getPosition());
+            bestTargetDist = d;
+            targetIsPlayer = true;
+            targetFeetPos = player.getPosition();
+            targetAimPos = player.getCenterTargetPosition();
+        }
+
+        for (int i = 0; i < allBots.size(); i++) {
+            Bot other = allBots.get(i);
+            if (other == this || !other.alive || other.team == this.team) continue;
+            if (canSeeBot(map, other, smokes)) {
+                double d = position.dist(other.position);
+                if (d < bestTargetDist) {
+                    bestTargetDist = d;
+                    targetIsPlayer = false;
+                    targetBot = other;
+                    targetFeetPos = other.position;
+                    targetAimPos = new Vec3(other.position.x, other.position.y + 1.24, other.position.z);
+                }
+            }
+        }
+
+        boolean seesEnemy = (targetFeetPos != null);
+        if (seesEnemy) {
+            lastSeenEnemyPos.set(targetFeetPos);
             if (state != State.ENGAGE) {
                 state = State.ENGAGE;
                 reactionTimer = difficulty.reactionDelay + rng.nextDouble() * 0.14;
@@ -199,9 +284,9 @@ public class Bot {
         double moveZ = 0.0;
         double combatSpeed = difficulty.combatSpeed;
 
-        if (state == State.ENGAGE && player.isAlive()) {
-            double dx = player.getPosition().x - position.x;
-            double dz = player.getPosition().z - position.z;
+        if (state == State.ENGAGE && seesEnemy) {
+            double dx = targetFeetPos.x - position.x;
+            double dz = targetFeetPos.z - position.z;
             double targetYaw = Math.atan2(dx, dz);
             yaw = turnSmoothly(yaw, targetYaw, dt * 7.8);
 
@@ -218,7 +303,7 @@ public class Bot {
             double rightX = dirZ;
             double rightZ = -dirX;
 
-            if (distXZ > 13.5) {
+            if (distXZ > 13.5 && radioOrder != RadioOrder.HOLD_POSITION) {
                 moveX = (dirX * 0.88 + rightX * strafeDir * 0.34) * combatSpeed;
                 moveZ = (dirZ * 0.88 + rightZ * strafeDir * 0.34) * combatSpeed;
             } else if (distXZ < 4.2) {
@@ -233,19 +318,31 @@ public class Bot {
                 reactionTimer -= dt;
             } else {
                 fireCooldown -= dt;
-                if (fireCooldown <= 0.0 && seesPlayer) {
-                    shotEvent = fireAtPlayer(map, player, difficulty);
+                if (fireCooldown <= 0.0) {
+                    shotEvent = fireAtTarget(map, player, targetIsPlayer, targetBot, targetAimPos, difficulty);
                     burstRemaining--;
                     if (burstRemaining <= 0) {
                         burstRemaining = 2 + rng.nextInt(3);
-                        fireCooldown = 0.62 + rng.nextDouble() * 0.36;
+                        fireCooldown = 0.60 + rng.nextDouble() * 0.34;
                     } else {
                         fireCooldown = 0.16 + rng.nextDouble() * 0.05;
                     }
                 }
             }
-        } else if (carryingC4 && c4TargetSpot != null) {
-            // Приоритет носителя бомбы C4: продвижение на Плент A или Плент B и закладка взрывчатки!
+        } else if (team == Team.COUNTER_TERRORIST && plantedC4 != null) {
+            // Союзник CT спешит к заложенной бомбе C4, чтобы помочь обезвредить её!
+            double dx = plantedC4.pos.x - position.x;
+            double dz = plantedC4.pos.z - position.z;
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist > 1.85) {
+                double targetYaw = Math.atan2(dx, dz);
+                yaw = turnSmoothly(yaw, targetYaw, dt * 6.2);
+                moveX = (dx / dist) * (PATROL_SPEED * 1.25);
+                moveZ = (dz / dist) * (PATROL_SPEED * 1.25);
+            } else {
+                yaw = turnSmoothly(yaw, Math.atan2(dx, dz), dt * 5.0);
+            }
+        } else if (team == Team.TERRORIST && carryingC4 && c4TargetSpot != null) {
             double dx = c4TargetSpot.x - position.x;
             double dz = c4TargetSpot.z - position.z;
             double dist = Math.sqrt(dx * dx + dz * dz);
@@ -262,10 +359,47 @@ public class Bot {
                 moveX = (dx / dist) * (PATROL_SPEED * 1.18);
                 moveZ = (dz / dist) * (PATROL_SPEED * 1.18);
             }
+        } else if (team == Team.COUNTER_TERRORIST && radioOrder == RadioOrder.FOLLOW_PLAYER && player != null && player.isAlive()) {
+            double dx = player.getPosition().x - position.x;
+            double dz = player.getPosition().z - position.z;
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist > 3.6) {
+                double targetYaw = Math.atan2(dx, dz);
+                yaw = turnSmoothly(yaw, targetYaw, dt * 6.0);
+                moveX = (dx / dist) * (PATROL_SPEED * 1.32);
+                moveZ = (dz / dist) * (PATROL_SPEED * 1.32);
+            } else {
+                yaw = turnSmoothly(yaw, player.getYaw(), dt * 3.5);
+            }
+        } else if (team == Team.COUNTER_TERRORIST && radioOrder == RadioOrder.HOLD_POSITION) {
+            double dx = holdAnchorPos.x - position.x;
+            double dz = holdAnchorPos.z - position.z;
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist > 1.8) {
+                double targetYaw = Math.atan2(dx, dz);
+                yaw = turnSmoothly(yaw, targetYaw, dt * 5.0);
+                moveX = (dx / dist) * PATROL_SPEED;
+                moveZ = (dz / dist) * PATROL_SPEED;
+            } else {
+                yaw += Math.sin(walkPhase * 0.5) * dt * 0.6;
+            }
+        } else if (team == Team.COUNTER_TERRORIST && radioOrder == RadioOrder.RUSH_SITE) {
+            Vec3 rushGoal = (currentWaypointIndex % 2 == 0) ? map.getBombsiteASpot() : map.getBombsiteBSpot();
+            double dx = rushGoal.x - position.x;
+            double dz = rushGoal.z - position.z;
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist < 2.2) {
+                currentWaypointIndex++;
+            } else {
+                double targetYaw = Math.atan2(dx, dz);
+                yaw = turnSmoothly(yaw, targetYaw, dt * 5.8);
+                moveX = (dx / dist) * (PATROL_SPEED * 1.28);
+                moveZ = (dz / dist) * (PATROL_SPEED * 1.28);
+            }
         } else if (state == State.SEARCH) {
             searchTimer -= dt;
-            double dx = lastSeenPlayerPos.x - position.x;
-            double dz = lastSeenPlayerPos.z - position.z;
+            double dx = lastSeenEnemyPos.x - position.x;
+            double dz = lastSeenEnemyPos.z - position.z;
             double dist = Math.sqrt(dx * dx + dz * dz);
             if (searchTimer <= 0.0 || dist < 1.35) {
                 state = State.PATROL;
@@ -368,15 +502,34 @@ public class Bot {
         return map.hasLineOfSight(eye, player.getCenterTargetPosition(), smokes);
     }
 
-    private ShotEvent fireAtPlayer(Map map, Player player, GameSettings.BotDifficulty difficulty) {
+    private boolean canSeeBot(Map map, Bot other, List<Vec3.SmokeCloud> smokes) {
+        if (!other.alive) return false;
+        Vec3 eye = getEyePosition();
+        Vec3 targetEye = other.getEyePosition();
+        double dist = eye.dist(targetEye);
+        if (dist > 42.0) return false;
+
+        if (dist > 8.0 && state == State.PATROL) {
+            Vec3 toOther = targetEye.sub(eye).normalize();
+            Vec3 forward = new Vec3(Math.sin(yaw), 0.0, Math.cos(yaw));
+            if (forward.dot(new Vec3(toOther.x, 0.0, toOther.z).normalize()) < -0.20) {
+                return false;
+            }
+        }
+        return map.hasLineOfSight(eye, targetEye, smokes);
+    }
+
+    private ShotEvent fireAtTarget(Map map, Player player, boolean targetIsPlayer, Bot targetBot,
+                                   Vec3 aimTarget, GameSettings.BotDifficulty difficulty) {
         muzzleFlashTimer = 0.075;
         Vec3 muzzle = getMuzzleWorldPosition();
-        Vec3 aimTarget = player.getCenterTargetPosition();
         Vec3 baseDir = aimTarget.sub(muzzle).normalize();
 
         double spread = difficulty.aimSpread;
-        if (player.isCrouching()) spread += 0.016;
-        if (player.getHorizontalSpeed() > 3.5) spread += 0.018;
+        if (targetIsPlayer && player != null) {
+            if (player.isCrouching()) spread += 0.016;
+            if (player.getHorizontalSpeed() > 3.5) spread += 0.018;
+        }
 
         Vec3 shotDir = new Vec3(
             baseDir.x + rng.nextGaussian() * spread,
@@ -388,21 +541,29 @@ public class Bot {
         double maxDist = (wallHit != null) ? wallHit.distance : 72.0;
         Vec3 endPos = (wallHit != null) ? wallHit.point : muzzle.add(shotDir.scale(72.0));
 
-        Vec3 pPos = player.getPosition();
-        double pH = player.getCurrentBodyHeight();
-        Vec3.Box playerBox = new Vec3.Box(
-            pPos.x - Player.RADIUS, pPos.y, pPos.z - Player.RADIUS,
-            pPos.x + Player.RADIUS, pPos.y + pH, pPos.z + Player.RADIUS,
-            0, 0, 0, true
-        );
-        double tPlayer = playerBox.intersectRay(muzzle, shotDir, maxDist, null);
-        if (tPlayer >= 0.0 && tPlayer < maxDist) {
-            Vec3 hitPt = muzzle.add(shotDir.scale(tPlayer));
-            int dmg = difficulty.baseDamage + rng.nextInt(5);
-            return new ShotEvent(muzzle, hitPt, true, dmg);
+        if (targetIsPlayer && player != null && player.isAlive()) {
+            Vec3 pPos = player.getPosition();
+            double pH = player.getCurrentBodyHeight();
+            Vec3.Box playerBox = new Vec3.Box(
+                pPos.x - Player.RADIUS, pPos.y, pPos.z - Player.RADIUS,
+                pPos.x + Player.RADIUS, pPos.y + pH, pPos.z + Player.RADIUS,
+                0, 0, 0, true
+            );
+            double tPlayer = playerBox.intersectRay(muzzle, shotDir, maxDist, null);
+            if (tPlayer >= 0.0 && tPlayer < maxDist) {
+                Vec3 hitPt = muzzle.add(shotDir.scale(tPlayer));
+                int dmg = difficulty.baseDamage + rng.nextInt(5);
+                return new ShotEvent(muzzle, hitPt, true, null, dmg);
+            }
+        } else if (targetBot != null && targetBot.alive) {
+            HitResult bHit = targetBot.intersectShotRay(muzzle, shotDir, maxDist);
+            if (bHit != null) {
+                int dmg = (bHit.headshot ? difficulty.baseDamage * 2 : difficulty.baseDamage) + rng.nextInt(7);
+                return new ShotEvent(muzzle, bHit.point, false, targetBot, dmg);
+            }
         }
 
-        return new ShotEvent(muzzle, endPos, false, 0);
+        return new ShotEvent(muzzle, endPos, false, null, 0);
     }
 
     private boolean tryMoveBotAxis(Map map, double dx, double dz) {
@@ -474,7 +635,7 @@ public class Bot {
         healthBarTimer = 4.5;
 
         if (attackerPos != null) {
-            lastSeenPlayerPos.set(attackerPos);
+            lastSeenEnemyPos.set(attackerPos);
             if (state == State.PATROL) {
                 state = State.SEARCH;
                 searchTimer = 6.0;
@@ -483,6 +644,7 @@ public class Bot {
 
         if (health <= 0) {
             alive = false;
+            deaths++;
             deathAnimProgress = 0.0;
             return true;
         }
@@ -491,17 +653,18 @@ public class Bot {
 
     public void render(Renderer3D r) {
         boolean flashing = hitFlashTimer > 0.0 && alive;
+        boolean ct = (team == Team.COUNTER_TERRORIST);
 
-        int pantsColor = flashing ? 0xFF5555 : 0x3D4652;
-        int bootsColor = flashing ? 0xFF4444 : 0x1E2126;
-        int shirtColor = flashing ? 0xFF7070 : 0xB88B58;
-        int vestColor  = flashing ? 0xFF3B3B : 0x2D3529;
-        int packColor  = flashing ? 0xFF4A4A : 0x4C3D2D;
-        int skinColor  = flashing ? 0xFF9090 : 0xD2A079;
-        int maskColor  = flashing ? 0xFF4848 : 0x292423;
-        int bandColor  = flashing ? 0xFFAAAA : 0xA82822;
+        int pantsColor = flashing ? 0xFF5555 : (ct ? 0x22334C : 0x3D4652);
+        int bootsColor = flashing ? 0xFF4444 : 0x1A1E24;
+        int shirtColor = flashing ? 0xFF7070 : (ct ? 0x2C5A8F : 0xB88B58);
+        int vestColor  = flashing ? 0xFF3B3B : (ct ? 0x18283C : 0x2D3529);
+        int packColor  = flashing ? 0xFF4A4A : (ct ? 0x20344E : 0x4C3D2D);
+        int faceColor  = flashing ? 0xFF9090 : (ct ? 0x56DCFF : 0xD2A079); // У спецназа CT голубой визор шлема!
+        int headColor  = flashing ? 0xFF4848 : (ct ? 0x1F3D63 : 0x292423);
+        int bandColor  = flashing ? 0xFFAAAA : (ct ? 0x3A8AD8 : 0xA82822);
         int gunColor   = 0x24282E;
-        int gunWood    = 0x8B4A22;
+        int gunAccent  = ct ? 0x365C82 : 0x8B4A22;
 
         if (!alive) {
             double fallAngle = deathAnimProgress * (Math.PI * 0.48);
@@ -512,7 +675,7 @@ public class Bot {
             drawPartFallen(r, 0.0, 0.42, -0.14, 0.18, 0.72, 0.19, fallAngle, sinF, cosF, baseY, pantsColor);
             drawPartFallen(r, 0.0, 0.42,  0.14, 0.18, 0.72, 0.19, fallAngle, sinF, cosF, baseY, pantsColor);
             drawPartFallen(r, 0.0, 1.04,  0.00, 0.30, 0.62, 0.46, fallAngle, sinF, cosF, baseY, vestColor);
-            drawPartFallen(r, 0.0, 1.54,  0.00, 0.30, 0.32, 0.30, fallAngle, sinF, cosF, baseY, maskColor);
+            drawPartFallen(r, 0.0, 1.54,  0.00, 0.30, 0.32, 0.30, fallAngle, sinF, cosF, baseY, headColor);
             double gx = position.x + Math.cos(yaw) * 0.45;
             double gz = position.z - Math.sin(yaw) * 0.45;
             r.drawOrientedWorldBox(gx, position.y + 0.06, gz, 0.08, 0.10, 0.68, yaw + 0.5, 0.0, Renderer3D.TEX_SOLID, gunColor);
@@ -532,7 +695,6 @@ public class Bot {
         r.drawOrientedWorldBox(bx - rightX * 0.14, by + 0.08, bz - rightZ * 0.14, 0.19, 0.16, 0.26, yaw, legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
         r.drawOrientedWorldBox(bx + rightX * 0.14, by + 0.08, bz + rightZ * 0.14, 0.19, 0.16, 0.26, yaw, -legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
 
-        // Торс, разгрузка и тактический рюкзак за спиной (+ пакет C4 если бот-подрывник!)
         r.drawOrientedWorldBox(bx, by + 1.06, bz, 0.46, 0.64, 0.28, yaw, 0.0, Renderer3D.TEX_SOLID, shirtColor);
         r.drawOrientedWorldBox(bx, by + 1.08, bz, 0.48, 0.48, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, vestColor);
         r.drawOrientedWorldBox(bx - sinY * 0.20, by + 1.10, bz - cosY * 0.20, 0.32, 0.38, 0.15, yaw, 0.0, Renderer3D.TEX_SOLID, packColor);
@@ -542,7 +704,6 @@ public class Bot {
         }
 
         if (blindTimer > 0.15) {
-            // Ослепленный бот закрывает глаза левой рукой!
             r.drawOrientedWorldBox(bx - rightX * 0.18 + sinY * 0.22, by + 1.54, bz - rightZ * 0.18 + cosY * 0.22,
                     0.34, 0.14, 0.18, yaw, 0.25, Renderer3D.TEX_SOLID, shirtColor);
         } else {
@@ -550,19 +711,19 @@ public class Bot {
         }
         r.drawOrientedWorldBox(bx + rightX * 0.27 + sinY * 0.15, by + 1.14, bz + rightZ * 0.27 + cosY * 0.15, 0.15, 0.22, 0.44, yaw - 0.12, 0.0, Renderer3D.TEX_SOLID, shirtColor);
 
-        r.drawOrientedWorldBox(bx, by + 1.57, bz, 0.31, 0.34, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, maskColor);
-        r.drawOrientedWorldBox(bx + sinY * 0.14, by + 1.58, bz + cosY * 0.14, 0.24, 0.10, 0.06, yaw, 0.0, Renderer3D.TEX_SOLID, skinColor);
+        r.drawOrientedWorldBox(bx, by + 1.57, bz, 0.31, 0.34, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, headColor);
+        r.drawOrientedWorldBox(bx + sinY * 0.14, by + 1.58, bz + cosY * 0.14, 0.24, 0.10, 0.06, yaw, 0.0, Renderer3D.TEX_SOLID, faceColor);
         r.drawOrientedWorldBox(bx, by + 1.67, bz, 0.33, 0.08, 0.33, yaw, 0.0, Renderer3D.TEX_SOLID, bandColor);
 
         double gunCenterX = bx + rightX * 0.15 + sinY * 0.36;
         double gunCenterY = by + 1.15;
         double gunCenterZ = bz + rightZ * 0.15 + cosY * 0.36;
         r.drawOrientedWorldBox(gunCenterX, gunCenterY, gunCenterZ, 0.07, 0.11, 0.68, yaw, 0.0, Renderer3D.TEX_SOLID, gunColor);
-        r.drawOrientedWorldBox(gunCenterX - sinY * 0.16, gunCenterY - 0.02, gunCenterZ - cosY * 0.16, 0.08, 0.10, 0.24, yaw, 0.0, Renderer3D.TEX_SOLID, gunWood);
+        r.drawOrientedWorldBox(gunCenterX - sinY * 0.16, gunCenterY - 0.02, gunCenterZ - cosY * 0.16, 0.08, 0.10, 0.24, yaw, 0.0, Renderer3D.TEX_SOLID, gunAccent);
 
         if (muzzleFlashTimer > 0.0) {
             Vec3 muz = getMuzzleWorldPosition();
-            r.drawOrientedWorldBox(muz.x, muz.y, muz.z, 0.24, 0.24, 0.24, yaw, 0.4, Renderer3D.TEX_SOLID, 0xFFCA3A);
+            r.drawOrientedWorldBox(muz.x, muz.y, muz.z, 0.24, 0.24, 0.24, yaw, 0.4, Renderer3D.TEX_SOLID, ct ? 0x70E8FF : 0xFFCA3A);
         }
     }
 
@@ -596,8 +757,12 @@ public class Bot {
     }
 
     public String getName() { return name; }
+    public Team getTeam() { return team; }
+    public boolean isAlly() { return team == Team.COUNTER_TERRORIST; }
     public int getHealth() { return health; }
     public boolean isAlive() { return alive; }
+    public int getKills() { return kills; }
+    public int getDeaths() { return deaths; }
     public State getState() { return state; }
     public boolean shouldShowHealthBar() { return alive && (health < 100 || healthBarTimer > 0.0 || blindTimer > 0.1); }
     public boolean isFiringRecently() { return muzzleFlashTimer > 0.0; }

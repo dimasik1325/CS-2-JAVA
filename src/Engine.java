@@ -110,6 +110,10 @@ public class Engine extends Canvas implements Runnable {
         "BOT Corsair", "BOT Mirage", "BOT Anubis", "BOT Titan"
     };
 
+    private static final String[] CT_ALLY_NAMES = {
+        "CT Альфа", "CT Браво", "CT Дельта", "CT Призрак"
+    };
+
     private final GameSettings settings;
     private final Renderer3D renderer;
     private final Map map;
@@ -122,6 +126,7 @@ public class Engine extends Canvas implements Runnable {
     private final List<Vec3.Grenade> grenades = new ArrayList<>();
     private final List<Vec3.SmokeCloud> smokeClouds = new ArrayList<>();
     private final List<Vec3.FireZone> fireZones = new ArrayList<>();
+    private final List<Vec3.Graffiti> graffitis = new ArrayList<>();
     private final List<Vec3.Pickup> pickups = new ArrayList<>();
     private final List<DamagePopup> damagePopups = new ArrayList<>();
     private final List<KillFeedEntry> killFeed = new ArrayList<>();
@@ -129,6 +134,11 @@ public class Engine extends Canvas implements Runnable {
 
     private Vec3.BombC4 plantedC4 = null;
     private double dmPlayerRespawnTimer = 0.0;
+    private int nextGraffitiStyle = 0;
+    private int radioOrderIndex = 0;
+    private String radioBannerText = "";
+    private double radioBannerTimer = 0.0;
+
     private final Weapon[] armoryShowcaseWeapons = new Weapon[]{
         new Weapon(Weapon.Type.AK47),
         new Weapon(Weapon.Type.M4A1S),
@@ -137,6 +147,7 @@ public class Engine extends Canvas implements Runnable {
         new Weapon(Weapon.Type.MP9),
         new Weapon(Weapon.Type.DEAGLE),
         new Weapon(Weapon.Type.GLOCK),
+        new Weapon(Weapon.Type.ZEUS),
         new Weapon(Weapon.Type.KNIFE)
     };
     private int armoryWeaponIdx = 0;
@@ -521,15 +532,70 @@ public class Engine extends Canvas implements Runnable {
                 player.addMolotovGrenade();
                 soundSystem.playBuy();
             } else soundSystem.playEmptyClick();
-        } else if (kind == 3 && (player.getHealth() < 100 || player.getArmor() < 100 || !player.hasDefuseKit())) {
+        } else if (kind == 3 && (player.getHealth() < 100 || player.getArmor() < 100 || !player.hasDefuseKit() || !player.hasZeus())) {
             if (player.spendMoney(freeDm ? 0 : 850)) {
                 player.healAndRestoreArmor(100, 100);
                 player.setHasDefuseKit(true);
+                player.equipPurchasedWeapon(Weapon.Type.ZEUS);
+                player.selectWeaponSlot(0);
                 soundSystem.playBuy();
             } else soundSystem.playEmptyClick();
         } else {
             soundSystem.playEmptyClick();
         }
+    }
+
+    public void trySprayGraffiti() {
+        if (!player.isAlive() || !player.canSprayGraffiti()) return;
+        Vec3.RayHit hit = map.raycast(player.getEyePosition(), player.getLookDirection(), 6.8);
+        if (hit == null) {
+            soundSystem.playEmptyClick();
+            return;
+        }
+        player.triggerGraffitiCooldown();
+        int[][] palettes = {
+            {0xFFD238, 0xFF5238},
+            {0x2CE8FF, 0xFF3E96},
+            {0x42FF88, 0xFFE24A}
+        };
+        int style = nextGraffitiStyle % 3;
+        nextGraffitiStyle++;
+        graffitis.add(new Vec3.Graffiti(hit.point, hit.normal, palettes[style][0], palettes[style][1], style));
+        while (graffitis.size() > 24) {
+            graffitis.remove(0);
+        }
+        soundSystem.playSprayCan();
+    }
+
+    public void issueNextRadioCommand() {
+        if (!player.isAlive()) return;
+        Bot.RadioOrder[] orders = {
+            Bot.RadioOrder.FOLLOW_PLAYER,
+            Bot.RadioOrder.HOLD_POSITION,
+            Bot.RadioOrder.RUSH_SITE,
+            Bot.RadioOrder.PATROL_FREE
+        };
+        String[] messages = {
+            "[РАДИО CT] Вы: «Отряд, за мной! Прикройте!»",
+            "[РАДИО CT] Вы: «Закрепиться и держать позицию!»",
+            "[РАДИО CT] Вы: «Штурмуем точки A и B!»",
+            "[РАДИО CT] Вы: «Свободный поиск противника!»"
+        };
+        Bot.RadioOrder chosen = orders[radioOrderIndex % orders.length];
+        String msg = messages[radioOrderIndex % messages.length];
+        radioOrderIndex++;
+
+        int responders = 0;
+        for (int i = 0; i < bots.size(); i++) {
+            Bot b = bots.get(i);
+            if (b.isAlly() && b.isAlive()) {
+                b.setRadioOrder(chosen);
+                responders++;
+            }
+        }
+        soundSystem.playRadioBeep();
+        radioBannerText = msg + (responders > 0 ? "  •  Принято (" + responders + " CT)" : "  •  Нет союзников");
+        radioBannerTimer = 3.8;
     }
 
     public void throwGrenade(Vec3.Grenade.Kind kind) {
@@ -662,16 +728,25 @@ public class Engine extends Canvas implements Runnable {
         this.currentRound = 1;
         this.playerRoundWins = 0;
         this.botRoundWins = 0;
+        if (map.getCurrentTheme() != settings.mapTheme) {
+            map.rebuildForTheme(settings.mapTheme);
+        }
         this.player.resetMatchStats();
         this.killFeed.clear();
+        this.graffitis.clear();
         this.bots.clear();
         applySettingsToSubsystems();
         setupRound(true);
     }
 
     private void setupRound(boolean resetPlayerWeapons) {
+        if (map.getCurrentTheme() != settings.mapTheme) {
+            map.rebuildForTheme(settings.mapTheme);
+        }
         this.matchState = MatchState.PLAYING;
-        this.roundTimeLeft = (settings.gameMode == GameSettings.GameMode.DEATHMATCH) ? 180.0 : ROUND_TIME_SECONDS;
+        boolean respawnMode = (settings.gameMode == GameSettings.GameMode.DEATHMATCH
+                || settings.gameMode == GameSettings.GameMode.ARMS_RACE);
+        this.roundTimeLeft = respawnMode ? 210.0 : ROUND_TIME_SECONDS;
         this.roundBannerTimer = 2.2;
         this.roundOverTimer = 0.0;
         this.buyMenuOpen = false;
@@ -692,28 +767,54 @@ public class Engine extends Canvas implements Runnable {
         player.respawnForRound(map.getPlayerSpawn(), resetPlayerWeapons);
         if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
             player.addMoney(16000);
+        } else if (settings.gameMode == GameSettings.GameMode.ARMS_RACE) {
+            player.applyArmsRaceTierLoadout();
         }
 
-        List<Vec3> spawns = map.getBotSpawns();
+        List<Vec3> tSpawns = map.getBotSpawns();
+        List<Vec3> ctSpawns = map.getAllySpawns();
         List<Vec3> waypoints = map.getPatrolWaypoints();
-        int desiredBots = settings.botCount;
-        while (bots.size() > desiredBots) {
-            bots.remove(bots.size() - 1);
-        }
-        for (int i = 0; i < desiredBots; i++) {
-            Vec3 sp = spawns.get((i + currentRound - 1) % spawns.size());
-            int wp = (i * 3 + currentRound) % Math.max(1, waypoints.size());
-            if (i < bots.size()) {
-                bots.get(i).respawn(sp, wp);
-            } else {
-                bots.add(new Bot(BOT_NAMES[i % BOT_NAMES.length], sp, wp, 1000L + i * 37L));
+        int desiredEnemies = settings.botCount;
+        int desiredAllies = (settings.gameMode == GameSettings.GameMode.ARMS_RACE) ? 0 : settings.allyCount;
+        int totalBots = desiredEnemies + desiredAllies;
+
+        if (bots.size() != totalBots) {
+            bots.clear();
+            for (int i = 0; i < desiredEnemies; i++) {
+                Vec3 sp = tSpawns.get((i + currentRound - 1) % tSpawns.size());
+                int wp = (i * 3 + currentRound) % Math.max(1, waypoints.size());
+                bots.add(new Bot(BOT_NAMES[i % BOT_NAMES.length], Bot.Team.TERRORIST, sp, wp, 1000L + i * 37L));
+            }
+            for (int i = 0; i < desiredAllies; i++) {
+                Vec3 sp = ctSpawns.get(i % ctSpawns.size());
+                int wp = (i * 4 + 1) % Math.max(1, waypoints.size());
+                bots.add(new Bot(CT_ALLY_NAMES[i % CT_ALLY_NAMES.length], Bot.Team.COUNTER_TERRORIST, sp, wp, 5000L + i * 53L));
+            }
+        } else {
+            int tIdx = 0, ctIdx = 0;
+            for (int i = 0; i < bots.size(); i++) {
+                Bot b = bots.get(i);
+                if (b.isAlly()) {
+                    Vec3 sp = ctSpawns.get(ctIdx % ctSpawns.size());
+                    b.respawn(sp, (ctIdx * 4 + currentRound) % Math.max(1, waypoints.size()));
+                    ctIdx++;
+                } else {
+                    Vec3 sp = tSpawns.get((tIdx + currentRound - 1) % tSpawns.size());
+                    b.respawn(sp, (tIdx * 3 + currentRound) % Math.max(1, waypoints.size()));
+                    tIdx++;
+                }
             }
         }
 
-        if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL && !bots.isEmpty()) {
-            boolean goSiteA = (currentRound % 2 == 1);
-            Vec3 targetSite = goSiteA ? map.getBombsiteASpot() : map.getBombsiteBSpot();
-            bots.get(0).assignBombCarrier(targetSite, goSiteA ? "A" : "B");
+        if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL) {
+            for (int i = 0; i < bots.size(); i++) {
+                if (!bots.get(i).isAlly()) {
+                    boolean goSiteA = (currentRound % 2 == 1);
+                    Vec3 targetSite = goSiteA ? map.getBombsiteASpot() : map.getBombsiteBSpot();
+                    bots.get(i).assignBombCarrier(targetSite, goSiteA ? "A" : "B");
+                    break;
+                }
+            }
         }
     }
 
@@ -809,6 +910,11 @@ public class Engine extends Canvas implements Runnable {
         if (hitMarkerTimer > 0.0) hitMarkerTimer = Math.max(0.0, hitMarkerTimer - dt);
         if (roundBannerTimer > 0.0) roundBannerTimer = Math.max(0.0, roundBannerTimer - dt);
         if (streakBannerTimer > 0.0) streakBannerTimer = Math.max(0.0, streakBannerTimer - dt);
+        if (radioBannerTimer > 0.0) radioBannerTimer = Math.max(0.0, radioBannerTimer - dt);
+
+        for (Iterator<Vec3.Graffiti> it = graffitis.iterator(); it.hasNext(); ) {
+            if (!it.next().update(dt)) it.remove();
+        }
 
         for (Iterator<Vec3.Tracer> it = tracers.iterator(); it.hasNext(); ) {
             Vec3.Tracer tr = it.next();
@@ -885,14 +991,14 @@ public class Engine extends Canvas implements Runnable {
                 double fireRad = fz.getCurrentRadius();
                 for (int bIdx = 0; bIdx < bots.size(); bIdx++) {
                     Bot b = bots.get(bIdx);
-                    if (!b.isAlive()) continue;
+                    if (!b.isAlive() || b.isAlly()) continue;
                     if (b.getPosition().distXZ(fz.center) <= fireRad && Math.abs(b.getPosition().y - fz.center.y) < 1.3) {
                         int burnDmg = 9;
                         if (settings.showDamageNumbers) {
                             damagePopups.add(new DamagePopup(b.getPosition().add(0, 1.85, 0), burnDmg, false));
                         }
                         if (b.takeDamage(burnDmg, player.getPosition())) {
-                            onBotKilledByPlayer(b, "Молотов", false, 300);
+                            onBotKilledByPlayer(b, "Молотов", false, 300, null);
                         }
                     }
                 }
@@ -946,38 +1052,60 @@ public class Engine extends Canvas implements Runnable {
             }
         }
 
-        int aliveBots = 0;
+        boolean respawnMode = (settings.gameMode == GameSettings.GameMode.DEATHMATCH
+                || settings.gameMode == GameSettings.GameMode.ARMS_RACE);
+        int aliveEnemies = 0;
+        int aliveAllies = 0;
         boolean anyBotHasC4 = false;
+
         for (int i = 0; i < bots.size(); i++) {
             Bot bot = bots.get(i);
-            Bot.ShotEvent shot = bot.update(dt, map, player, bots, smokeClouds, settings.botDifficulty);
+            Bot.ShotEvent shot = bot.update(dt, map, player, bots, smokeClouds, settings.botDifficulty, plantedC4);
             if (bot.isAlive()) {
-                aliveBots++;
-                if (bot.isCarryingC4()) anyBotHasC4 = true;
-                if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL
-                        && plantedC4 == null && bot.consumeC4PlantReady()) {
-                    plantC4AtSpot(bot.getC4TargetSpot(), bot.getC4SiteName());
+                if (bot.isAlly()) {
+                    aliveAllies++;
+                } else {
+                    aliveEnemies++;
+                    if (bot.isCarryingC4()) anyBotHasC4 = true;
+                    if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL
+                            && plantedC4 == null && bot.consumeC4PlantReady()) {
+                        plantC4AtSpot(bot.getC4TargetSpot(), bot.getC4SiteName());
+                    }
                 }
-            } else if (settings.gameMode == GameSettings.GameMode.DEATHMATCH && bot.getRespawnTimer() <= 0.0) {
-                List<Vec3> spList = map.getBotSpawns();
+            } else if (respawnMode && bot.getRespawnTimer() <= 0.0) {
+                List<Vec3> spList = bot.isAlly() ? map.getAllySpawns() : map.getBotSpawns();
                 Vec3 rsp = spList.get(rng.nextInt(spList.size()));
                 bot.respawn(rsp, rng.nextInt(Math.max(1, map.getPatrolWaypoints().size())));
-                aliveBots++;
+                if (bot.isAlly()) aliveAllies++;
+                else aliveEnemies++;
             }
 
             if (shot != null && matchState == MatchState.PLAYING) {
-                tracers.add(new Vec3.Tracer(shot.muzzlePos, shot.endPos, 0xFF9F38, 0.085));
+                int trCol = bot.isAlly() ? 0x62D8FF : 0xFF9F38;
+                tracers.add(new Vec3.Tracer(shot.muzzlePos, shot.endPos, trCol, 0.085));
                 soundSystem.playBotShot(bot.getPosition().dist(player.getPosition()));
+
                 if (shot.hitPlayer && player.isAlive()) {
                     boolean wasAlive = player.isAlive();
                     player.takeDamage(shot.damage, bot.getPosition());
                     soundSystem.playPlayerHurt();
                     spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xE03030, 5);
                     if (wasAlive && !player.isAlive()) {
+                        bot.recordKill();
                         addKillFeed(bot.getName(), "AK-47", "ВЫ", false, true);
-                        if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
-                            dmPlayerRespawnTimer = 1.8;
+                        if (respawnMode) {
+                            dmPlayerRespawnTimer = 1.7;
                         }
+                    }
+                } else if (shot.hitBot != null && shot.hitBot.isAlive()) {
+                    spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xE03030, 5);
+                    if (shot.hitBot.takeDamage(shot.damage, bot.getPosition())) {
+                        bot.recordKill();
+                        if (respawnMode) {
+                            shot.hitBot.setRespawnTimer(2.4);
+                        }
+                        addKillFeed(bot.getName(), bot.isAlly() ? "M4A1-S" : "AK-47",
+                                shot.hitBot.getName(), false, false);
                     }
                 } else {
                     spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xE2C48E, 4);
@@ -985,33 +1113,38 @@ public class Engine extends Canvas implements Runnable {
             }
         }
 
-        // Если носитель C4 убит до закладки, передаем задачу ближайшему живому боту
-        if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL && plantedC4 == null && !anyBotHasC4 && aliveBots > 0) {
+        // Если носитель C4 убит до закладки, передаем задачу ближайшему живому T-боту
+        if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL && plantedC4 == null && !anyBotHasC4 && aliveEnemies > 0) {
             for (int i = 0; i < bots.size(); i++) {
-                if (bots.get(i).isAlive()) {
+                Bot cand = bots.get(i);
+                if (cand.isAlive() && !cand.isAlly()) {
                     boolean goSiteA = (currentRound % 2 == 1);
-                    bots.get(i).assignBombCarrier(goSiteA ? map.getBombsiteASpot() : map.getBombsiteBSpot(), goSiteA ? "A" : "B");
+                    cand.assignBombCarrier(goSiteA ? map.getBombsiteASpot() : map.getBombsiteBSpot(), goSiteA ? "A" : "B");
                     break;
                 }
             }
         }
 
-        // Обновление установленной бомбы C4 (пикающий таймер, обезвреживание клавишей E и взрыв)
+        // Обновление установленной бомбы C4 (пикающий таймер, обезвреживание клавишей E или союзником CT и взрыв)
         if (plantedC4 != null && matchState == MatchState.PLAYING) {
             updatePlantedC4(dt);
         }
 
         if (matchState == MatchState.PLAYING) {
-            if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
+            if (respawnMode) {
                 roundTimeLeft -= dt;
                 if (!player.isAlive()) {
                     dmPlayerRespawnTimer -= dt;
                     if (dmPlayerRespawnTimer <= 0.0) {
                         player.respawnForRound(map.getPlayerSpawn(), false);
-                        player.addMoney(16000);
+                        if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
+                            player.addMoney(16000);
+                        } else {
+                            player.applyArmsRaceTierLoadout();
+                        }
                     }
                 }
-                if (player.getKills() >= 25) {
+                if (settings.gameMode == GameSettings.GameMode.DEATHMATCH && player.getKills() >= 25) {
                     playerRoundWins = settings.roundsToWin;
                     matchState = MatchState.MATCH_VICTORY;
                     setMouseCaptured(false);
@@ -1024,10 +1157,10 @@ public class Engine extends Canvas implements Runnable {
                 if (plantedC4 == null) {
                     roundTimeLeft -= dt;
                 }
-                if (!player.isAlive()) {
-                    finishRound(false, "Игрок погиб в бою (+$1900 бонус раунда)");
-                } else if (plantedC4 == null && aliveBots == 0) {
-                    finishRound(true, "Все противники нейтрализованы! (+$3250 бонус победы)");
+                if (!player.isAlive() && aliveAllies == 0) {
+                    finishRound(false, "Весь отряд спецназа погиб (+$1900 бонус раунда)");
+                } else if (plantedC4 == null && aliveEnemies == 0) {
+                    finishRound(true, "Все террористы нейтрализованы! (+$3250 бонус победы)");
                 } else if (plantedC4 == null && roundTimeLeft <= 0.0) {
                     roundTimeLeft = 0.0;
                     if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL) {
@@ -1062,21 +1195,35 @@ public class Engine extends Canvas implements Runnable {
             soundSystem.playC4Beep(plantedC4.countdown < 10.0, player.getPosition().dist(plantedC4.pos));
         }
 
-        // Обезвреживание при зажатой клавише E рядом с бомбой C4
+        // Обезвреживание при зажатой клавише E игроком ИЛИ союзным ботом CT рядом с бомбой C4
         boolean nearC4 = player.isAlive() && player.getPosition().dist(plantedC4.pos) < 2.95;
-        if (nearC4 && keys[KeyEvent.VK_E] && !buyMenuOpen) {
+        boolean playerDefusing = nearC4 && keys[KeyEvent.VK_E] && !buyMenuOpen;
+        Bot ctDefuser = null;
+        if (!playerDefusing) {
+            for (int i = 0; i < bots.size(); i++) {
+                Bot b = bots.get(i);
+                if (b.isAlive() && b.isAlly() && b.getState() != Bot.State.ENGAGE
+                        && b.getPosition().dist(plantedC4.pos) < 2.25) {
+                    ctDefuser = b;
+                    break;
+                }
+            }
+        }
+
+        if (playerDefusing || ctDefuser != null) {
             if (!plantedC4.beingDefused) {
                 soundSystem.playC4Keypad();
             }
             plantedC4.beingDefused = true;
-            plantedC4.defuseRequired = player.hasDefuseKit() ? 5.0 : 10.0;
+            plantedC4.defuseRequired = playerDefusing ? (player.hasDefuseKit() ? 5.0 : 10.0) : 6.5;
             plantedC4.defuseProgress += dt;
             if (plantedC4.defuseProgress >= plantedC4.defuseRequired) {
                 plantedC4.defused = true;
                 soundSystem.playC4Keypad();
                 player.addMoney(300);
+                String who = (ctDefuser != null) ? ctDefuser.getName() : "ВЫ";
                 plantedC4 = null;
-                finishRound(true, "БОМБА C4 УСПЕШНО ОБЕЗВРЕЖЕНА! СПЕЦНАЗ ПОБЕДИЛ (+$3550)");
+                finishRound(true, "БОМБА C4 ОБЕЗВРЕЖЕНА (" + who + ")! СПЕЦНАЗ ПОБЕДИЛ (+$3550)");
                 return;
             }
         } else {
@@ -1140,10 +1287,10 @@ public class Engine extends Canvas implements Runnable {
                         Math.cos(ang) * 5.5, 2.5 + rng.nextDouble() * 4.0, Math.sin(ang) * 5.5,
                         0xFFFFFF, 0.12, 0.24));
             }
-            // Ослепление всех ботов в прямой видимости (до 18 метров)
+            // Ослепление вражеских ботов в прямой видимости (до 18 метров)
             for (int i = 0; i < bots.size(); i++) {
                 Bot b = bots.get(i);
-                if (!b.isAlive()) continue;
+                if (!b.isAlive() || b.isAlly()) continue;
                 double d = b.getEyePosition().dist(gr.pos);
                 if (d < 18.5 && map.hasLineOfSight(gr.pos.add(0, 0.2, 0), b.getEyePosition(), smokeClouds)) {
                     double dur = Math.max(1.8, (1.0 - d / 20.0) * 4.8);
@@ -1188,7 +1335,7 @@ public class Engine extends Canvas implements Runnable {
         double blastRadius = 8.2;
         for (int i = 0; i < bots.size(); i++) {
             Bot b = bots.get(i);
-            if (!b.isAlive()) continue;
+            if (!b.isAlive() || b.isAlly()) continue;
             double d = b.getPosition().add(0, 0.9, 0).dist(gr.pos);
             if (d <= blastRadius) {
                 int dmg = (int) Math.round((1.0 - d / blastRadius) * 118.0);
@@ -1200,7 +1347,7 @@ public class Engine extends Canvas implements Runnable {
                     hitMarkerTimer = 0.20;
                     hitMarkerHeadshot = false;
                     if (killed) {
-                        onBotKilledByPlayer(b, "HE Граната", false, 300);
+                        onBotKilledByPlayer(b, "HE Граната", false, 300, null);
                     }
                 }
             }
@@ -1212,9 +1359,10 @@ public class Engine extends Canvas implements Runnable {
         }
     }
 
-    private void onBotKilledByPlayer(Bot victim, String weaponLabel, boolean headshot, int cashReward) {
-        if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
-            victim.setRespawnTimer(2.4);
+    private void onBotKilledByPlayer(Bot victim, String weaponLabel, boolean headshot, int cashReward, Weapon.Type killerType) {
+        if (settings.gameMode == GameSettings.GameMode.DEATHMATCH
+                || settings.gameMode == GameSettings.GameMode.ARMS_RACE) {
+            victim.setRespawnTimer(2.2);
         }
         int streak = player.recordKill(headshot, cashReward);
         addKillFeed("ВЫ", weaponLabel, victim.getName(), headshot, true);
@@ -1224,7 +1372,41 @@ public class Engine extends Canvas implements Runnable {
             pickups.add(new Vec3.Pickup(pt, new Vec3(victim.getPosition().x, victim.getPosition().y, victim.getPosition().z)));
         }
 
-        if (streak >= bots.size() && bots.size() >= 3) {
+        // Прогрессия уровней оружия в режиме «Гонка вооружений» (Arms Race)!
+        if (settings.gameMode == GameSettings.GameMode.ARMS_RACE) {
+            int tier = player.getArmsRaceTier();
+            int maxTier = Weapon.ARMS_RACE_LADDER.length - 1;
+            if (tier >= maxTier && killerType == Weapon.Type.KNIFE) {
+                soundSystem.playRoundWin();
+                player.addMvpStar();
+                playerRoundWins = settings.roundsToWin;
+                streakBannerText = "★ ЗОЛОТОЙ НОЖ! ПОБЕДА В ГОНКЕ ВООРУЖЕНИЙ! ★";
+                streakBannerTimer = 4.0;
+                matchState = MatchState.MATCH_VICTORY;
+                setMouseCaptured(false);
+                return;
+            }
+            boolean instantUpgrade = (killerType == Weapon.Type.KNIFE || killerType == Weapon.Type.ZEUS);
+            int killsInTier = player.getArmsRaceTierKills() + (instantUpgrade ? 2 : 1);
+            if (killsInTier >= 2 && tier < maxTier) {
+                int nextTier = tier + 1;
+                player.setArmsRaceTier(nextTier);
+                player.setArmsRaceTierKills(0);
+                player.applyArmsRaceTierLoadout();
+                soundSystem.playLevelUp();
+                String nextName = (nextTier == maxTier)
+                        ? "ЗОЛОТОЙ НОЖ (ФИНАЛ!)"
+                        : new Weapon(Weapon.ARMS_RACE_LADDER[nextTier]).getDisplayName();
+                streakBannerText = "▲ УРОВЕНЬ " + (nextTier + 1) + "/" + Weapon.ARMS_RACE_LADDER.length + ": " + nextName + " ▲";
+                streakBannerTimer = 2.6;
+                return;
+            } else {
+                player.setArmsRaceTierKills(Math.min(1, killsInTier));
+            }
+        }
+
+        int enemyTeamSize = settings.botCount;
+        if (streak >= enemyTeamSize && enemyTeamSize >= 3) {
             streakBannerText = "★ ЭЙС! ВСЯ КОМАНДА УНИЧТОЖЕНА (+$500) ★";
             streakBannerTimer = 3.0;
             player.addMoney(500);
@@ -1249,6 +1431,9 @@ public class Engine extends Canvas implements Runnable {
         if (playerWon) {
             playerRoundWins++;
             player.addMoney(3250);
+            if (player.getRoundKills() > 0) {
+                player.addMvpStar();
+            }
             soundSystem.playRoundWin();
         } else {
             botRoundWins++;
@@ -1308,7 +1493,7 @@ public class Engine extends Canvas implements Runnable {
 
         for (int i = 0; i < bots.size(); i++) {
             Bot bot = bots.get(i);
-            if (!bot.isAlive()) continue;
+            if (!bot.isAlive() || bot.isAlly()) continue;
 
             Bot.HitResult rayHit = bot.intersectShotRay(eye, look, range);
             if (rayHit != null && rayHit.distance < bestDist && map.hasLineOfSight(eye, rayHit.point)) {
@@ -1341,7 +1526,10 @@ public class Engine extends Canvas implements Runnable {
             soundSystem.playHitMarker(headshot);
             spawnHitParticles(bestBot.getPosition().add(0.0, 1.2, 0.0), look.scale(-1.0), 0xE62E2E, 10);
             if (killed) {
-                onBotKilledByPlayer(bestBot, knife.getDisplayName(), headshot, knife.getKillReward());
+                boolean goldenKnife = (settings.gameMode == GameSettings.GameMode.ARMS_RACE
+                        && player.getArmsRaceTier() == Weapon.ARMS_RACE_LADDER.length - 1);
+                onBotKilledByPlayer(bestBot, goldenKnife ? "Золотой Нож" : knife.getDisplayName(),
+                        headshot, knife.getKillReward(), Weapon.Type.KNIFE);
             }
         } else {
             Vec3.RayHit wallHit = map.raycast(eye, look, range);
@@ -1369,8 +1557,8 @@ public class Engine extends Canvas implements Runnable {
 
         Vec3 muzzle = gun.getMuzzleWorldPosition(player, settings.leftHandedModel);
 
-        // Выброс латунной 3D-гильзы!
-        if (settings.decalsAndShells) {
+        // Выброс латунной 3D-гильзы (кроме электрошокера Zeus x27)!
+        if (settings.decalsAndShells && gun.getType() != Weapon.Type.ZEUS) {
             double sideSign = settings.leftHandedModel ? -1.0 : 1.0;
             Vec3 ejectVel = right.scale(sideSign * (2.2 + rng.nextDouble() * 1.4))
                     .add(0.0, 2.4 + rng.nextDouble() * 1.1, 0.0)
@@ -1398,14 +1586,39 @@ public class Engine extends Canvas implements Runnable {
 
             Bot hitBot = null;
             Bot.HitResult bestBotHit = null;
+            boolean penetratedWallbang = false;
+
             for (int i = 0; i < bots.size(); i++) {
                 Bot bot = bots.get(i);
+                if (bot.isAlly()) continue;
                 Bot.HitResult hr = bot.intersectShotRay(eye, shotDir, maxDist);
                 if (hr != null && hr.distance < maxDist) {
                     maxDist = hr.distance;
                     bestBotHit = hr;
                     hitBot = bot;
                     endPoint = hr.point;
+                }
+            }
+
+            // Механика прострела деревянных ящиков и двойных дверей CS2 (Wallbang)!
+            if (hitBot == null && wallHit != null && gun.canWallbang() && map.isBoxPenetrable(wallHit.box)) {
+                Vec3.RayHit secondWall = map.raycastIgnoringBox(eye, shotDir, maxRange, wallHit.box);
+                double wbMaxDist = (secondWall != null) ? secondWall.distance : maxRange;
+                for (int i = 0; i < bots.size(); i++) {
+                    Bot bot = bots.get(i);
+                    if (bot.isAlly()) continue;
+                    Bot.HitResult hr = bot.intersectShotRay(eye, shotDir, wbMaxDist);
+                    if (hr != null && hr.distance > wallHit.distance && hr.distance < wbMaxDist) {
+                        wbMaxDist = hr.distance;
+                        bestBotHit = hr;
+                        hitBot = bot;
+                        endPoint = hr.point;
+                        penetratedWallbang = true;
+                    }
+                }
+                if (penetratedWallbang && settings.decalsAndShells) {
+                    addBulletDecal(wallHit.point, wallHit.normal, 0.11, 0x2C2620);
+                    spawnHitParticles(wallHit.point, wallHit.normal, 0xDEC08E, 5);
                 }
             }
 
@@ -1417,29 +1630,42 @@ public class Engine extends Canvas implements Runnable {
                 }
             }
 
-            int tracerCol = gun.isSilenced() ? 0xB8E4FF : 0xFFE37E;
-            tracers.add(new Vec3.Tracer(muzzle, endPoint, tracerCol, gun.getType() == Weapon.Type.AWP ? 0.14 : 0.075));
+            if (gun.getType() == Weapon.Type.ZEUS) {
+                // Яркая ломаная электрическая дуга молнии Zeus x27!
+                Vec3 mid1 = muzzle.add(endPoint.sub(muzzle).scale(0.35)).add((rng.nextDouble() - 0.5) * 0.22, (rng.nextDouble() - 0.5) * 0.22, (rng.nextDouble() - 0.5) * 0.22);
+                Vec3 mid2 = muzzle.add(endPoint.sub(muzzle).scale(0.70)).add((rng.nextDouble() - 0.5) * 0.22, (rng.nextDouble() - 0.5) * 0.22, (rng.nextDouble() - 0.5) * 0.22);
+                tracers.add(new Vec3.Tracer(muzzle, mid1, 0x52F6FF, 0.18));
+                tracers.add(new Vec3.Tracer(mid1, mid2, 0xDCF9FF, 0.18));
+                tracers.add(new Vec3.Tracer(mid2, endPoint, 0x52F6FF, 0.18));
+                spawnHitParticles(endPoint, shotDir.scale(-1.0), 0x48F5FF, 12);
+            } else {
+                int tracerCol = gun.isSilenced() ? 0xB8E4FF : 0xFFE37E;
+                tracers.add(new Vec3.Tracer(muzzle, endPoint, tracerCol, gun.getType() == Weapon.Type.AWP ? 0.14 : 0.075));
+            }
 
             if (hitBot != null && bestBotHit != null) {
                 anyPelletHit = true;
                 if (bestBotHit.headshot) anyHeadshot = true;
 
                 int baseDmg = bestBotHit.headshot ? gun.getHeadDamage() : gun.getBodyDamage();
-                double falloff = (gun.getType() == Weapon.Type.AWP)
+                double falloff = (gun.getType() == Weapon.Type.AWP || gun.getType() == Weapon.Type.ZEUS)
                         ? 1.0
                         : Math.max(0.65, 1.0 - bestBotHit.distance / 145.0);
-                int finalDamage = Math.max(1, (int) Math.round(baseDmg * falloff));
+                double wbFactor = penetratedWallbang ? gun.getWallbangDamageFactor() : 1.0;
+                int finalDamage = Math.max(1, (int) Math.round(baseDmg * falloff * wbFactor));
 
                 if (settings.showDamageNumbers) {
                     damagePopups.add(new DamagePopup(bestBotHit.point.add(0, 0.25, 0), finalDamage, bestBotHit.headshot));
                 }
 
                 boolean killed = hitBot.takeDamage(finalDamage, player.getPosition());
-                int particleColor = bestBotHit.headshot ? 0xFFAA22 : 0xDC2626;
+                int particleColor = (gun.getType() == Weapon.Type.ZEUS) ? 0x48F5FF
+                        : (bestBotHit.headshot ? 0xFFAA22 : 0xDC2626);
                 spawnHitParticles(bestBotHit.point, shotDir.scale(-1.0), particleColor, bestBotHit.headshot ? 10 : 6);
 
                 if (killed) {
-                    onBotKilledByPlayer(hitBot, gun.getDisplayName(), bestBotHit.headshot, gun.getKillReward());
+                    String wTag = gun.getDisplayName() + (penetratedWallbang ? " • ПРОСТРЕЛ" : "");
+                    onBotKilledByPlayer(hitBot, wTag, bestBotHit.headshot, gun.getKillReward(), gun.getType());
                 }
             } else if (wallHit != null) {
                 spawnHitParticles(wallHit.point, wallHit.normal, 0xE4C896, pellets > 1 ? 3 : 7);
@@ -1554,11 +1780,14 @@ public class Engine extends Canvas implements Runnable {
         // 2. Стены, ящики, ворота и архитектура Dust II
         map.renderStructures(renderer);
 
-        // 3. Следы от пуль (декали) и огненные зоны Молотова
+        // 3. Следы от пуль (декали), цветные 3D-граффити [Y] и огненные зоны Молотова
         if (settings.decalsAndShells) {
             for (int i = 0; i < decals.size(); i++) {
                 renderer.drawDecal(decals.get(i));
             }
+        }
+        for (int i = 0; i < graffitis.size(); i++) {
+            renderer.drawGraffiti(graffitis.get(i));
         }
         for (int i = 0; i < fireZones.size(); i++) {
             renderer.drawFireZone(fireZones.get(i));
@@ -1622,16 +1851,22 @@ public class Engine extends Canvas implements Runnable {
             renderer.applyFlashlightBeam();
         }
 
-        // 8. Модель оружия от первого лица (с активным скином CS2) или 3D-витрина скинов в меню
+        // 8. Модель оружия от первого лица (с активным скином CS2 / Золотым ножом в Гонке вооружений) или 3D-витрина скинов в меню
         if (currentScreen == AppScreen.IN_GAME && player.isAlive()) {
             renderer.clearDepthBuffer();
+            GameSettings.WeaponSkin activeSkin = settings.weaponSkin;
+            if (settings.gameMode == GameSettings.GameMode.ARMS_RACE
+                    && player.getArmsRaceTier() == Weapon.ARMS_RACE_LADDER.length - 1
+                    && player.getCurrentWeapon().getType() == Weapon.Type.KNIFE) {
+                activeSkin = GameSettings.WeaponSkin.GOLD_FADE;
+            }
             player.getCurrentWeapon().renderViewModel(
                 renderer,
                 player.getWalkBobPhase(),
                 player.getWalkSpeedNormalized(),
                 player.getSwayX(),
                 player.getSwayY(),
-                settings.weaponSkin
+                activeSkin
             );
         } else if (currentScreen == AppScreen.SKIN_ARMORY) {
             renderer.clearDepthBuffer();
@@ -1703,10 +1938,10 @@ public class Engine extends Canvas implements Runnable {
 
         g.setColor(Color.WHITE);
         g.setFont(new Font("SansSerif", Font.BOLD, 28));
-        g.drawString("CS-2 JAVA", 104, 62);
+        g.drawString("CS-2 JAVA 4.0", 104, 62);
         g.setColor(new Color(245, 195, 76));
         g.setFont(new Font("SansSerif", Font.BOLD, 12));
-        g.drawString("DUST II • SOURCE 2 TACTICAL EDITION", 105, 83);
+        g.drawString("DUST II • MIRAGE • NUKE EDITION", 105, 83);
 
         int btnX = 34;
         int btnW = leftW - 68;
@@ -1746,43 +1981,59 @@ public class Engine extends Canvas implements Runnable {
         g.drawString("Рендер: " + settings.resolutionScale.label + " • " + currentFps + " FPS", 34, outH - 42);
         g.drawString("Скин: " + settings.weaponSkin.label + " • F11 Полный экран", 34, outH - 22);
 
-        // Правая карточка быстрой настройки параметров боя (с живым предпросмотром 3D-сцены!)
-        int cardW = 468;
-        int cardH = 352;
+        // Правая карточка быстрой настройки параметров боя (с живым предпросмотром 3D-карты!)
+        int cardW = 478;
+        int cardH = 398;
         int cardX = outW - cardW - 34;
-        int cardY = outH - cardH - 34;
+        int cardY = outH - cardH - 28;
 
         g.setColor(new Color(12, 17, 26, 214));
         g.fillRoundRect(cardX, cardY, cardW, cardH, 16, 16);
         g.setColor(new Color(255, 255, 255, 48));
         g.drawRoundRect(cardX, cardY, cardW, cardH, 16, 16);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 17));
+        g.setFont(new Font("SansSerif", Font.BOLD, 16));
         g.setColor(new Color(248, 204, 84));
-        g.drawString("ПАРАМЕТРЫ ОПЕРАЦИИ: DUST II", cardX + 24, cardY + 32);
+        g.drawString("ОПЕРАЦИЯ: " + settings.mapTheme.label.toUpperCase(), cardX + 24, cardY + 30);
 
-        int rowY = cardY + 52;
+        int rowY = cardY + 46;
+        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "3D-Карта арены", settings.mapTheme.label, () -> {
+            int ord = (settings.mapTheme.ordinal() + 1) % GameSettings.MapTheme.values().length;
+            settings.mapTheme = GameSettings.MapTheme.values()[ord];
+            settings.save();
+            startNewMatch();
+        });
+        rowY += 45;
+
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Режим игры", settings.gameMode.label, () -> {
             int ord = (settings.gameMode.ordinal() + 1) % GameSettings.GameMode.values().length;
             settings.gameMode = GameSettings.GameMode.values()[ord];
             settings.save();
             startNewMatch();
         });
-        rowY += 46;
+        rowY += 45;
+
+        String allyLabel = (settings.allyCount == 0) ? "Без напарников (Соло)" : (settings.allyCount + " бойца CT");
+        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Отряд союзников", allyLabel, () -> {
+            settings.allyCount = (settings.allyCount + 1) % 5;
+            settings.save();
+            startNewMatch();
+        });
+        rowY += 45;
+
+        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Противников", settings.botCount + " ботов T", () -> {
+            settings.botCount = (settings.botCount >= 8) ? 3 : settings.botCount + 1;
+            settings.save();
+            startNewMatch();
+        });
+        rowY += 45;
 
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Сложность ИИ", settings.botDifficulty.label, () -> {
             int ord = (settings.botDifficulty.ordinal() + 1) % GameSettings.BotDifficulty.values().length;
             settings.botDifficulty = GameSettings.BotDifficulty.values()[ord];
             settings.save();
         });
-        rowY += 46;
-
-        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Противников", settings.botCount + " ботов", () -> {
-            settings.botCount = (settings.botCount >= 8) ? 3 : settings.botCount + 1;
-            settings.save();
-            startNewMatch();
-        });
-        rowY += 46;
+        rowY += 45;
 
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Освещение карты", settings.timeOfDay.label, () -> {
             int ord = (settings.timeOfDay.ordinal() + 1) % GameSettings.TimeOfDay.values().length;
@@ -1790,17 +2041,9 @@ public class Engine extends Canvas implements Runnable {
             renderer.applyTimeOfDay(settings.timeOfDay);
             settings.save();
         });
-        rowY += 46;
 
-        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Матч до побед", settings.roundsToWin + " раундов", () -> {
-            if (settings.roundsToWin == 3) settings.roundsToWin = 5;
-            else if (settings.roundsToWin == 5) settings.roundsToWin = 8;
-            else settings.roundsToWin = 3;
-            settings.save();
-        });
-
-        drawCenteredText(g, "C4 [E] • Flash [V] • Молотов [X] • Фонарик [L] • Скины [H]",
-                cardX + cardW / 2, cardY + cardH - 16,
+        drawCenteredText(g, "Zeus [8/T] • Граффити [Y] • Радио CT [Z] • C4 [E] • Скины [H]",
+                cardX + cardW / 2, cardY + cardH - 14,
                 new Font("SansSerif", Font.PLAIN, 12), new Color(184, 198, 216));
     }
 
@@ -1824,23 +2067,25 @@ public class Engine extends Canvas implements Runnable {
 
         g.setFont(new Font("SansSerif", Font.BOLD, 13));
         g.setColor(new Color(185, 198, 216));
-        g.drawString("ВЫБЕРИТЕ ОРУЖИЕ ДЛЯ 3D-ОСМОТРА:", 30, 98);
+        g.drawString("ВЫБЕРИТЕ ОРУЖИЕ ДЛЯ 3D-ОСМОТРА:", 30, 96);
 
-        int wx = 30, wy = 108;
-        int btnW = (panelW - 72) / 2;
+        int wx = 30, wy = 106;
+        int btnW = (panelW - 76) / 3;
         for (int i = 0; i < armoryShowcaseWeapons.length; i++) {
             final int idx = i;
             Weapon w = armoryShowcaseWeapons[i];
-            int col = i % 2;
-            int row = i / 2;
-            Rectangle r = new Rectangle(wx + col * (btnW + 12), wy + row * 42, btnW, 35);
+            int col = i % 3;
+            int row = i / 3;
+            Rectangle r = new Rectangle(wx + col * (btnW + 8), wy + row * 40, btnW, 34);
             boolean sel = (armoryWeaponIdx == i);
-            addMenuButton(g, r, w.getDisplayName(),
+            String label = w.getType() == Weapon.Type.DEAGLE ? "Deagle"
+                    : (w.getType() == Weapon.Type.KNIFE ? "Нож" : w.getDisplayName());
+            addMenuButton(g, r, label,
                     sel ? new Color(228, 152, 38) : new Color(34, 45, 62), sel,
                     () -> armoryWeaponIdx = idx);
         }
 
-        int sy = 294;
+        int sy = 250;
         g.setFont(new Font("SansSerif", Font.BOLD, 13));
         g.setColor(new Color(185, 198, 216));
         g.drawString("КОЛЛЕКЦИОННЫЙ СКИН (ДЛЯ ВСЕГО АРСЕНАЛА):", 30, sy);
@@ -1851,7 +2096,7 @@ public class Engine extends Canvas implements Runnable {
             final GameSettings.WeaponSkin sk = allSkins[i];
             boolean active = (settings.weaponSkin == sk);
             Color base = active ? new Color(142, 58, 178) : new Color(28, 38, 52);
-            addMenuButton(g, new Rectangle(30, sy + i * 43, panelW - 60, 36),
+            addMenuButton(g, new Rectangle(30, sy + i * 40, panelW - 60, 34),
                     (active ? "★ " : "   ") + sk.label, base, false, () -> {
                         settings.weaponSkin = sk;
                         settings.save();
@@ -2117,29 +2362,29 @@ public class Engine extends Canvas implements Runnable {
             "УПРАВЛЕНИЕ ПЕРСОНАЖЕМ И ГРАНАТАМИ:",
             "• WASD / Space / Ctrl — Бег, прыжок, приседание",
             "• Shift — Тихий шаг (без шума + высокая кучность)",
-            "• ЛКМ — Стрельба / Быстрый взмах ножом",
-            "• ПКМ — Оптический зум AWP / Прицел ADS / Выпад ножом",
+            "• 8 / T — Электрошокер Zeus x27 (мгновенный разряд!)",
+            "• Z — Радиокоманды отряду спецназа CT (4 тактики!)",
+            "• Y — Нанести цветное 3D-граффити на стену или пол",
             "• E (зажать у бомбы) — Обезвреживание C4 на пленте",
             "• B — Магазин закупки ($), F — Осмотр, H — Скин",
             "• L — Тактический 3D-фонарик (для Ночной операции!)",
-            "• 4 / G — Осколочная граната HE",
-            "• 5 / Q — Дымовая шашка Smoke (тушит Молотов!)",
-            "• 6 / V — Светошумовая Flashbang (слепит врагов!)",
-            "• 7 / X — Зажигательный Молотов (горящая зона)"
+            "• 4/G: HE • 5/Q: Smoke • 6/V: Flash • 7/X: Молотов",
+            "• Прострел (Wallbang): винтовки и AWP бьют сквозь ящики!",
+            "• Пробел (после гибели) — Ускорить бой союзников CT"
         };
 
         String[] rightLines = {
-            "ВООРУЖЕНИЕ И РЕЖИМЫ (МАГАЗИН [B]):",
-            "• AK-47 ($2700) • M4A1-S с глушителем ($2900)",
-            "• AWP ($4750) — Снайперский зум 2.8X / 6.0X на ПКМ",
-            "• XM1014 ($2000) — Дробовик (8 картечин за залп)",
-            "• MP9 ($1250) — Скорострельный ПП ($600 за фраг)",
-            "• Desert Eagle ($700) • Glock-18 ($200) • Нож ($1500)",
-            "• Набор сапёра C4 — Ускоряет разминирование в 2 раза",
-            "• 5 коллекционных скинов CS2 (Asiimov, Fade, Redline)",
+            "КАРТЫ, РЕЖИМЫ И ВООРУЖЕНИЕ 4.0:",
+            "• 3 Карты: Dust II (Пески), Mirage (Дворец), Nuke (АЭС)",
+            "• Гонка вооружений: 8 уровней пушек до Золотого Ножа!",
+            "• Союзники ИИ (Спецназ CT) сражаются и разминируют C4",
+            "• AK-47 ($2700) • M4A1-S ($2900) • AWP ($4750)",
+            "• XM1014 ($2000) • MP9 ($1250) • Deagle ($700)",
+            "• Zeus x27 — автоподзарядка батареи каждые 10 сек",
+            "• 6 коллекций скинов (включая Неоновый Зверь!)",
             "",
             "СИСТЕМНЫЕ КЛАВИШИ:",
-            "• Tab — Таблица счета   • F5 — Быстрый рестарт",
+            "• Tab — Командный счет  • F5 — Быстрый рестарт",
             "• F11 — Полный экран    • ESC — Пауза и настройки"
         };
 
@@ -2287,7 +2532,7 @@ public class Engine extends Canvas implements Runnable {
                 () -> tryPurchaseUtility(1)); iy += step;
         drawBuyRow(g, itemX, iy, itemW, "[8] Набор гранат: Дым Smoke [Q] + Зажигательный Молотов [X]", freeDm ? 0 : 600,
                 () -> tryPurchaseUtility(2)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[9] Броня 100 AP + Аптечка + Набор сапёра C4 (5 сек размин.)", freeDm ? 0 : 850,
+        drawBuyRow(g, itemX, iy, itemW, "[9] Броня 100 AP + Аптечка + Щипцы C4 + Шокер Zeus x27 [T]", freeDm ? 0 : 850,
                 () -> tryPurchaseUtility(3));
 
         addMenuButton(g, new Rectangle(bx + bw / 2 - 140, by + bh - 50, 280, 38),
@@ -2336,8 +2581,9 @@ public class Engine extends Canvas implements Runnable {
             double dist = toBot.length();
             boolean aimedAt = dist > 0.1 && look.dot(toBot.scale(1.0 / dist)) > 0.985;
 
-            if (!b.shouldShowHealthBar() && !aimedAt) continue;
-            if (!map.hasLineOfSight(eye, b.getEyePosition(), smokeClouds)) continue;
+            boolean ally = b.isAlly();
+            if (!ally && !b.shouldShowHealthBar() && !aimedAt) continue;
+            if (!ally && !map.hasLineOfSight(eye, b.getEyePosition(), smokeClouds)) continue;
 
             if (renderer.projectToScreen(headTop.x, headTop.y, headTop.z, proj)) {
                 int sx = (int) (proj[0] * scaleX);
@@ -2349,10 +2595,19 @@ public class Engine extends Canvas implements Runnable {
 
                 g.setColor(new Color(15, 18, 22, 195));
                 g.fillRoundRect(bx - 2, by - 2, barW + 4, barH + 4, 4, 4);
-                g.setColor(b.getHealth() > 45 ? new Color(235, 72, 65) : new Color(255, 165, 45));
+                if (ally) {
+                    g.setColor(new Color(64, 188, 255));
+                } else {
+                    g.setColor(b.getHealth() > 45 ? new Color(235, 72, 65) : new Color(255, 165, 45));
+                }
                 g.fillRect(bx, by, (int) ((barW * b.getHealth()) / 100.0), barH);
 
-                if (b.isBlinded()) {
+                if (ally) {
+                    String allyTag = "▲ " + b.getName() + " (" + b.getHealth() + " HP)";
+                    FontMetrics fm = g.getFontMetrics();
+                    g.setColor(new Color(128, 224, 255));
+                    g.drawString(allyTag, sx - fm.stringWidth(allyTag) / 2, by - 5);
+                } else if (b.isBlinded()) {
                     drawCenteredText(g, "★ ОСЛЕПЛЁН ★", sx, by - 6,
                             new Font("SansSerif", Font.BOLD, 11), new Color(255, 245, 150));
                 } else if (aimedAt || b.isCarryingC4()) {
@@ -2528,11 +2783,33 @@ public class Engine extends Canvas implements Runnable {
             drawCenteredText(g, timeStr, outW / 2, topY + 30,
                     new Font("Monospaced", Font.BOLD, 22), totalSec <= 15 ? new Color(255, 95, 85) : Color.WHITE);
 
-            String subStr = (settings.gameMode == GameSettings.GameMode.DEATHMATCH)
-                    ? ("БОЙ НАСМЕРТЬ (ДО 25 ФРАГОВ) • СЧЕТ: " + player.getKills() + "/25")
-                    : ("РАУНД " + currentRound + " (ДО " + settings.roundsToWin + ") • ВРАГОВ: " + countAliveBots());
+            String subStr;
+            if (settings.gameMode == GameSettings.GameMode.ARMS_RACE) {
+                int tIdx = player.getArmsRaceTier();
+                int totalTiers = Weapon.ARMS_RACE_LADDER.length;
+                subStr = "ГОНКА ВООРУЖЕНИЙ: УРОВЕНЬ " + (tIdx + 1) + "/" + totalTiers
+                        + (tIdx == totalTiers - 1 ? " (ЗОЛОТОЙ НОЖ!)" : " • ФРАГОВ: " + player.getArmsRaceTierKills() + "/2");
+            } else if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
+                subStr = "БОЙ НАСМЕРТЬ (ДО 25 ФРАГОВ) • СЧЕТ: " + player.getKills() + "/25";
+            } else {
+                int ctAlive = (player.isAlive() ? 1 : 0) + countAliveAllies();
+                subStr = "РАУНД " + currentRound + " • СПЕЦНАЗ: " + ctAlive + " VS " + countAliveEnemies() + " ТЕРР.";
+            }
             drawCenteredText(g, subStr, outW / 2, topY + 49,
                     new Font("SansSerif", Font.BOLD, 11), new Color(205, 214, 226));
+        }
+
+        // Баннер активной радиокоманды спецназу CT [Z]
+        if (radioBannerTimer > 0.0 && !radioBannerText.isEmpty()) {
+            int rw = 500, rh = 30;
+            int rx = 20, ry = 200;
+            g.setColor(new Color(12, 24, 38, 214));
+            g.fillRoundRect(rx, ry, rw, rh, 8, 8);
+            g.setColor(new Color(78, 198, 255, 185));
+            g.drawRoundRect(rx, ry, rw, rh, 8, 8);
+            g.setFont(new Font("SansSerif", Font.BOLD, 12));
+            g.setColor(new Color(148, 232, 255));
+            g.drawString(radioBannerText, rx + 12, ry + 20);
         }
 
         // Индикатор обезвреживания C4 по клавише E
@@ -2566,17 +2843,17 @@ public class Engine extends Canvas implements Runnable {
         int hpW = 302, hpH = 74;
         int hpX = 20, hpY = outH - hpH - 22;
 
-        // Плашка валюты $, набора сапёра и фонарика [L]
+        // Плашка валюты $, радио [Z], граффити [Y] и фонарика [L]
         g.setColor(new Color(14, 20, 26, 208));
-        g.fillRoundRect(hpX, hpY - 38, 326, 32, 10, 10);
+        g.fillRoundRect(hpX, hpY - 38, 354, 32, 10, 10);
         g.setFont(new Font("Monospaced", Font.BOLD, 17));
         g.setColor(new Color(102, 242, 136));
         g.drawString("$ " + player.getMoney(), hpX + 12, hpY - 17);
         g.setFont(new Font("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(245, 202, 86));
-        String rightBadge = "[B] Маг." + (player.hasDefuseKit() ? " • Щипцы C4" : "")
-                + (player.isFlashlightOn() ? " • [L] Свет ВКЛ" : " • [L] Свет");
-        g.drawString(rightBadge, hpX + 98, hpY - 17);
+        String rightBadge = "[B]Маг • [Z]Радио • [Y]Спрей • [L]"
+                + (player.isFlashlightOn() ? "ВКЛ" : "Свет");
+        g.drawString(rightBadge, hpX + 94, hpY - 17);
 
         g.setColor(new Color(14, 18, 25, 214));
         g.fillRoundRect(hpX, hpY, hpW, hpH, 12, 12);
@@ -2658,18 +2935,22 @@ public class Engine extends Canvas implements Runnable {
         }
 
         Weapon[] allW = player.getWeapons();
-        int slotW = 99;
-        for (int i = 0; i < allW.length; i++) {
-            int sx = amX + 14 + i * (slotW + 6);
+        int slotCount = player.hasZeus() ? 4 : 3;
+        int slotGap = 5;
+        int slotW = (amW - 28 - (slotCount - 1) * slotGap) / slotCount;
+        for (int i = 0; i < slotCount; i++) {
+            int sx = amX + 14 + i * (slotW + slotGap);
             int sy = amY + 93;
             boolean sel = (i == player.getCurrentWeaponIndex());
             g.setColor(sel ? new Color(245, 188, 66, 228) : new Color(36, 44, 56, 190));
             g.fillRoundRect(sx, sy, slotW, 22, 6, 6);
-            g.setFont(new Font("SansSerif", Font.BOLD, 11));
+            g.setFont(new Font("SansSerif", Font.BOLD, 10));
             g.setColor(sel ? new Color(18, 20, 24) : new Color(196, 206, 218));
-            String shortName = (i == 2) ? "Нож" : (allW[i].getDisplayName().length() > 9
-                    ? allW[i].getDisplayName().substring(0, 8) : allW[i].getDisplayName());
-            g.drawString((i + 1) + ": " + shortName, sx + 6, sy + 15);
+            String keyNum = (i == 3) ? "T" : String.valueOf(i + 1);
+            String shortName = (i == 2) ? "Нож" : (i == 3 ? "Zeus"
+                    : (allW[i].getDisplayName().length() > 7
+                            ? allW[i].getDisplayName().substring(0, 6) : allW[i].getDisplayName()));
+            g.drawString(keyNum + ":" + shortName, sx + 5, sy + 15);
         }
 
         // 4. Фирменные карточки фрагов раунда CS2 внизу по центру экрана!
@@ -2748,6 +3029,14 @@ public class Engine extends Canvas implements Runnable {
         for (int i = 0; i < bots.size(); i++) {
             Bot b = bots.get(i);
             if (!b.isAlive()) continue;
+            if (b.isAlly()) {
+                // Союзники спецназа CT всегда видны на радаре голубыми маркерами!
+                int mx = rx + pad + (int) (((b.getPosition().x - Map.MIN_X) / span) * inner);
+                int mz = ry + pad + (int) (((Map.MAX_Z - b.getPosition().z) / span) * inner);
+                g.setColor(new Color(72, 196, 255));
+                g.fillOval(mx - 4, mz - 4, 8, 8);
+                continue;
+            }
             boolean visibleOnRadar = b.isFiringRecently()
                     || b.getState() == Bot.State.ENGAGE
                     || map.hasLineOfSight(eye, b.getEyePosition(), smokeClouds);
@@ -2775,7 +3064,8 @@ public class Engine extends Canvas implements Runnable {
         if (settings.showFpsTelemetry) {
             g.setFont(new Font("SansSerif", Font.BOLD, 10));
             g.setColor(new Color(214, 222, 234));
-            g.drawString(String.format("DUST II • %d FPS (%.1f мс)", currentFps, lastFrameMs), rx + 11, ry + totalH - 8);
+            String mapShort = settings.mapTheme.name().replace("_", " ");
+            g.drawString(String.format("%s • %d FPS (%.1f мс)", mapShort, currentFps, lastFrameMs), rx + 11, ry + totalH - 8);
         }
     }
 
@@ -2850,46 +3140,55 @@ public class Engine extends Canvas implements Runnable {
     }
 
     private void drawScoreboardOverlay(Graphics2D g, int outW, int outH) {
-        int sh = 165 + bots.size() * 32;
-        int sw = 580;
+        int sh = Math.min(outH - 40, 175 + bots.size() * 29);
+        int sw = 684;
         int sx = outW / 2 - sw / 2, sy = outH / 2 - sh / 2;
 
-        g.setColor(new Color(12, 16, 24, 235));
+        g.setColor(new Color(12, 16, 24, 238));
         g.fillRoundRect(sx, sy, sw, sh, 14, 14);
         g.setColor(new Color(255, 255, 255, 65));
         g.drawRoundRect(sx, sy, sw, sh, 14, 14);
 
-        drawCenteredText(g, "ТАБЛИЦА СЧЕТА — DUST II (" + settings.botDifficulty.label + ")", outW / 2, sy + 34,
-                new Font("SansSerif", Font.BOLD, 18), new Color(248, 205, 86));
-        drawCenteredText(g, "Счет по раундам: CT " + playerRoundWins + " : " + botRoundWins + " BOTS",
-                outW / 2, sy + 58, new Font("SansSerif", Font.BOLD, 14), new Color(200, 212, 228));
+        drawCenteredText(g, "ТАБЛИЦА СЧЕТА — " + settings.mapTheme.label.toUpperCase() + " • " + settings.gameMode.label,
+                outW / 2, sy + 32, new Font("SansSerif", Font.BOLD, 17), new Color(248, 205, 86));
+        drawCenteredText(g, "Счет по раундам: СПЕЦНАЗ CT " + playerRoundWins + " : " + botRoundWins + " ТЕРРОРИСТЫ T",
+                outW / 2, sy + 54, new Font("SansSerif", Font.BOLD, 13), new Color(200, 212, 228));
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 13));
+        g.setFont(new Font("SansSerif", Font.BOLD, 12));
         g.setColor(new Color(145, 162, 184));
-        g.drawString("БОЕЦ", sx + 26, sy + 90);
-        g.drawString("СТАТУС", sx + 225, sy + 90);
-        g.drawString("HP", sx + 340, sy + 90);
-        g.drawString("K / D / БАЛАНС", sx + 405, sy + 90);
+        g.drawString("БОЕЦ ОТРЯДА", sx + 26, sy + 82);
+        g.drawString("СТАТУС", sx + 245, sy + 82);
+        g.drawString("HP", sx + 355, sy + 82);
+        g.drawString("K / D / НАГРАДЫ", sx + 420, sy + 82);
 
-        g.setColor(new Color(45, 92, 148, 135));
-        g.fillRoundRect(sx + 18, sy + 100, sw - 36, 30, 8, 8);
+        g.setColor(new Color(45, 108, 178, 155));
+        g.fillRoundRect(sx + 18, sy + 90, sw - 36, 28, 8, 8);
         g.setColor(Color.WHITE);
-        g.drawString("ВЫ (Counter-Terrorist)", sx + 26, sy + 120);
-        g.drawString(player.isAlive() ? "ЖИВ" : "УБИТ", sx + 225, sy + 120);
-        g.drawString(String.valueOf(player.getHealth()), sx + 340, sy + 120);
-        g.drawString(player.getKills() + " / " + player.getDeaths() + "  ($" + player.getMoney() + ")", sx + 405, sy + 120);
+        String mvpStr = player.getMvpStars() > 0 ? (" ★" + player.getMvpStars()) : "";
+        g.drawString("ВЫ (Командир CT)" + mvpStr, sx + 26, sy + 109);
+        g.drawString(player.isAlive() ? "В БОЮ" : "УБИТ", sx + 245, sy + 109);
+        g.drawString(String.valueOf(player.getHealth()), sx + 355, sy + 109);
+        g.drawString(player.getKills() + " / " + player.getDeaths() + "  ($" + player.getMoney() + ")", sx + 420, sy + 109);
 
-        int rowY = sy + 142;
-        for (int i = 0; i < bots.size(); i++) {
-            Bot b = bots.get(i);
-            g.setColor(new Color(65, 42, 34, 120));
-            g.fillRoundRect(sx + 18, rowY, sw - 36, 26, 8, 8);
-            g.setColor(b.isAlive() ? new Color(245, 215, 185) : new Color(138, 144, 154));
-            g.drawString(b.getName(), sx + 26, rowY + 18);
-            g.drawString(b.isAlive() ? b.getState().name() : "УБИТ", sx + 225, rowY + 18);
-            g.drawString(String.valueOf(b.getHealth()), sx + 340, rowY + 18);
-            g.drawString("Отряд ИИ", sx + 405, rowY + 18);
-            rowY += 31;
+        int rowY = sy + 124;
+        // Сначала союзники CT, затем противники T
+        for (int pass = 0; pass < 2; pass++) {
+            boolean wantAlly = (pass == 0);
+            for (int i = 0; i < bots.size(); i++) {
+                Bot b = bots.get(i);
+                if (b.isAlly() != wantAlly) continue;
+                if (rowY + 26 > sy + sh - 10) break;
+                g.setColor(wantAlly ? new Color(32, 68, 112, 135) : new Color(72, 42, 34, 135));
+                g.fillRoundRect(sx + 18, rowY, sw - 36, 24, 7, 7);
+                g.setColor(b.isAlive()
+                        ? (wantAlly ? new Color(165, 228, 255) : new Color(248, 214, 182))
+                        : new Color(132, 140, 152));
+                g.drawString(b.getName() + (b.isCarryingC4() ? " [C4]" : ""), sx + 26, rowY + 16);
+                g.drawString(b.isAlive() ? b.getState().name() : "УБИТ", sx + 245, rowY + 16);
+                g.drawString(String.valueOf(b.getHealth()), sx + 355, rowY + 16);
+                g.drawString(b.getKills() + " / " + b.getDeaths() + (wantAlly ? "  (Союзник CT)" : "  (Террорист T)"), sx + 420, rowY + 16);
+                rowY += 27;
+            }
         }
     }
 
@@ -3053,9 +3352,23 @@ public class Engine extends Canvas implements Runnable {
     }
 
     public int countAliveBots() {
+        return countAliveEnemies();
+    }
+
+    public int countAliveEnemies() {
         int c = 0;
         for (int i = 0; i < bots.size(); i++) {
-            if (bots.get(i).isAlive()) c++;
+            Bot b = bots.get(i);
+            if (b.isAlive() && !b.isAlly()) c++;
+        }
+        return c;
+    }
+
+    public int countAliveAllies() {
+        int c = 0;
+        for (int i = 0; i < bots.size(); i++) {
+            Bot b = bots.get(i);
+            if (b.isAlive() && b.isAlly()) c++;
         }
         return c;
     }
@@ -3063,12 +3376,14 @@ public class Engine extends Canvas implements Runnable {
     public AppScreen getCurrentScreen() { return currentScreen; }
     public void setCurrentScreen(AppScreen screen) { this.currentScreen = screen; }
     public void setBuyMenuOpen(boolean open) { this.buyMenuOpen = open; }
+    public void setScoreTabHeld(boolean held) { this.scoreTabHeld = held; }
     public GameSettings getSettings() { return settings; }
     public Player getPlayer() { return player; }
     public Map getMap() { return map; }
     public List<Bot> getBots() { return bots; }
     public List<Vec3.SmokeCloud> getSmokeClouds() { return smokeClouds; }
     public List<Vec3.FireZone> getFireZones() { return fireZones; }
+    public List<Vec3.Graffiti> getGraffitis() { return graffitis; }
     public Vec3.BombC4 getPlantedC4() { return plantedC4; }
     public void setPlantedC4(Vec3.BombC4 c4) { this.plantedC4 = c4; }
     public MatchState getMatchState() { return matchState; }

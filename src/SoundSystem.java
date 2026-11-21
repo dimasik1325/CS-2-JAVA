@@ -49,6 +49,10 @@ public class SoundSystem {
     private final byte[] sfxUiClick;
     private final byte[] sfxRoundWin;
     private final byte[] sfxRoundLose;
+    private final byte[] sfxZeusZap;
+    private final byte[] sfxSprayCan;
+    private final byte[] sfxRadioChirp;
+    private final byte[] sfxLevelUp;
 
     public SoundSystem(boolean enabled) {
         this.format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
@@ -81,6 +85,10 @@ public class SoundSystem {
         this.sfxUiClick     = buildToneClick(1560.0, 0.032, 0.40);
         this.sfxRoundWin    = buildFanfare(true);
         this.sfxRoundLose   = buildFanfare(false);
+        this.sfxZeusZap     = buildZeusZapSound();
+        this.sfxSprayCan    = buildSprayCanSound();
+        this.sfxRadioChirp  = buildRadioChirpSound();
+        this.sfxLevelUp     = buildLevelUpSound();
 
         if (this.audioAvailable) {
             this.audioPool = Executors.newCachedThreadPool(r -> {
@@ -115,6 +123,7 @@ public class SoundSystem {
             case MP9:    playAsync(sfxMp9Shot, 0.86); break;
             case GLOCK:  playAsync(sfxGlockShot, 0.90); break;
             case DEAGLE: playAsync(sfxDeagleShot, 1.0); break;
+            case ZEUS:   playAsync(sfxZeusZap, 1.0); break;
             case KNIFE:  playAsync(sfxKnifeSlash, 0.85); break;
         }
     }
@@ -143,6 +152,9 @@ public class SoundSystem {
         playAsync(urgent ? sfxC4Urgent : sfxC4Beep, atten);
     }
     public void playC4Keypad() { playAsync(sfxC4Keypad, 0.85); }
+    public void playSprayCan() { playAsync(sfxSprayCan, 0.84); }
+    public void playRadioBeep() { playAsync(sfxRadioChirp, 0.80); }
+    public void playLevelUp() { playAsync(sfxLevelUp, 0.92); }
     public void playFootstep() { playAsync(sfxFootstep, 0.36); }
     public void playShellClink() { playAsync(sfxShellClink, 0.28); }
     public void playBuy() { playAsync(sfxBuyCash, 0.80); }
@@ -464,6 +476,65 @@ public class SoundSystem {
             double local = ((i * 3.0) / count) - step;
             double env = Math.max(0.0, 1.0 - local * 1.15);
             buf[i] = Math.sin(2.0 * Math.PI * freqs[step] * sec) * env * 0.58;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildZeusZapSound() {
+        int count = (int) (SAMPLE_RATE * 0.34);
+        double[] buf = new double[count];
+        Random rng = new Random(8080L);
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double sec = i / SAMPLE_RATE;
+            double env = Math.pow(1.0 - t, 1.45);
+            double buzz = Math.signum(Math.sin(2.0 * Math.PI * 135.0 * sec)) * 0.38;
+            double crackle = (rng.nextDouble() > 0.35 ? (rng.nextDouble() * 2.0 - 1.0) : 0.0) * 0.65;
+            double whine = Math.sin(2.0 * Math.PI * (2200.0 - 1100.0 * t) * sec) * 0.32;
+            buf[i] = (buzz + crackle + whine) * env;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildSprayCanSound() {
+        int count = (int) (SAMPLE_RATE * 0.26);
+        double[] buf = new double[count];
+        Random rng = new Random(5150L);
+        double prev = 0.0;
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double white = rng.nextDouble() * 2.0 - 1.0;
+            double hp = white - prev * 0.68;
+            prev = white;
+            double env = Math.sin(Math.min(1.0, t * 4.5) * Math.PI * 0.5) * Math.pow(1.0 - t, 0.55);
+            buf[i] = hp * env * 0.52;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildRadioChirpSound() {
+        int count = (int) (SAMPLE_RATE * 0.16);
+        double[] buf = new double[count];
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double sec = i / SAMPLE_RATE;
+            double freq = (t < 0.45) ? 1680.0 : 2180.0;
+            double env = Math.sin(t * Math.PI);
+            buf[i] = Math.sin(2.0 * Math.PI * freq * sec) * env * 0.48;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildLevelUpSound() {
+        int count = (int) (SAMPLE_RATE * 0.36);
+        double[] buf = new double[count];
+        double[] notes = {587.33, 739.99, 880.0, 1174.66};
+        for (int i = 0; i < count; i++) {
+            int idx = Math.min(3, (i * 4) / count);
+            double sec = i / SAMPLE_RATE;
+            double local = ((i * 4.0) / count) - idx;
+            double env = Math.pow(Math.max(0.0, 1.0 - local * 0.72), 1.2);
+            buf[i] = Math.sin(2.0 * Math.PI * notes[idx] * sec) * env * 0.55;
         }
         return toPcmBytes(buf);
     }

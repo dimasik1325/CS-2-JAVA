@@ -13,7 +13,7 @@ import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
 /**
- * Точка входа в игру CS-2 JAVA 3.0 (Source 2 Tactical & Skins Edition).
+ * Точка входа в игру CS-2 JAVA 4.0 (Maps, Arms Race, Allies & Zeus Edition).
  * Управляет окном JFrame, полноэкранным режимом F11 и запуском игрового движка Engine.
  */
 public class Main {
@@ -28,7 +28,7 @@ public class Main {
         System.setProperty("sun.java2d.uiScale", "1.0");
 
         SwingUtilities.invokeLater(() -> {
-            final JFrame frame = new JFrame("CS-2 JAVA 3.0 | Dust II Source 2 Edition");
+            final JFrame frame = new JFrame("CS-2 JAVA 4.0 | Dust II • Mirage • Nuke Edition");
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
             frame.getContentPane().setBackground(Color.BLACK);
@@ -95,60 +95,91 @@ public class Main {
             Engine engine = new Engine(true);
             Player player = engine.getPlayer();
 
-            // 1. Главное меню 3.0 с живой 3D-камерой над ареной Dust II
+            // 1. Главное меню 4.0 с картой MIRAGE (марокканский дворец и пальмы) на живом 3D-фоне
+            engine.getSettings().mapTheme = GameSettings.MapTheme.MIRAGE;
+            engine.startNewMatch();
             engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
             for (int i = 0; i < 35; i++) {
                 engine.updateGame(1.0 / 60.0);
             }
-            saveTestScreenshot(engine, new File(dir, "01_main_menu.png"));
+            saveTestScreenshot(engine, new File(dir, "01_main_menu_mirage.png"));
 
-            // 2. Интерактивная 3D-оружейная скинов (AK-47 | Азимов)
-            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.ASIIMOV;
-            engine.setCurrentScreen(Engine.AppScreen.SKIN_ARMORY);
-            for (int i = 0; i < 25; i++) {
-                engine.updateGame(1.0 / 60.0);
-            }
-            saveTestScreenshot(engine, new File(dir, "02_skin_armory_asiimov.png"));
-
-            // 3. Режим Операции C4: заложенная бомба C4 на Пленте A, горящий Молотов, ослепленный бот,
-            //    AK-47 | Азимов, счетчик StatTrak™ и карточки фрагов раунда CS2
+            // 2. Карта MIRAGE в бою: союзник спецназа CT (▲ CT Альфа), 3D-граффити [Y] на стене, радиокоманда [Z] и молния Zeus x27!
             engine.launchMatchFromMenu();
-            Vec3 siteA = engine.getMap().getBombsiteASpot();
-            engine.setPlantedC4(new Vec3.BombC4(siteA, "A"));
-            player.setHasDefuseKit(true);
-            player.getPosition().set(siteA.x - 1.5, 0.0, siteA.z - 2.0);
-            Vec3 lookC4 = siteA.add(0.0, 0.4, 0.0).sub(player.getEyePosition()).normalize();
-            player.setAngles(Math.atan2(lookC4.x, lookC4.z), Math.asin(lookC4.y));
+            player.getPosition().set(-0.6, 0.0, -5.0);
+            player.setAngles(0.0, -0.14);
+            engine.trySprayGraffiti();
 
-            engine.getFireZones().add(new Vec3.FireZone(new Vec3(siteA.x + 1.8, 0.0, siteA.z + 1.1), 2.3, 7.0));
-            Bot target = engine.getBots().get(0);
-            target.getPosition().set(siteA.x + 0.5, 0.0, siteA.z + 2.4);
-            target.applyFlashBlind(4.0);
-            player.recordKill(true);
-            player.recordKill(false);
-            for (int i = 0; i < 18; i++) engine.updateGame(1.0 / 60.0);
-            saveTestScreenshot(engine, new File(dir, "03_c4_planted_molotov_asiimov.png"));
+            // Размещаем союзника CT слева и врага T перед электрошокером Zeus x27
+            Bot enemyT = null;
+            Bot allyCt = null;
+            for (Bot b : engine.getBots()) {
+                if (b.isAlly() && allyCt == null) allyCt = b;
+                else if (!b.isAlly() && enemyT == null) enemyT = b;
+            }
+            player.selectWeaponSlot(3); // Zeus x27
+            for (int i = 0; i < 16; i++) engine.updateGame(1.0 / 60.0);
+            engine.issueNextRadioCommand();
+            if (allyCt != null) {
+                allyCt.getPosition().set(-2.3, 0.0, -2.5);
+            }
+            if (enemyT != null) {
+                enemyT.getPosition().set(1.25, 0.0, -2.4);
+                Vec3 toEnemy = enemyT.getPosition().add(0, 1.25, 0).sub(player.getEyePosition()).normalize();
+                player.setAngles(Math.atan2(toEnemy.x, toEnemy.z), Math.asin(toEnemy.y));
+                engine.tryFireCurrentWeapon(false);
+            }
+            saveTestScreenshot(engine, new File(dir, "02_mirage_allies_zeus_graffiti.png"));
 
-            // 4. Ночная операция + направленный 3D-фонарик [L] + новый ПП MP9 | Золотой Градиент
-            engine.getSettings().timeOfDay = GameSettings.TimeOfDay.NIGHT;
-            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.GOLD_FADE;
-            player.addMoney(5000);
-            player.equipPurchasedWeapon(Weapon.Type.MP9);
-            player.toggleFlashlight();
-            player.getPosition().set(-1.0, 0.0, -5.5);
-            player.setAngles(0.08, -0.04);
-            target.getPosition().set(-0.4, 0.0, 1.5);
+            // 3. Карта NUKE (ядерный комплекс с желтым реактором Silo) + режим «Гонка вооружений» + скин Неоновый Зверь
+            engine.getSettings().mapTheme = GameSettings.MapTheme.NUKE;
+            engine.getSettings().gameMode = GameSettings.GameMode.ARMS_RACE;
+            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.HYPER_BEAST;
+            engine.startNewMatch();
+            player.setArmsRaceTier(3); // AK-47 в Гонке вооружений
+            player.setArmsRaceTierKills(1);
+            player.applyArmsRaceTierLoadout();
+            player.getPosition().set(12.2, 0.0, 7.8);
+            Vec3 toSilo = new Vec3(19.2, 1.8, 17.8).sub(player.getEyePosition()).normalize();
+            player.setAngles(Math.atan2(toSilo.x, toSilo.z), Math.asin(toSilo.y));
             for (int i = 0; i < 20; i++) engine.updateGame(1.0 / 60.0);
-            saveTestScreenshot(engine, new File(dir, "04_night_flashlight_mp9_fade.png"));
+            saveTestScreenshot(engine, new File(dir, "03_nuke_arms_race_hyperbeast.png"));
 
-            // 5. Магазин закупки 3.0 (9 позиций: MP9, Flash, Molotov, Набор сапёра C4)
-            engine.getSettings().timeOfDay = GameSettings.TimeOfDay.DAY;
+            // 4. Обновленная 3D-оружейная 4.0 (9 видов оружия включая Zeus x27 + 6 коллекций скинов)
+            engine.setCurrentScreen(Engine.AppScreen.SKIN_ARMORY);
+            for (int i = 0; i < 15; i++) engine.updateGame(1.0 / 60.0);
+            saveTestScreenshot(engine, new File(dir, "04_skin_armory_v4.png"));
+
+            // 5. Двухкомандная таблица счета Tab (Отряд Спецназа CT со звездой MVP vs Террористы T) на Dust II
+            engine.getSettings().mapTheme = GameSettings.MapTheme.DUST_II;
+            engine.getSettings().gameMode = GameSettings.GameMode.BOMB_DEFUSAL;
             engine.getSettings().weaponSkin = GameSettings.WeaponSkin.STANDARD;
-            if (player.isFlashlightOn()) player.toggleFlashlight();
+            engine.launchMatchFromMenu();
+            player.addMvpStar();
             for (int i = 0; i < 10; i++) engine.updateGame(1.0 / 60.0);
-            engine.setBuyMenuOpen(true);
-            saveTestScreenshot(engine, new File(dir, "05_buy_menu_v3.png"));
-            engine.setBuyMenuOpen(false);
+            engine.setScoreTabHeld(true);
+            saveTestScreenshot(engine, new File(dir, "05_scoreboard_two_teams.png"));
+            engine.setScoreTabHeld(false);
+
+            // Проверка механики Wallbang (прострел двойных дверей Dust II из AWP)!
+            player.equipPurchasedWeapon(Weapon.Type.AWP);
+            for (int i = 0; i < 20; i++) engine.updateGame(1.0 / 60.0);
+            Bot wbTarget = null;
+            for (Bot b : engine.getBots()) {
+                if (!b.isAlly()) { wbTarget = b; break; }
+            }
+            if (wbTarget != null) {
+                player.getPosition().set(-1.5, 0.0, -3.5);
+                wbTarget.getPosition().set(-1.5, 0.0, 2.8);
+                int hpBefore = wbTarget.getHealth();
+                Vec3 dirWb = wbTarget.getPosition().add(0, 1.2, 0).sub(player.getEyePosition()).normalize();
+                player.setAngles(Math.atan2(dirWb.x, dirWb.z), Math.asin(dirWb.y));
+                player.getCurrentWeapon().toggleSecondaryAction();
+                engine.tryFireCurrentWeapon(false);
+                if (wbTarget.getHealth() >= hpBefore && wbTarget.isAlive()) {
+                    throw new IllegalStateException("AWP must penetrate Dust II wooden/metal Mid Double Doors (Wallbang)!");
+                }
+            }
 
             // Проверка механики CS2: Дымовая шашка тушит огонь Молотова!
             engine.getFireZones().clear();
@@ -171,7 +202,7 @@ public class Main {
                 throw new IllegalStateException("Smoke cloud must block bot line of sight!");
             }
 
-            // Бенчмарк рендера 854x480 HD -> 1280x720 со всеми тенями и облаками
+            // Бенчмарк рендера 854x480 HD -> 1280x720 со всеми тенями, картами и союзниками CT
             BufferedImage benchImg = new BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
             Graphics2D bg = benchImg.createGraphics();
             engine.startNewMatch();
@@ -185,7 +216,7 @@ public class Main {
             bg.dispose();
             engine.stop();
 
-            System.out.printf("CS-2 JAVA 3.0 SELF-TEST PASSED! %d HD frames rendered in %d ms (%.1f FPS avg)%n",
+            System.out.printf("CS-2 JAVA 4.0 SELF-TEST PASSED! %d HD frames rendered in %d ms (%.1f FPS avg)%n",
                     benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs));
         } catch (Exception ex) {
             ex.printStackTrace();
