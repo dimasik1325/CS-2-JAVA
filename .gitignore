@@ -4,6 +4,7 @@ lib/*.jar
 *.class
 *.zip
 CS-2-JAVA.jar
+settings.properties
 
 # Системные и IDE-файлы
 .idea/

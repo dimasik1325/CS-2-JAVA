@@ -1,6 +1,9 @@
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Graphics2D;
+import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -10,8 +13,8 @@ import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
 /**
- * Точка входа в игру CS-2 JAVA.
- * Запускает графическое окно и игровой движок Engine.
+ * Точка входа в игру CS-2 JAVA 2.0 (Source 2 Tactical Edition).
+ * Управляет окном JFrame, полноэкранным режимом F11 и запуском игрового движка Engine.
  */
 public class Main {
 
@@ -22,24 +25,52 @@ public class Main {
             return;
         }
 
-        // Отключаем масштабирование UI там, где требуется точный захват мыши Robot
         System.setProperty("sun.java2d.uiScale", "1.0");
 
         SwingUtilities.invokeLater(() -> {
-            JFrame frame = new JFrame("CS-2 JAVA | Dust II Tactical 3D Arena");
+            final JFrame frame = new JFrame("CS-2 JAVA 2.0 | Dust II Source 2 Edition");
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
             frame.getContentPane().setBackground(Color.BLACK);
 
-            Engine engine = new Engine(false);
+            final Engine engine = new Engine(false);
             frame.add(engine, BorderLayout.CENTER);
             frame.pack();
-            frame.setMinimumSize(new java.awt.Dimension(960, 540));
+            frame.setMinimumSize(new Dimension(960, 540));
             frame.setLocationRelativeTo(null);
+
+            engine.setFullscreenListener(fullscreen -> SwingUtilities.invokeLater(() -> {
+                GraphicsDevice gd = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
+                frame.dispose();
+                if (fullscreen) {
+                    frame.setUndecorated(true);
+                    frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+                    if (gd.isFullScreenSupported()) {
+                        try {
+                            gd.setFullScreenWindow(frame);
+                        } catch (Throwable ignored) {
+                            frame.setVisible(true);
+                        }
+                    } else {
+                        frame.setVisible(true);
+                    }
+                } else {
+                    if (gd.getFullScreenWindow() == frame) {
+                        gd.setFullScreenWindow(null);
+                    }
+                    frame.setUndecorated(false);
+                    frame.setExtendedState(JFrame.NORMAL);
+                    frame.setSize(Engine.DEFAULT_WINDOW_WIDTH, Engine.DEFAULT_WINDOW_HEIGHT);
+                    frame.setLocationRelativeTo(null);
+                    frame.setVisible(true);
+                }
+                engine.requestFocusInWindow();
+            }));
 
             frame.addWindowListener(new WindowAdapter() {
                 @Override
                 public void windowClosing(WindowEvent e) {
+                    engine.getSettings().save();
                     engine.stop();
                     frame.dispose();
                     System.exit(0);
@@ -53,82 +84,68 @@ public class Main {
     }
 
     /**
-     * Автономная проверка физики, коллизий, стрельбы, ИИ ботов, смены раундов и 3D-рендера.
+     * Полная автономная проверка всех новых режимов: Главное меню, Настройки графики,
+     * реалистичные солнечные тени, облака, дымовые гранаты CS2, магазин закупки и прицел AWP.
      */
     private static void runHeadlessSelfTest(String outDir) {
         try {
             File dir = new File(outDir);
-            if (!dir.exists()) {
-                dir.mkdirs();
-            }
+            if (!dir.exists()) dir.mkdirs();
 
             Engine engine = new Engine(true);
             Player player = engine.getPlayer();
 
-            // 1. Проверка старта и рендера вида с AK-47 на спавне CT (вид на Двойные двери Мида)
-            for (int i = 0; i < 30; i++) {
-                engine.updateGame(1.0 / 60.0);
-            }
-            saveTestScreenshot(engine, new File(dir, "01_spawn_ak47.png"));
-
-            // 2. Перемещение к центру Мида, сближение с ботами, проверка Glock-18 и Ножа
-            player.getPosition().set(0.0, 0.0, -3.2);
-            player.setAngles(0.0, -0.02);
-            for (int i = 0; i < 90; i++) {
-                engine.updateGame(1.0 / 60.0);
-            }
-
-            // Наводим камеру на ближайшего живого бота и делаем выстрел из AK-47 (вспышка + трассер)
-            Bot target = engine.getBots().get(0);
-            target.getPosition().set(0.2, 0.0, 5.2);
-            engine.updateGame(1.0 / 60.0);
-            Vec3 toBot = target.getPosition().add(0.0, 1.35, 0.0).sub(player.getEyePosition()).normalize();
-            double aimYaw = Math.atan2(toBot.x, toBot.z);
-            double aimPitch = Math.asin(toBot.y);
-            player.setAngles(aimYaw, aimPitch);
-            engine.tryFireCurrentWeapon();
-            saveTestScreenshot(engine, new File(dir, "02_combat_ak47_fire.png"));
-
-            // 3. Смена оружия на Glock-18 (слот 2) на фоне Плента A
-            player.selectWeaponSlot(1);
-            player.getPosition().set(15.2, 0.0, 6.2);
-            player.setAngles(0.28, 0.03);
+            // 1. Главное меню с живой 3D-камерой над ареной Dust II
+            engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
             for (int i = 0; i < 35; i++) {
                 engine.updateGame(1.0 / 60.0);
             }
-            saveTestScreenshot(engine, new File(dir, "03_asite_glock18.png"));
+            saveTestScreenshot(engine, new File(dir, "01_main_menu.png"));
 
-            // 4. Смена оружия на Боевой нож (слот 3)
-            player.selectWeaponSlot(2);
-            for (int i = 0; i < 25; i++) {
-                engine.updateGame(1.0 / 60.0);
+            // 2. Экран Настроек Графики
+            engine.openSettingsScreen(false, 0);
+            saveTestScreenshot(engine, new File(dir, "02_graphics_settings.png"));
+
+            // 3. Вход в матч: реалистичные тени на песке, облака, дым CS2 и выстрел из AK-47 с гильзами
+            engine.launchMatchFromMenu();
+            player.getPosition().set(-1.2, 0.0, -7.2);
+            player.setAngles(0.06, -0.03);
+            engine.getSmokeClouds().add(new Vec3.SmokeCloud(new Vec3(-4.2, 0.2, -1.8), 3.4, 12.0));
+            Bot target = engine.getBots().get(0);
+            target.getPosition().set(0.1, 0.0, 4.8);
+            engine.updateGame(1.0 / 60.0);
+            Vec3 toBot = target.getPosition().add(0.0, 1.32, 0.0).sub(player.getEyePosition()).normalize();
+            player.setAngles(Math.atan2(toBot.x, toBot.z), Math.asin(toBot.y));
+            engine.tryFireCurrentWeapon(false);
+            saveTestScreenshot(engine, new File(dir, "03_combat_shadows_smoke.png"));
+
+            // 4. Золотой закат + покупка AWP + оптический снайперский прицел ПКМ
+            engine.getSettings().timeOfDay = GameSettings.TimeOfDay.SUNSET;
+            player.addMoney(8000);
+            player.equipPurchasedWeapon(Weapon.Type.AWP);
+            for (int i = 0; i < 20; i++) engine.updateGame(1.0 / 60.0);
+            player.getCurrentWeapon().toggleSecondaryAction();
+            saveTestScreenshot(engine, new File(dir, "04_awp_scope_sunset.png"));
+
+            // 5. Магазин закупки CS2 [B] + пистолет Desert Eagle в руках (Полдень)
+            engine.getSettings().timeOfDay = GameSettings.TimeOfDay.DAY;
+            player.equipPurchasedWeapon(Weapon.Type.DEAGLE);
+            for (int i = 0; i < 20; i++) engine.updateGame(1.0 / 60.0);
+            engine.setBuyMenuOpen(true);
+            saveTestScreenshot(engine, new File(dir, "05_buy_menu_deagle.png"));
+            engine.setBuyMenuOpen(false);
+
+            // Проверка блокировки обзора дымом (Smoke LOS check)
+            Vec3 a = new Vec3(0, 1.5, -6);
+            Vec3 b = new Vec3(0, 1.5, 6);
+            engine.getSmokeClouds().clear();
+            engine.getSmokeClouds().add(new Vec3.SmokeCloud(new Vec3(0, 0.5, 0), 4.0, 12.0));
+            engine.updateGame(0.8);
+            if (engine.getMap().hasLineOfSight(a, b, engine.getSmokeClouds())) {
+                throw new IllegalStateException("Smoke cloud must block bot line of sight!");
             }
-            engine.tryFireCurrentWeapon();
-            engine.updateGame(0.08);
-            saveTestScreenshot(engine, new File(dir, "04_knife_slash.png"));
 
-            // 5. Проверка прохождения раундов до экрана ПОБЕДЫ
-            player.selectWeaponSlot(0);
-            for (int round = 0; round < Engine.ROUNDS_TO_WIN_MATCH; round++) {
-                for (Bot b : engine.getBots()) {
-                    if (b.isAlive()) {
-                        b.takeDamage(200, player.getPosition());
-                        player.recordKill(true);
-                        player.recordShot(true);
-                    }
-                }
-                engine.updateGame(1.0 / 60.0);
-                if (engine.getMatchState() == Engine.MatchState.ROUND_OVER) {
-                    engine.updateGame(4.0);
-                }
-            }
-            saveTestScreenshot(engine, new File(dir, "05_victory_screen.png"));
-
-            if (engine.getMatchState() != Engine.MatchState.MATCH_VICTORY) {
-                throw new IllegalStateException("Expected MATCH_VICTORY, got: " + engine.getMatchState());
-            }
-
-            // Замер скорости рендера кадра 1280x720
+            // Бенчмарк рендера 854x480 HD -> 1280x720 со всеми тенями и облаками
             BufferedImage benchImg = new BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
             Graphics2D bg = benchImg.createGraphics();
             engine.startNewMatch();
@@ -142,7 +159,7 @@ public class Main {
             bg.dispose();
             engine.stop();
 
-            System.out.printf("SELF-TEST PASSED! Rendered %d full 3D+HUD frames in %d ms (%.1f FPS avg)%n",
+            System.out.printf("CS-2 JAVA 2.0 SELF-TEST PASSED! %d HD frames rendered in %d ms (%.1f FPS avg)%n",
                     benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs));
         } catch (Exception ex) {
             ex.printStackTrace();

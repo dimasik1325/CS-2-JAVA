@@ -2,11 +2,10 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Противник под управлением ИИ (Бот):
- * - Патрулирует вейпоинты арены Dust 2
- * - Обнаруживает игрока по прямой видимости (LOS) и звуку выстрелов
- * - Сближается, маневрирует стрейфами и ведет ответный огонь очередями
- * - Имеет раздельные хитбоксы головы (Headshot) и корпуса, индикацию попадания и 3D-анимацию смерти
+ * Тактический ИИ-противник (Бот) CS-2 JAVA 2.0:
+ * - Поддержка 3 уровней сложности (Новичок / Спецназ / Global Elite)
+ * - Слепота сквозь облака дымовых гранат CS2 и учет глушителя M4A1-S
+ * - Детализированная составная 3D-модель с рюкзаком, разгрузкой, хитбоксами головы/тела и анимацией смерти
  */
 public class Bot {
 
@@ -46,7 +45,6 @@ public class Bot {
     private static final double HEIGHT = 1.78;
     private static final double EYE_HEIGHT = 1.58;
     private static final double PATROL_SPEED = 3.25;
-    private static final double COMBAT_SPEED = 4.25;
     private static final double GRAVITY = 20.0;
 
     private final String name;
@@ -65,14 +63,12 @@ public class Bot {
     private double stuckTimer = 0.0;
     private final Vec3 lastProgressPos = new Vec3();
 
-    // Боевые таймеры
     private double reactionTimer = 0.35;
     private double fireCooldown = 0.45;
     private int burstRemaining = 3;
     private double strafeDir = 1.0;
     private double strafeSwitchTimer = 1.4;
 
-    // Визуальная анимация и индикация урона/смерти
     private double walkPhase = 0.0;
     private double hitFlashTimer = 0.0;
     private double muzzleFlashTimer = 0.0;
@@ -96,7 +92,7 @@ public class Bot {
         this.currentWaypointIndex = initialWaypoint;
         this.searchTimer = 0.0;
         this.stuckTimer = 0.0;
-        this.reactionTimer = 0.38;
+        this.reactionTimer = 0.35;
         this.fireCooldown = 0.45 + rng.nextDouble() * 0.35;
         this.burstRemaining = 3;
         this.strafeDir = rng.nextBoolean() ? 1.0 : -1.0;
@@ -107,23 +103,18 @@ public class Bot {
         this.deathAnimProgress = 0.0;
     }
 
-    /**
-     * Оповещает бота о громком выстреле игрока поблизости.
-     */
-    public void notifyPlayerGunshot(Vec3 shotPos) {
+    public void notifyPlayerGunshot(Vec3 shotPos, boolean silenced) {
         if (!alive) return;
-        double dist = position.dist(shotPos);
-        if (dist < 23.0 && state == State.PATROL) {
+        double hearRadius = silenced ? 6.5 : 24.0;
+        if (position.dist(shotPos) < hearRadius && state == State.PATROL) {
             lastSeenPlayerPos.set(shotPos);
             state = State.SEARCH;
-            searchTimer = 5.0;
+            searchTimer = 5.2;
         }
     }
 
-    /**
-     * Обновляет ИИ бота, передвижение и стрельбу. Возвращает событие выстрела, если бот выстрелил в этом кадре.
-     */
-    public ShotEvent update(double dt, Map map, Player player, List<Bot> allBots) {
+    public ShotEvent update(double dt, Map map, Player player, List<Bot> allBots,
+                            List<Vec3.SmokeCloud> smokes, GameSettings.BotDifficulty difficulty) {
         if (hitFlashTimer > 0.0) hitFlashTimer = Math.max(0.0, hitFlashTimer - dt);
         if (muzzleFlashTimer > 0.0) muzzleFlashTimer = Math.max(0.0, muzzleFlashTimer - dt);
         if (healthBarTimer > 0.0) healthBarTimer = Math.max(0.0, healthBarTimer - dt);
@@ -136,12 +127,12 @@ public class Bot {
             return null;
         }
 
-        boolean seesPlayer = canSeePlayer(map, player);
+        boolean seesPlayer = canSeePlayer(map, player, smokes);
         if (seesPlayer) {
             lastSeenPlayerPos.set(player.getPosition());
             if (state != State.ENGAGE) {
                 state = State.ENGAGE;
-                reactionTimer = 0.30 + rng.nextDouble() * 0.18;
+                reactionTimer = difficulty.reactionDelay + rng.nextDouble() * 0.14;
             }
             searchTimer = 5.5;
         } else if (state == State.ENGAGE) {
@@ -151,12 +142,13 @@ public class Bot {
         ShotEvent shotEvent = null;
         double moveX = 0.0;
         double moveZ = 0.0;
+        double combatSpeed = difficulty.combatSpeed;
 
         if (state == State.ENGAGE && player.isAlive()) {
             double dx = player.getPosition().x - position.x;
             double dz = player.getPosition().z - position.z;
             double targetYaw = Math.atan2(dx, dz);
-            yaw = turnSmoothly(yaw, targetYaw, dt * 7.2);
+            yaw = turnSmoothly(yaw, targetYaw, dt * 7.8);
 
             double distXZ = Math.sqrt(dx * dx + dz * dz);
             double dirX = distXZ > 1e-4 ? dx / distXZ : 0.0;
@@ -165,21 +157,21 @@ public class Bot {
             strafeSwitchTimer -= dt;
             if (strafeSwitchTimer <= 0.0) {
                 strafeDir = -strafeDir;
-                strafeSwitchTimer = 1.0 + rng.nextDouble() * 1.4;
+                strafeSwitchTimer = 0.9 + rng.nextDouble() * 1.4;
             }
 
             double rightX = dirZ;
             double rightZ = -dirX;
 
             if (distXZ > 13.5) {
-                moveX = (dirX * 0.88 + rightX * strafeDir * 0.32) * COMBAT_SPEED;
-                moveZ = (dirZ * 0.88 + rightZ * strafeDir * 0.32) * COMBAT_SPEED;
+                moveX = (dirX * 0.88 + rightX * strafeDir * 0.34) * combatSpeed;
+                moveZ = (dirZ * 0.88 + rightZ * strafeDir * 0.34) * combatSpeed;
             } else if (distXZ < 4.2) {
-                moveX = (-dirX * 0.65 + rightX * strafeDir * 0.75) * COMBAT_SPEED;
-                moveZ = (-dirZ * 0.65 + rightZ * strafeDir * 0.75) * COMBAT_SPEED;
+                moveX = (-dirX * 0.65 + rightX * strafeDir * 0.75) * combatSpeed;
+                moveZ = (-dirZ * 0.65 + rightZ * strafeDir * 0.75) * combatSpeed;
             } else {
-                moveX = rightX * strafeDir * (COMBAT_SPEED * 0.78);
-                moveZ = rightZ * strafeDir * (COMBAT_SPEED * 0.78);
+                moveX = rightX * strafeDir * (combatSpeed * 0.80);
+                moveZ = rightZ * strafeDir * (combatSpeed * 0.80);
             }
 
             if (reactionTimer > 0.0) {
@@ -187,13 +179,13 @@ public class Bot {
             } else {
                 fireCooldown -= dt;
                 if (fireCooldown <= 0.0 && seesPlayer) {
-                    shotEvent = fireAtPlayer(map, player);
+                    shotEvent = fireAtPlayer(map, player, difficulty);
                     burstRemaining--;
                     if (burstRemaining <= 0) {
                         burstRemaining = 2 + rng.nextInt(3);
-                        fireCooldown = 0.68 + rng.nextDouble() * 0.38;
+                        fireCooldown = 0.62 + rng.nextDouble() * 0.36;
                     } else {
-                        fireCooldown = 0.17 + rng.nextDouble() * 0.05;
+                        fireCooldown = 0.16 + rng.nextDouble() * 0.05;
                     }
                 }
             }
@@ -208,11 +200,10 @@ public class Bot {
             } else {
                 double targetYaw = Math.atan2(dx, dz);
                 yaw = turnSmoothly(yaw, targetYaw, dt * 5.2);
-                moveX = (dx / dist) * (COMBAT_SPEED * 0.88);
-                moveZ = (dz / dist) * (COMBAT_SPEED * 0.88);
+                moveX = (dx / dist) * (combatSpeed * 0.88);
+                moveZ = (dz / dist) * (combatSpeed * 0.88);
             }
         } else {
-            // Состояние PATROL
             List<Vec3> wps = map.getPatrolWaypoints();
             if (!wps.isEmpty()) {
                 Vec3 wp = wps.get(currentWaypointIndex % wps.size());
@@ -230,7 +221,6 @@ public class Bot {
             }
         }
 
-        // Отталкивание ботов друг от друга, чтобы не слипались в проходах
         for (int i = 0; i < allBots.size(); i++) {
             Bot other = allBots.get(i);
             if (other == this || !other.alive) continue;
@@ -255,17 +245,12 @@ public class Bot {
             walkPhase += dt * Math.sqrt(speedSq) * 2.1;
         }
 
-        // Анти-застревание при патрулировании/поиске
         stuckTimer += dt;
         if (stuckTimer >= 1.1) {
             if (speedSq > 1.0 && position.distXZ(lastProgressPos) < 0.22) {
                 strafeDir = -strafeDir;
-                if (state == State.PATROL) {
-                    pickNextWaypoint(map.getPatrolWaypoints());
-                } else if (state == State.SEARCH) {
-                    state = State.PATROL;
-                    pickNextWaypoint(map.getPatrolWaypoints());
-                }
+                state = State.PATROL;
+                pickNextWaypoint(map.getPatrolWaypoints());
             }
             lastProgressPos.set(position);
             stuckTimer = 0.0;
@@ -290,15 +275,15 @@ public class Bot {
         currentWaypointIndex = bestIdx;
     }
 
-    private boolean canSeePlayer(Map map, Player player) {
+    private boolean canSeePlayer(Map map, Player player, List<Vec3.SmokeCloud> smokes) {
         if (!player.isAlive()) return false;
         Vec3 eye = getEyePosition();
         Vec3 targetEye = player.getEyePosition();
         double dist = eye.dist(targetEye);
-        if (dist > 41.0) return false;
+        if (dist > 42.0) return false;
 
-        // Проверка угла обзора бота (вблизи чувствует на 360 градусов)
-        if (dist > 7.5 && state == State.PATROL) {
+        double closeHearDist = player.isSilentWalking() ? 3.2 : 7.5;
+        if (dist > closeHearDist && state == State.PATROL) {
             Vec3 toPlayer = targetEye.sub(eye).normalize();
             Vec3 forward = new Vec3(Math.sin(yaw), 0.0, Math.cos(yaw));
             if (forward.dot(new Vec3(toPlayer.x, 0.0, toPlayer.z).normalize()) < -0.18) {
@@ -306,34 +291,30 @@ public class Bot {
             }
         }
 
-        if (map.hasLineOfSight(eye, targetEye)) {
-            return true;
-        }
-        return map.hasLineOfSight(eye, player.getCenterTargetPosition());
+        if (map.hasLineOfSight(eye, targetEye, smokes)) return true;
+        return map.hasLineOfSight(eye, player.getCenterTargetPosition(), smokes);
     }
 
-    private ShotEvent fireAtPlayer(Map map, Player player) {
+    private ShotEvent fireAtPlayer(Map map, Player player, GameSettings.BotDifficulty difficulty) {
         muzzleFlashTimer = 0.075;
         Vec3 muzzle = getMuzzleWorldPosition();
         Vec3 aimTarget = player.getCenterTargetPosition();
         Vec3 baseDir = aimTarget.sub(muzzle).normalize();
 
-        // Реалистичный разброс стрельбы бота (увеличивается на дистанции и если игрок сидит/двигается)
-        double spread = 0.048;
-        if (player.isCrouching()) spread += 0.018;
-        if (player.getHorizontalSpeed() > 3.5) spread += 0.020;
+        double spread = difficulty.aimSpread;
+        if (player.isCrouching()) spread += 0.016;
+        if (player.getHorizontalSpeed() > 3.5) spread += 0.018;
 
         Vec3 shotDir = new Vec3(
-            baseDir.x + (rng.nextGaussian()) * spread,
-            baseDir.y + (rng.nextGaussian()) * (spread * 0.78),
-            baseDir.z + (rng.nextGaussian()) * spread
+            baseDir.x + rng.nextGaussian() * spread,
+            baseDir.y + rng.nextGaussian() * (spread * 0.78),
+            baseDir.z + rng.nextGaussian() * spread
         ).normalize();
 
-        Vec3.RayHit wallHit = map.raycast(muzzle, shotDir, 70.0);
-        double maxDist = (wallHit != null) ? wallHit.distance : 70.0;
-        Vec3 endPos = (wallHit != null) ? wallHit.point : muzzle.add(shotDir.scale(70.0));
+        Vec3.RayHit wallHit = map.raycast(muzzle, shotDir, 72.0);
+        double maxDist = (wallHit != null) ? wallHit.distance : 72.0;
+        Vec3 endPos = (wallHit != null) ? wallHit.point : muzzle.add(shotDir.scale(72.0));
 
-        // Проверка пересечения луча выстрела бота с AABB игрока
         Vec3 pPos = player.getPosition();
         double pH = player.getCurrentBodyHeight();
         Vec3.Box playerBox = new Vec3.Box(
@@ -344,7 +325,7 @@ public class Bot {
         double tPlayer = playerBox.intersectRay(muzzle, shotDir, maxDist, null);
         if (tPlayer >= 0.0 && tPlayer < maxDist) {
             Vec3 hitPt = muzzle.add(shotDir.scale(tPlayer));
-            int dmg = 11 + rng.nextInt(6);
+            int dmg = difficulty.baseDamage + rng.nextInt(5);
             return new ShotEvent(muzzle, hitPt, true, dmg);
         }
 
@@ -361,7 +342,6 @@ public class Bot {
             position.z = nz;
             return true;
         }
-        // Подъем на ступеньки платформ (Плент A)
         for (double step = 0.12; step <= 0.34; step += 0.10) {
             if (!map.collides(nx, position.y + step, nz, RADIUS, HEIGHT)) {
                 position.x = nx;
@@ -370,9 +350,7 @@ public class Bot {
                 return true;
             }
         }
-        if (state == State.ENGAGE) {
-            strafeDir = -strafeDir;
-        }
+        if (state == State.ENGAGE) strafeDir = -strafeDir;
         return false;
     }
 
@@ -390,9 +368,6 @@ public class Bot {
         }
     }
 
-    /**
-     * Проверяет попадание луча выстрела игрока в хитбоксы головы и тела бота.
-     */
     public HitResult intersectShotRay(Vec3 origin, Vec3 dir, double maxDist) {
         if (!alive) return null;
 
@@ -441,24 +416,21 @@ public class Bot {
         return false;
     }
 
-    /**
-     * Отрисовка составной 3D-модели бота (ноги, торс в бронежилете, руки, голова в балаклаве, автомат и вспышка).
-     */
     public void render(Renderer3D r) {
         boolean flashing = hitFlashTimer > 0.0 && alive;
 
         int pantsColor = flashing ? 0xFF5555 : 0x3D4652;
         int bootsColor = flashing ? 0xFF4444 : 0x1E2126;
         int shirtColor = flashing ? 0xFF7070 : 0xB88B58;
-        int vestColor  = flashing ? 0xFF3B3B : 0x2F362B;
+        int vestColor  = flashing ? 0xFF3B3B : 0x2D3529;
+        int packColor  = flashing ? 0xFF4A4A : 0x4C3D2D;
         int skinColor  = flashing ? 0xFF9090 : 0xD2A079;
         int maskColor  = flashing ? 0xFF4848 : 0x292423;
-        int bandColor  = flashing ? 0xFFAAAA : 0x9E2A25;
+        int bandColor  = flashing ? 0xFFAAAA : 0xA82822;
         int gunColor   = 0x24282E;
         int gunWood    = 0x8B4A22;
 
         if (!alive) {
-            // 3D-анимация падения убитого противника на песок
             double fallAngle = deathAnimProgress * (Math.PI * 0.48);
             double sinF = Math.sin(fallAngle);
             double cosF = Math.cos(fallAngle);
@@ -468,7 +440,6 @@ public class Bot {
             drawPartFallen(r, 0.0, 0.42,  0.14, 0.18, 0.72, 0.19, fallAngle, sinF, cosF, baseY, pantsColor);
             drawPartFallen(r, 0.0, 1.04,  0.00, 0.30, 0.62, 0.46, fallAngle, sinF, cosF, baseY, vestColor);
             drawPartFallen(r, 0.0, 1.54,  0.00, 0.30, 0.32, 0.30, fallAngle, sinF, cosF, baseY, maskColor);
-            // Упавший рядом автомат
             double gx = position.x + Math.cos(yaw) * 0.45;
             double gz = position.z - Math.sin(yaw) * 0.45;
             r.drawOrientedWorldBox(gx, position.y + 0.06, gz, 0.08, 0.10, 0.68, yaw + 0.5, 0.0, Renderer3D.TEX_SOLID, gunColor);
@@ -481,47 +452,31 @@ public class Bot {
         double rightX = cosY;
         double rightZ = -sinY;
 
-        double bx = position.x;
-        double by = position.y;
-        double bz = position.z;
+        double bx = position.x, by = position.y, bz = position.z;
 
-        // Левая и правая ноги с анимацией шага
-        r.drawOrientedWorldBox(bx - rightX * 0.14, by + 0.38, bz - rightZ * 0.14,
-                0.18, 0.74, 0.20, yaw, legSwing, Renderer3D.TEX_SOLID, pantsColor);
-        r.drawOrientedWorldBox(bx + rightX * 0.14, by + 0.38, bz + rightZ * 0.14,
-                0.18, 0.74, 0.20, yaw, -legSwing, Renderer3D.TEX_SOLID, pantsColor);
+        r.drawOrientedWorldBox(bx - rightX * 0.14, by + 0.38, bz - rightZ * 0.14, 0.18, 0.74, 0.20, yaw, legSwing, Renderer3D.TEX_SOLID, pantsColor);
+        r.drawOrientedWorldBox(bx + rightX * 0.14, by + 0.38, bz + rightZ * 0.14, 0.18, 0.74, 0.20, yaw, -legSwing, Renderer3D.TEX_SOLID, pantsColor);
+        r.drawOrientedWorldBox(bx - rightX * 0.14, by + 0.08, bz - rightZ * 0.14, 0.19, 0.16, 0.26, yaw, legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
+        r.drawOrientedWorldBox(bx + rightX * 0.14, by + 0.08, bz + rightZ * 0.14, 0.19, 0.16, 0.26, yaw, -legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
 
-        // Ботинки
-        r.drawOrientedWorldBox(bx - rightX * 0.14, by + 0.08, bz - rightZ * 0.14,
-                0.19, 0.16, 0.26, yaw, legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
-        r.drawOrientedWorldBox(bx + rightX * 0.14, by + 0.08, bz + rightZ * 0.14,
-                0.19, 0.16, 0.26, yaw, -legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
-
-        // Торс и тактический жилет
+        // Торс, разгрузка и тактический рюкзак за спиной
         r.drawOrientedWorldBox(bx, by + 1.06, bz, 0.46, 0.64, 0.28, yaw, 0.0, Renderer3D.TEX_SOLID, shirtColor);
         r.drawOrientedWorldBox(bx, by + 1.08, bz, 0.48, 0.48, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, vestColor);
+        r.drawOrientedWorldBox(bx - sinY * 0.20, by + 1.10, bz - cosY * 0.20, 0.32, 0.38, 0.15, yaw, 0.0, Renderer3D.TEX_SOLID, packColor);
 
-        // Плечи и руки, удерживающие винтовку
-        r.drawOrientedWorldBox(bx - rightX * 0.29 + sinY * 0.14, by + 1.16, bz - rightZ * 0.29 + cosY * 0.14,
-                0.15, 0.22, 0.42, yaw + 0.18, 0.0, Renderer3D.TEX_SOLID, shirtColor);
-        r.drawOrientedWorldBox(bx + rightX * 0.27 + sinY * 0.15, by + 1.14, bz + rightZ * 0.27 + cosY * 0.15,
-                0.15, 0.22, 0.44, yaw - 0.12, 0.0, Renderer3D.TEX_SOLID, shirtColor);
+        r.drawOrientedWorldBox(bx - rightX * 0.29 + sinY * 0.14, by + 1.16, bz - rightZ * 0.29 + cosY * 0.14, 0.15, 0.22, 0.42, yaw + 0.18, 0.0, Renderer3D.TEX_SOLID, shirtColor);
+        r.drawOrientedWorldBox(bx + rightX * 0.27 + sinY * 0.15, by + 1.14, bz + rightZ * 0.27 + cosY * 0.15, 0.15, 0.22, 0.44, yaw - 0.12, 0.0, Renderer3D.TEX_SOLID, shirtColor);
 
-        // Голова, балаклава и красная повязка противника (хорошо читаемый силуэт на фоне песка!)
         r.drawOrientedWorldBox(bx, by + 1.57, bz, 0.31, 0.34, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, maskColor);
         r.drawOrientedWorldBox(bx + sinY * 0.14, by + 1.58, bz + cosY * 0.14, 0.24, 0.10, 0.06, yaw, 0.0, Renderer3D.TEX_SOLID, skinColor);
         r.drawOrientedWorldBox(bx, by + 1.67, bz, 0.33, 0.08, 0.33, yaw, 0.0, Renderer3D.TEX_SOLID, bandColor);
 
-        // Винтовка AK в руках бота
         double gunCenterX = bx + rightX * 0.15 + sinY * 0.36;
         double gunCenterY = by + 1.15;
         double gunCenterZ = bz + rightZ * 0.15 + cosY * 0.36;
-        r.drawOrientedWorldBox(gunCenterX, gunCenterY, gunCenterZ,
-                0.07, 0.11, 0.68, yaw, 0.0, Renderer3D.TEX_SOLID, gunColor);
-        r.drawOrientedWorldBox(gunCenterX - sinY * 0.16, gunCenterY - 0.02, gunCenterZ - cosY * 0.16,
-                0.08, 0.10, 0.24, yaw, 0.0, Renderer3D.TEX_SOLID, gunWood);
+        r.drawOrientedWorldBox(gunCenterX, gunCenterY, gunCenterZ, 0.07, 0.11, 0.68, yaw, 0.0, Renderer3D.TEX_SOLID, gunColor);
+        r.drawOrientedWorldBox(gunCenterX - sinY * 0.16, gunCenterY - 0.02, gunCenterZ - cosY * 0.16, 0.08, 0.10, 0.24, yaw, 0.0, Renderer3D.TEX_SOLID, gunWood);
 
-        // Вспышка выстрела на стволе бота
         if (muzzleFlashTimer > 0.0) {
             Vec3 muz = getMuzzleWorldPosition();
             r.drawOrientedWorldBox(muz.x, muz.y, muz.z, 0.24, 0.24, 0.24, yaw, 0.4, Renderer3D.TEX_SOLID, 0xFFCA3A);
@@ -533,17 +488,12 @@ public class Bot {
                                 double fallAngle, double sinF, double cosF, double baseY, int color) {
         double sinY = Math.sin(yaw);
         double cosY = Math.cos(yaw);
-        double rightX = cosY;
-        double rightZ = -sinY;
-
-        // Падение назад вдоль направления -forward
+        double rightX = cosY, rightZ = -sinY;
         double localY = heightOffset * cosF;
         double backDist = -heightOffset * sinF;
-
         double wx = position.x + rightX * (sideOffset + zOffset) + sinY * backDist;
         double wy = baseY + Math.max(0.08, localY);
         double wz = position.z + rightZ * (sideOffset + zOffset) + cosY * backDist;
-
         r.drawOrientedWorldBox(wx, wy, wz, sz, sy, sx, yaw, -fallAngle, Renderer3D.TEX_SOLID, color);
     }
 
@@ -551,22 +501,15 @@ public class Bot {
         double diff = target - current;
         while (diff > Math.PI) diff -= Math.PI * 2.0;
         while (diff < -Math.PI) diff += Math.PI * 2.0;
-        if (Math.abs(diff) <= maxDelta) {
-            return target;
-        }
+        if (Math.abs(diff) <= maxDelta) return target;
         return current + Math.copySign(maxDelta, diff);
     }
 
     public Vec3 getPosition() { return position; }
     public Vec3 getEyePosition() { return new Vec3(position.x, position.y + EYE_HEIGHT, position.z); }
     public Vec3 getMuzzleWorldPosition() {
-        double sinY = Math.sin(yaw);
-        double cosY = Math.cos(yaw);
-        return new Vec3(
-            position.x + cosY * 0.15 + sinY * 0.72,
-            position.y + 1.16,
-            position.z - sinY * 0.15 + cosY * 0.72
-        );
+        double sinY = Math.sin(yaw), cosY = Math.cos(yaw);
+        return new Vec3(position.x + cosY * 0.15 + sinY * 0.72, position.y + 1.16, position.z - sinY * 0.15 + cosY * 0.72);
     }
 
     public String getName() { return name; }

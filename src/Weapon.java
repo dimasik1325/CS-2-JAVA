@@ -1,23 +1,31 @@
 /**
- * Система вооружения CS-2 JAVA:
- * 1 — Винтовка AK-47 (автоматический огонь, высокий урон, отдача)
- * 2 — Пистолет Glock-18 (полуавтоматический, точный, быстрая перезарядка)
- * 3 — Боевой нож (ближний бой, повышенная скорость бега)
- * Включает полноценный 3D-рендеринг оружия в руках от первого лица.
+ * Расширенный арсенал оружия CS-2 JAVA 2.0 (7 видов оружия):
+ * Слот 1 (Основное): AK-47, M4A1-S (с глушителем), AWP (снайперский прицел ПКМ), Дробовик XM1014
+ * Слот 2 (Пистолеты): Glock-18, Desert Eagle (крупнокалиберный хром)
+ * Слот 3 (Ближний бой): Боевой нож (быстрый удар ЛКМ, сильный выпад ПКМ, осмотр на F)
  */
 public class Weapon {
 
     public enum Type {
         AK47,
+        M4A1S,
+        AWP,
+        XM1014,
         GLOCK,
+        DEAGLE,
         KNIFE
     }
 
     private final Type type;
     private final String displayName;
     private final int slotNumber;
+    private final int price;
+    private final int killReward;
     private final boolean automatic;
     private final boolean melee;
+    private final boolean silenced;
+    private final boolean sniperScope;
+    private final int pelletsPerShot;
 
     private final int maxMagAmmo;
     private final int initialReserveAmmo;
@@ -36,12 +44,19 @@ public class Weapon {
     private boolean reloading;
     private double reloadTimer;
 
-    // Визуальные параметры анимации оружия в руках
+    // Прицеливание (ПКМ) и осмотр оружия в руках (клавиша F)
+    private int scopeZoomLevel = 0; // 0 = нет, 1 = зум x2.8, 2 = зум x6 (для AWP)
+    private boolean adsActive = false;
+    private double inspectTimer = 0.0;
+    private static final double INSPECT_DURATION = 2.1;
+
+    // Визуальные параметры анимации оружия
     private double recoilBloom;
     private double recoilKick;
     private double muzzleFlashTimer;
     private double equipProgress;
     private double slashTimer;
+    private boolean heavySlash;
 
     public Weapon(Type type) {
         this.type = type;
@@ -49,27 +64,126 @@ public class Weapon {
             case AK47:
                 this.displayName = "AK-47";
                 this.slotNumber = 1;
+                this.price = 2700;
+                this.killReward = 300;
                 this.automatic = true;
                 this.melee = false;
+                this.silenced = false;
+                this.sniperScope = false;
+                this.pelletsPerShot = 1;
                 this.maxMagAmmo = 30;
                 this.initialReserveAmmo = 90;
                 this.fireInterval = 0.10;
                 this.reloadDuration = 2.15;
                 this.bodyDamage = 36;
                 this.headDamage = 116;
-                this.maxRange = 110.0;
-                this.baseSpread = 0.008;
-                this.recoilPerShot = 0.014;
+                this.maxRange = 115.0;
+                this.baseSpread = 0.0075;
+                this.recoilPerShot = 0.0135;
                 this.moveSpeedMultiplier = 0.92;
                 break;
+
+            case M4A1S:
+                this.displayName = "M4A1-S";
+                this.slotNumber = 1;
+                this.price = 2900;
+                this.killReward = 300;
+                this.automatic = true;
+                this.melee = false;
+                this.silenced = true;
+                this.sniperScope = false;
+                this.pelletsPerShot = 1;
+                this.maxMagAmmo = 20;
+                this.initialReserveAmmo = 80;
+                this.fireInterval = 0.095;
+                this.reloadDuration = 1.95;
+                this.bodyDamage = 33;
+                this.headDamage = 104;
+                this.maxRange = 115.0;
+                this.baseSpread = 0.0042;
+                this.recoilPerShot = 0.0085;
+                this.moveSpeedMultiplier = 0.94;
+                break;
+
+            case AWP:
+                this.displayName = "AWP";
+                this.slotNumber = 1;
+                this.price = 4750;
+                this.killReward = 100;
+                this.automatic = false;
+                this.melee = false;
+                this.silenced = false;
+                this.sniperScope = true;
+                this.pelletsPerShot = 1;
+                this.maxMagAmmo = 5;
+                this.initialReserveAmmo = 30;
+                this.fireInterval = 1.15;
+                this.reloadDuration = 2.85;
+                this.bodyDamage = 148;
+                this.headDamage = 440;
+                this.maxRange = 160.0;
+                this.baseSpread = 0.038; // Без прицела разброс выше, в прицеле ПКМ ~0.0008!
+                this.recoilPerShot = 0.035;
+                this.moveSpeedMultiplier = 0.82;
+                break;
+
+            case XM1014:
+                this.displayName = "XM1014";
+                this.slotNumber = 1;
+                this.price = 2000;
+                this.killReward = 900;
+                this.automatic = true;
+                this.melee = false;
+                this.silenced = false;
+                this.sniperScope = false;
+                this.pelletsPerShot = 8;
+                this.maxMagAmmo = 7;
+                this.initialReserveAmmo = 32;
+                this.fireInterval = 0.34;
+                this.reloadDuration = 2.10;
+                this.bodyDamage = 20;
+                this.headDamage = 52;
+                this.maxRange = 46.0;
+                this.baseSpread = 0.052;
+                this.recoilPerShot = 0.018;
+                this.moveSpeedMultiplier = 0.93;
+                break;
+
+            case DEAGLE:
+                this.displayName = "Desert Eagle";
+                this.slotNumber = 2;
+                this.price = 700;
+                this.killReward = 300;
+                this.automatic = false;
+                this.melee = false;
+                this.silenced = false;
+                this.sniperScope = false;
+                this.pelletsPerShot = 1;
+                this.maxMagAmmo = 7;
+                this.initialReserveAmmo = 35;
+                this.fireInterval = 0.27;
+                this.reloadDuration = 1.85;
+                this.bodyDamage = 58;
+                this.headDamage = 186;
+                this.maxRange = 98.0;
+                this.baseSpread = 0.0055;
+                this.recoilPerShot = 0.026;
+                this.moveSpeedMultiplier = 0.97;
+                break;
+
             case GLOCK:
                 this.displayName = "Glock-18";
                 this.slotNumber = 2;
+                this.price = 200;
+                this.killReward = 300;
                 this.automatic = false;
                 this.melee = false;
+                this.silenced = false;
+                this.sniperScope = false;
+                this.pelletsPerShot = 1;
                 this.maxMagAmmo = 20;
                 this.initialReserveAmmo = 120;
-                this.fireInterval = 0.145;
+                this.fireInterval = 0.14;
                 this.reloadDuration = 1.45;
                 this.bodyDamage = 26;
                 this.headDamage = 82;
@@ -78,22 +192,28 @@ public class Weapon {
                 this.recoilPerShot = 0.009;
                 this.moveSpeedMultiplier = 1.00;
                 break;
+
             case KNIFE:
             default:
                 this.displayName = "Боевой нож";
                 this.slotNumber = 3;
+                this.price = 0;
+                this.killReward = 1500;
                 this.automatic = true;
                 this.melee = true;
+                this.silenced = true;
+                this.sniperScope = false;
+                this.pelletsPerShot = 1;
                 this.maxMagAmmo = 0;
                 this.initialReserveAmmo = 0;
-                this.fireInterval = 0.40;
+                this.fireInterval = 0.38;
                 this.reloadDuration = 0.0;
                 this.bodyDamage = 55;
                 this.headDamage = 95;
-                this.maxRange = 2.65;
+                this.maxRange = 2.68;
                 this.baseSpread = 0.0;
                 this.recoilPerShot = 0.0;
-                this.moveSpeedMultiplier = 1.14;
+                this.moveSpeedMultiplier = 1.15;
                 break;
         }
         resetAmmo();
@@ -110,31 +230,66 @@ public class Weapon {
         this.muzzleFlashTimer = 0.0;
         this.equipProgress = 1.0;
         this.slashTimer = 0.0;
+        this.scopeZoomLevel = 0;
+        this.adsActive = false;
+        this.inspectTimer = 0.0;
+    }
+
+    public void refillReserveAmmo() {
+        this.magAmmo = maxMagAmmo;
+        this.reserveAmmo = initialReserveAmmo;
     }
 
     public void onEquip() {
         this.reloading = false;
         this.reloadTimer = 0.0;
         this.equipProgress = 0.0;
+        this.scopeZoomLevel = 0;
+        this.adsActive = false;
+        this.inspectTimer = 0.0;
         this.fireCooldown = Math.max(this.fireCooldown, 0.16);
     }
 
-    public void update(double dt) {
-        if (fireCooldown > 0.0) {
-            fireCooldown = Math.max(0.0, fireCooldown - dt);
+    public void triggerInspect() {
+        if (!reloading && scopeZoomLevel == 0) {
+            inspectTimer = INSPECT_DURATION;
         }
-        if (muzzleFlashTimer > 0.0) {
-            muzzleFlashTimer = Math.max(0.0, muzzleFlashTimer - dt);
-        }
-        if (slashTimer > 0.0) {
-            slashTimer = Math.max(0.0, slashTimer - dt);
-        }
-        if (equipProgress < 1.0) {
-            equipProgress = Math.min(1.0, equipProgress + dt * 4.8);
-        }
+    }
 
-        recoilBloom = Math.max(0.0, recoilBloom - dt * 0.055);
-        recoilKick = Math.max(0.0, recoilKick - dt * 6.5);
+    public void toggleSecondaryAction() {
+        if (reloading || melee) return;
+        inspectTimer = 0.0;
+        if (sniperScope) {
+            scopeZoomLevel = (scopeZoomLevel + 1) % 3;
+        } else {
+            adsActive = !adsActive;
+        }
+    }
+
+    public void cancelZoom() {
+        scopeZoomLevel = 0;
+        adsActive = false;
+    }
+
+    public double getEffectiveFovFactor() {
+        if (sniperScope) {
+            if (scopeZoomLevel == 1) return 0.34;
+            if (scopeZoomLevel == 2) return 0.15;
+        } else if (adsActive) {
+            return 0.78;
+        }
+        return 1.0;
+    }
+
+    public void update(double dt) {
+        if (fireCooldown > 0.0) fireCooldown = Math.max(0.0, fireCooldown - dt);
+        if (muzzleFlashTimer > 0.0) muzzleFlashTimer = Math.max(0.0, muzzleFlashTimer - dt);
+        if (slashTimer > 0.0) slashTimer = Math.max(0.0, slashTimer - dt);
+        if (inspectTimer > 0.0) inspectTimer = Math.max(0.0, inspectTimer - dt);
+        if (equipProgress < 1.0) equipProgress = Math.min(1.0, equipProgress + dt * 4.8);
+
+        recoilBloom = Math.max(0.0, recoilBloom - dt * 0.058);
+        recoilKick = Math.max(0.0, recoilKick - dt * (type == Type.AWP ? 3.5 : 6.5));
 
         if (reloading) {
             reloadTimer -= dt;
@@ -153,6 +308,8 @@ public class Weapon {
         if (melee || reloading || magAmmo >= maxMagAmmo || reserveAmmo <= 0) {
             return false;
         }
+        cancelZoom();
+        inspectTimer = 0.0;
         reloading = true;
         reloadTimer = reloadDuration;
         return true;
@@ -162,199 +319,273 @@ public class Weapon {
         if (reloading || fireCooldown > 0.0 || equipProgress < 0.75) {
             return false;
         }
-        if (melee) {
-            return true;
-        }
-        return magAmmo > 0;
+        return melee || magAmmo > 0;
     }
 
-    public void onFire() {
-        fireCooldown = fireInterval;
+    public void onFire(boolean altHeavyMelee) {
+        inspectTimer = 0.0;
         if (melee) {
-            slashTimer = 0.28;
-            recoilKick = 0.55;
+            heavySlash = altHeavyMelee;
+            fireCooldown = altHeavyMelee ? 0.68 : fireInterval;
+            slashTimer = altHeavyMelee ? 0.36 : 0.26;
+            recoilKick = altHeavyMelee ? 0.85 : 0.52;
         } else {
+            fireCooldown = fireInterval;
             magAmmo = Math.max(0, magAmmo - 1);
-            recoilBloom = Math.min(0.065, recoilBloom + recoilPerShot);
+            recoilBloom = Math.min(0.075, recoilBloom + recoilPerShot);
             recoilKick = 1.0;
-            muzzleFlashTimer = 0.055;
+            muzzleFlashTimer = silenced ? 0.025 : 0.058;
+            if (sniperScope && magAmmo > 0) {
+                // Как в CS: передергивание продольно-скользящего затвора AWP временно сбрасывает зум
+                scopeZoomLevel = 0;
+            }
         }
     }
 
-    public double computeCurrentSpread(boolean moving, boolean airborne, boolean crouching) {
+    public double computeCurrentSpread(boolean moving, boolean silentWalking, boolean airborne, boolean crouching) {
         if (melee) return 0.0;
-        double spread = baseSpread + recoilBloom;
-        if (moving) spread += (type == Type.AK47 ? 0.022 : 0.010);
-        if (airborne) spread += 0.055;
+        double spread = baseSpread;
+        if (sniperScope && scopeZoomLevel > 0) {
+            spread = (scopeZoomLevel == 2) ? 0.0006 : 0.0014;
+        } else if (adsActive) {
+            spread *= 0.62;
+        }
+        spread += recoilBloom;
+
+        if (moving) {
+            double movePen = (type == Type.AWP) ? 0.065 : (type == Type.XM1014 ? 0.012 : 0.020);
+            if (silentWalking) movePen *= 0.35;
+            spread += movePen;
+        }
+        if (airborne) spread += 0.062;
         if (crouching) spread *= 0.52;
         return spread;
     }
 
-    /**
-     * Возвращает мировую точку дульного среза оружия для красивого старта 3D-трассера.
-     */
-    public Vec3 getMuzzleWorldPosition(Player player) {
+    public Vec3 getMuzzleWorldPosition(Player player, boolean leftHanded) {
         Vec3 eye = player.getEyePosition();
         Vec3 forward = player.getLookDirection();
-        Vec3 right = player.getRightVector();
+        Vec3 right = player.getRightVector().scale(leftHanded ? -1.0 : 1.0);
         double cp = Math.cos(player.getPitch());
         double sp = Math.sin(player.getPitch());
         double sy = Math.sin(player.getYaw());
         double cy = Math.cos(player.getYaw());
         Vec3 camUp = new Vec3(-sy * sp, cp, -cy * sp);
 
-        double forwardDist = (type == Type.AK47) ? 0.76 : 0.55;
-        return eye
-                .add(forward.scale(forwardDist))
-                .add(right.scale(0.21))
-                .add(camUp.scale(-0.15));
+        double forwardDist = (type == Type.AWP || type == Type.M4A1S) ? 0.86 : (slotNumber == 1 ? 0.76 : 0.55);
+        double sideDist = adsActive ? 0.06 : 0.21;
+        return eye.add(forward.scale(forwardDist)).add(right.scale(sideDist)).add(camUp.scale(-0.14));
     }
 
     /**
-     * Отрисовка детализированной 3D-модели оружия в руках игрока + вспышки выстрела.
+     * Рендер 3D-модели оружия от первого лица (скрывается при включенном оптическом прицеле AWP).
      */
     public void renderViewModel(Renderer3D renderer, double walkBobPhase, double walkSpeedNorm,
                                 double swayX, double swayY) {
+        if (sniperScope && scopeZoomLevel > 0) {
+            return;
+        }
+
         double bobX = Math.sin(walkBobPhase) * 0.014 * walkSpeedNorm;
         double bobY = Math.abs(Math.cos(walkBobPhase)) * (-0.013) * walkSpeedNorm;
-        double equipDrop = (1.0 - equipProgress) * 0.24;
+        double equipDrop = (1.0 - equipProgress) * 0.25;
 
-        double rotX = -recoilKick * 0.13;
+        double rotX = -recoilKick * (type == Type.DEAGLE || type == Type.AWP ? 0.22 : 0.13);
         double rotY = -0.07;
         double rotZ = 0.0;
         double reloadDropY = 0.0;
 
+        // Анимация осмотра оружия на клавишу F (как в CS2!)
+        if (inspectTimer > 0.0) {
+            double p = 1.0 - (inspectTimer / INSPECT_DURATION);
+            double s1 = Math.sin(p * Math.PI);
+            double s2 = Math.sin(p * Math.PI * 2.0);
+            rotZ = -0.58 * s1 + 0.22 * s2;
+            rotY = -0.07 + 0.48 * s1;
+            rotX += 0.16 * s1;
+        }
+
         if (reloading && reloadDuration > 0.0) {
             double progress = 1.0 - (reloadTimer / reloadDuration);
             double wave = Math.sin(progress * Math.PI);
-            rotZ = 0.52 * wave;
+            rotZ = 0.54 * wave;
             rotX = 0.28 * wave;
             reloadDropY = -0.10 * wave;
         }
 
-        double ox = 0.23 + bobX + swayX;
-        double oy = -0.22 + bobY + swayY - equipDrop + reloadDropY;
-        double oz = 0.48 - recoilKick * 0.055;
+        double adsShiftX = adsActive ? -0.15 : 0.0;
+        double adsShiftY = adsActive ? 0.058 : 0.0;
+        double adsShiftZ = adsActive ? -0.06 : 0.0;
 
-        if (type == Type.AK47) {
-            renderAk47Model(renderer, ox, oy, oz, rotX, rotY, rotZ);
-        } else if (type == Type.GLOCK) {
-            renderGlockModel(renderer, ox, oy, oz, rotX, rotY, rotZ);
-        } else {
-            renderKnifeModel(renderer, ox, oy, oz);
+        double ox = 0.23 + adsShiftX + bobX + swayX;
+        double oy = -0.22 + adsShiftY + bobY + swayY - equipDrop + reloadDropY;
+        double oz = 0.48 + adsShiftZ - recoilKick * 0.06;
+
+        switch (type) {
+            case AK47:   renderAk47Model(renderer, ox, oy, oz, rotX, rotY, rotZ); break;
+            case M4A1S:  renderM4a1sModel(renderer, ox, oy, oz, rotX, rotY, rotZ); break;
+            case AWP:    renderAwpModel(renderer, ox, oy, oz, rotX, rotY, rotZ); break;
+            case XM1014: renderShotgunModel(renderer, ox, oy, oz, rotX, rotY, rotZ); break;
+            case DEAGLE: renderDeagleModel(renderer, ox, oy, oz, rotX, rotY, rotZ); break;
+            case GLOCK:  renderGlockModel(renderer, ox, oy, oz, rotX, rotY, rotZ); break;
+            case KNIFE:  renderKnifeModel(renderer, ox, oy, oz); break;
         }
     }
 
-    private void renderAk47Model(Renderer3D r, double ox, double oy, double oz,
-                                 double rotX, double rotY, double rotZ) {
-        int wood = 0x9B5326;
-        int darkWood = 0x7B3E1B;
-        int steel = 0x32373E;
-        int darkSteel = 0x20242A;
-        int boltMetal = 0x767E87;
-        int magColor = 0x3C251B;
-        int sleeve = 0x2C3E54;
-        int glove = 0x1E2228;
+    private void renderAk47Model(Renderer3D r, double ox, double oy, double oz, double rotX, double rotY, double rotZ) {
+        int wood = 0x9B5326, darkWood = 0x7B3E1B, steel = 0x32373E, darkSteel = 0x20242A;
+        int boltMetal = 0x767E87, magColor = 0x3C251B, sleeve = 0x2C3E54, glove = 0x1E2228;
 
-        double px = ox, py = oy, pz = oz;
+        r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
+        r.drawViewModelBox(ox - 0.01, oy - 0.05, oz + 0.06, 0.062, 0.055, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
 
-        // Рукава и тактические перчатки спецназа CT
-        r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, sleeve);
-        r.drawViewModelBox(ox - 0.01, oy - 0.05, oz + 0.06, 0.062, 0.055, 0.09, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, glove);
+        r.drawViewModelBox(ox, oy - 0.025, oz - 0.18, 0.046, 0.082, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkWood);
+        r.drawViewModelBox(ox, oy - 0.085, oz - 0.04, 0.040, 0.095, 0.048, rotX + 0.22, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkWood);
+        r.drawViewModelBox(ox, oy + 0.012, oz + 0.01, 0.052, 0.068, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, steel);
+        r.drawViewModelBox(ox + 0.029, oy + 0.022, oz + 0.03 - recoilKick * 0.03, 0.018, 0.016, 0.045, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, boltMetal);
 
-        // Деревянный приклад AK-47
-        r.drawViewModelBox(ox, oy - 0.025, oz - 0.18, 0.046, 0.082, 0.20, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, darkWood);
-        // Пистолетная рукоятка
-        r.drawViewModelBox(ox, oy - 0.085, oz - 0.04, 0.040, 0.095, 0.048, rotX + 0.22, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, darkWood);
-
-        // Стальная ствольная коробка и крышка
-        r.drawViewModelBox(ox, oy + 0.012, oz + 0.01, 0.052, 0.068, 0.24, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, steel);
-        r.drawViewModelBox(ox + 0.029, oy + 0.022, oz + 0.03 - recoilKick * 0.03, 0.018, 0.016, 0.045, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, boltMetal);
-
-        // Изогнутый магазин AK-47 ("банан")
         if (!reloading || reloadTimer > reloadDuration * 0.65 || reloadTimer < reloadDuration * 0.28) {
-            r.drawViewModelBox(ox, oy - 0.095, oz + 0.085, 0.038, 0.145, 0.058, rotX - 0.28, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, magColor);
+            r.drawViewModelBox(ox, oy - 0.095, oz + 0.085, 0.038, 0.145, 0.058, rotX - 0.28, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, magColor);
         }
 
-        // Деревянное цевье и накладка газовой трубки
-        r.drawViewModelBox(ox, oy + 0.006, oz + 0.20, 0.048, 0.058, 0.16, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, wood);
-        r.drawViewModelBox(ox, oy + 0.038, oz + 0.19, 0.038, 0.026, 0.14, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, darkWood);
+        r.drawViewModelBox(ox, oy + 0.006, oz + 0.20, 0.048, 0.058, 0.16, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, wood);
+        r.drawViewModelBox(ox, oy + 0.038, oz + 0.19, 0.038, 0.026, 0.14, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkWood);
+        r.drawViewModelBox(ox, oy + 0.014, oz + 0.39, 0.020, 0.020, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
+        r.drawViewModelBox(ox, oy + 0.034, oz + 0.33, 0.016, 0.018, 0.12, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, steel);
+        r.drawViewModelBox(ox, oy + 0.044, oz + 0.48, 0.014, 0.045, 0.024, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
+        r.drawViewModelBox(ox, oy + 0.052, oz + 0.10, 0.028, 0.016, 0.032, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
 
-        // Длинный ствол, газоотвод и характерная мушка AK-47
-        r.drawViewModelBox(ox, oy + 0.014, oz + 0.39, 0.020, 0.020, 0.26, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, darkSteel);
-        r.drawViewModelBox(ox, oy + 0.034, oz + 0.33, 0.016, 0.018, 0.12, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, steel);
-        r.drawViewModelBox(ox, oy + 0.044, oz + 0.48, 0.014, 0.045, 0.024, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, darkSteel);
-        // Целик
-        r.drawViewModelBox(ox, oy + 0.052, oz + 0.10, 0.028, 0.016, 0.032, rotX, rotY, rotZ, px, py, pz, Renderer3D.TEX_SOLID, darkSteel);
-
-        if (muzzleFlashTimer > 0.0) {
-            renderMuzzleFlash3D(r, ox, oy + 0.016, oz + 0.55, 0.14);
-        }
+        if (muzzleFlashTimer > 0.0) renderMuzzleFlash3D(r, ox, oy + 0.016, oz + 0.55, 0.14);
     }
 
-    private void renderGlockModel(Renderer3D r, double ox, double oy, double oz,
-                                  double rotX, double rotY, double rotZ) {
-        int frameBlack = 0x1E2126;
-        int slideSteel = 0x434A54;
-        int barrelDark = 0x262A30;
-        int sightWhite = 0xEDF3F8;
-        int sleeve = 0x2C3E54;
-        int glove = 0x1E2228;
+    private void renderM4a1sModel(Renderer3D r, double ox, double oy, double oz, double rotX, double rotY, double rotZ) {
+        int bodyBlack = 0x262B33, railGray = 0x3A414C, suppressor = 0x1A1E24;
+        int accentBlue = 0x365C82, sleeve = 0x2C3E54, glove = 0x1E2228;
 
-        double gx = ox - 0.02;
-        double gy = oy + 0.01;
-        double gz = oz - 0.05;
+        r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
+        r.drawViewModelBox(ox - 0.01, oy - 0.05, oz + 0.08, 0.062, 0.055, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
+
+        // Телескопический приклад и ствольная коробка M4A1-S
+        r.drawViewModelBox(ox, oy - 0.012, oz - 0.18, 0.042, 0.086, 0.19, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyBlack);
+        r.drawViewModelBox(ox, oy - 0.085, oz - 0.03, 0.038, 0.095, 0.045, rotX + 0.20, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyBlack);
+        r.drawViewModelBox(ox, oy + 0.015, oz + 0.03, 0.050, 0.070, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, railGray);
+        // Ручка переноски / планка Пикатинни
+        r.drawViewModelBox(ox, oy + 0.062, oz + 0.02, 0.032, 0.024, 0.16, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyBlack);
+
+        if (!reloading || reloadTimer > reloadDuration * 0.62 || reloadTimer < reloadDuration * 0.28) {
+            r.drawViewModelBox(ox, oy - 0.090, oz + 0.07, 0.034, 0.130, 0.052, rotX - 0.10, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentBlue);
+        }
+
+        // Тактическое цевье и длинный массивный глушитель M4A1-S
+        r.drawViewModelBox(ox, oy + 0.016, oz + 0.23, 0.046, 0.054, 0.19, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyBlack);
+        r.drawViewModelBox(ox, oy + 0.016, oz + 0.47, 0.034, 0.034, 0.30, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, suppressor);
+
+        if (muzzleFlashTimer > 0.0) renderMuzzleFlash3D(r, ox, oy + 0.016, oz + 0.63, 0.07);
+    }
+
+    private void renderAwpModel(Renderer3D r, double ox, double oy, double oz, double rotX, double rotY, double rotZ) {
+        int awpGreen = 0x3D5438, darkSteel = 0x20252B, scopeMetal = 0x181C22, lensCyan = 0x4FC3F7;
+        int sleeve = 0x2C3E54, glove = 0x1E2228;
+
+        r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
+        r.drawViewModelBox(ox, oy - 0.020, oz - 0.16, 0.050, 0.092, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, awpGreen);
+        r.drawViewModelBox(ox, oy + 0.005, oz + 0.10, 0.052, 0.072, 0.34, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, awpGreen);
+        r.drawViewModelBox(ox - 0.01, oy - 0.05, oz + 0.10, 0.064, 0.054, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
+
+        // Оптический снайперский прицел на кольцах
+        r.drawViewModelBox(ox, oy + 0.062, oz + 0.03, 0.024, 0.032, 0.03, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
+        r.drawViewModelBox(ox, oy + 0.062, oz + 0.15, 0.024, 0.032, 0.03, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
+        r.drawViewModelBox(ox, oy + 0.085, oz + 0.09, 0.042, 0.042, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, scopeMetal);
+        r.drawViewModelBox(ox, oy + 0.085, oz - 0.042, 0.036, 0.036, 0.01, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, lensCyan);
+
+        // Сверхдлинный ствол AWP с дульным тормозом
+        r.drawViewModelBox(ox, oy + 0.022, oz + 0.46, 0.022, 0.022, 0.42, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
+        r.drawViewModelBox(ox, oy + 0.022, oz + 0.68, 0.032, 0.028, 0.05, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, scopeMetal);
+
+        if (muzzleFlashTimer > 0.0) renderMuzzleFlash3D(r, ox, oy + 0.022, oz + 0.72, 0.19);
+    }
+
+    private void renderShotgunModel(Renderer3D r, double ox, double oy, double oz, double rotX, double rotY, double rotZ) {
+        int polyDark = 0x25282E, receiverSilver = 0x626A75, barrelSteel = 0x2E333B;
+        int sleeve = 0x2C3E54, glove = 0x1E2228;
+
+        r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
+        r.drawViewModelBox(ox, oy - 0.025, oz - 0.16, 0.048, 0.085, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, polyDark);
+        r.drawViewModelBox(ox, oy + 0.015, oz + 0.04, 0.054, 0.070, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, receiverSilver);
+        r.drawViewModelBox(ox, oy - 0.012, oz + 0.24, 0.052, 0.048, 0.18, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, polyDark);
+        r.drawViewModelBox(ox - 0.01, oy - 0.04, oz + 0.20, 0.064, 0.055, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
+
+        // Двойная трубка: ствол + подствольный трубчатый магазин дробовика
+        r.drawViewModelBox(ox, oy + 0.032, oz + 0.36, 0.024, 0.024, 0.42, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, barrelSteel);
+        r.drawViewModelBox(ox, oy + 0.005, oz + 0.34, 0.022, 0.022, 0.36, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, polyDark);
+
+        if (muzzleFlashTimer > 0.0) renderMuzzleFlash3D(r, ox, oy + 0.032, oz + 0.58, 0.18);
+    }
+
+    private void renderDeagleModel(Renderer3D r, double ox, double oy, double oz, double rotX, double rotY, double rotZ) {
+        int chrome = 0xC8D2DC, darkChrome = 0x8F9AA6, gripBlack = 0x1D2026;
+        int sleeve = 0x2C3E54, glove = 0x1E2228;
+
+        double gx = ox - 0.02, gy = oy + 0.01, gz = oz - 0.04;
+        double slideBack = recoilKick * 0.058;
+
+        r.drawViewModelBox(gx - 0.03, gy - 0.11, gz - 0.12, 0.072, 0.070, 0.25, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sleeve);
+        r.drawViewModelBox(gx, gy - 0.06, gz - 0.01, 0.066, 0.070, 0.08, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, glove);
+        r.drawViewModelBox(gx, gy - 0.058, gz + 0.00, 0.042, 0.112, 0.054, rotX + 0.20, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, gripBlack);
+        r.drawViewModelBox(gx, gy + 0.006, gz + 0.09, 0.044, 0.032, 0.23, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, darkChrome);
+        // Массивный хромированный кожух-затвор Desert Eagle
+        r.drawViewModelBox(gx, gy + 0.038, gz + 0.09 - slideBack, 0.048, 0.048, 0.24, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, chrome);
+        r.drawViewModelBox(gx, gy + 0.065, gz - 0.02 - slideBack, 0.030, 0.012, 0.015, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, gripBlack);
+        r.drawViewModelBox(gx, gy + 0.065, gz + 0.19, 0.012, 0.014, 0.015, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, gripBlack);
+
+        if (muzzleFlashTimer > 0.0) renderMuzzleFlash3D(r, gx, gy + 0.038, gz + 0.24, 0.15);
+    }
+
+    private void renderGlockModel(Renderer3D r, double ox, double oy, double oz, double rotX, double rotY, double rotZ) {
+        int frameBlack = 0x1E2126, slideSteel = 0x434A54, barrelDark = 0x262A30, sightWhite = 0xEDF3F8;
+        int sleeve = 0x2C3E54, glove = 0x1E2228;
+
+        double gx = ox - 0.02, gy = oy + 0.01, gz = oz - 0.05;
         double slideBack = recoilKick * 0.048;
 
-        // Руки и перчатки в двуручном хвате
         r.drawViewModelBox(gx - 0.03, gy - 0.11, gz - 0.12, 0.072, 0.070, 0.25, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sleeve);
         r.drawViewModelBox(gx, gy - 0.06, gz - 0.01, 0.064, 0.068, 0.075, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, glove);
-
-        // Полимерная рамка и рукоятка Glock-18
         r.drawViewModelBox(gx, gy - 0.055, gz + 0.00, 0.038, 0.105, 0.048, rotX + 0.20, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, frameBlack);
         r.drawViewModelBox(gx, gy + 0.002, gz + 0.065, 0.040, 0.030, 0.19, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, frameBlack);
-
-        // Металлический кожух-затвор (откатывается назад при выстреле)
         r.drawViewModelBox(gx, gy + 0.030, gz + 0.065 - slideBack, 0.042, 0.038, 0.195, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, slideSteel);
-        // Ствол
         r.drawViewModelBox(gx, gy + 0.026, gz + 0.14, 0.020, 0.020, 0.09, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, barrelDark);
-
-        // Прицельные приспособления Glock с белыми точками
         r.drawViewModelBox(gx, gy + 0.053, gz - 0.02 - slideBack, 0.026, 0.010, 0.012, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sightWhite);
         r.drawViewModelBox(gx, gy + 0.053, gz + 0.15 - slideBack, 0.009, 0.011, 0.012, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sightWhite);
 
-        if (muzzleFlashTimer > 0.0) {
-            renderMuzzleFlash3D(r, gx, gy + 0.028, gz + 0.21, 0.10);
-        }
+        if (muzzleFlashTimer > 0.0) renderMuzzleFlash3D(r, gx, gy + 0.028, gz + 0.21, 0.10);
     }
 
     private void renderKnifeModel(Renderer3D r, double ox, double oy, double oz) {
-        double slashPhase = (slashTimer > 0.0) ? (1.0 - slashTimer / 0.28) : 0.0;
+        double dur = heavySlash ? 0.36 : 0.26;
+        double slashPhase = (slashTimer > 0.0) ? (1.0 - slashTimer / dur) : 0.0;
         double swing = Math.sin(slashPhase * Math.PI);
 
-        double kx = ox - 0.02 - swing * 0.19;
-        double ky = oy - 0.01 + swing * 0.06;
-        double kz = oz - 0.09 + swing * 0.13;
+        double inspectSpin = 0.0;
+        if (inspectTimer > 0.0) {
+            double p = 1.0 - inspectTimer / INSPECT_DURATION;
+            inspectSpin = Math.sin(p * Math.PI * 2.0) * 1.4;
+        }
 
-        double rotX = -0.35 + swing * 0.55;
-        double rotY = -0.25 - swing * 0.85;
+        double kx = ox - 0.02 - swing * (heavySlash ? 0.11 : 0.19);
+        double ky = oy - 0.01 + swing * 0.06;
+        double kz = oz - 0.09 + swing * (heavySlash ? 0.22 : 0.13);
+
+        double rotX = -0.35 + swing * 0.58 + inspectSpin * 0.6;
+        double rotY = -0.25 - swing * (heavySlash ? 0.35 : 0.85) + inspectSpin * 0.35;
         double rotZ = 0.18 + swing * 0.45;
 
-        int sleeve = 0x2C3E54;
-        int glove = 0x1E2228;
-        int handle = 0x23272E;
-        int guard = 0x4A525D;
-        int bladeSteel = 0xB8C4D0;
-        int bladeEdge = 0xEDF4FA;
+        int sleeve = 0x2C3E54, glove = 0x1E2228, handle = 0x23272E, guard = 0xD4AF37;
+        int bladeSteel = 0xB8C4D0, bladeEdge = 0xEDF4FA;
 
         r.drawViewModelBox(kx + 0.02, ky - 0.09, kz - 0.10, 0.072, 0.070, 0.22, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, sleeve);
         r.drawViewModelBox(kx, ky - 0.03, kz + 0.00, 0.062, 0.058, 0.075, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, glove);
-
-        // Рукоять и гарда боевого ножа
         r.drawViewModelBox(kx, ky + 0.00, kz + 0.01, 0.030, 0.036, 0.11, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, handle);
         r.drawViewModelBox(kx, ky + 0.005, kz + 0.07, 0.048, 0.062, 0.016, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, guard);
-
-        // Клинок и светлая режущая кромка (монолитное лезвие с острием)
         r.drawViewModelBox(kx, ky + 0.012, kz + 0.170, 0.011, 0.034, 0.185, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
         r.drawViewModelBox(kx, ky - 0.005, kz + 0.172, 0.007, 0.011, 0.190, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
         r.drawViewModelBox(kx, ky + 0.006, kz + 0.276, 0.008, 0.021, 0.042, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
@@ -370,8 +601,15 @@ public class Weapon {
     public Type getType() { return type; }
     public String getDisplayName() { return displayName; }
     public int getSlotNumber() { return slotNumber; }
+    public int getPrice() { return price; }
+    public int getKillReward() { return killReward; }
     public boolean isAutomatic() { return automatic; }
     public boolean isMelee() { return melee; }
+    public boolean isSilenced() { return silenced; }
+    public boolean hasSniperScope() { return sniperScope; }
+    public int getScopeZoomLevel() { return scopeZoomLevel; }
+    public boolean isAdsActive() { return adsActive; }
+    public int getPelletsPerShot() { return pelletsPerShot; }
     public int getMagAmmo() { return magAmmo; }
     public int getMaxMagAmmo() { return maxMagAmmo; }
     public int getReserveAmmo() { return reserveAmmo; }
@@ -384,6 +622,5 @@ public class Weapon {
     public int getHeadDamage() { return headDamage; }
     public double getMaxRange() { return maxRange; }
     public double getMoveSpeedMultiplier() { return moveSpeedMultiplier; }
-    public double getRecoilBloom() { return recoilBloom; }
     public boolean hasMuzzleFlash() { return muzzleFlashTimer > 0.0; }
 }
