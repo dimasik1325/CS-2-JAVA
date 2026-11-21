@@ -638,6 +638,78 @@ public class Renderer3D {
         }
     }
 
+    /**
+     * Отрисовка огненной зоны Молотова CS2 (горящее пятно на земле + пляшущие языки 3D-пламени).
+     */
+    public void drawFireZone(Vec3.FireZone fz) {
+        double rad = fz.getCurrentRadius();
+        if (rad < 0.25) return;
+
+        double y = fz.center.y + 0.015;
+        double rIn = rad * 0.78;
+        drawWorldQuad(
+            fz.center.x - rIn, y, fz.center.z + rIn, 0, 0,
+            fz.center.x + rIn, y, fz.center.z + rIn, 1, 0,
+            fz.center.x + rIn, y, fz.center.z - rIn, 1, 1,
+            fz.center.x - rIn, y, fz.center.z - rIn, 0, 1,
+            TEX_SOLID, 0xCC3B0E, false, true, 0
+        );
+
+        for (int i = 0; i < 16; i++) {
+            double ang = i * 2.39996 + fz.animPhase * 0.14;
+            double dist = ((i + 0.5) / 16.0) * rad * 0.88;
+            double fx = fz.center.x + Math.cos(ang) * dist;
+            double fzPos = fz.center.z + Math.sin(ang) * dist;
+            double flicker = 0.55 + 0.45 * Math.sin(fz.animPhase * 1.4 + i * 1.7);
+            double h = (0.34 + (1.0 - dist / (rad + 0.1)) * 0.48) * flicker;
+            int flameCol = (i % 3 == 0) ? 0xFFE35C : ((i % 2 == 0) ? 0xFF7B1A : 0xF0380E);
+            drawOrientedWorldBox(fx, y + h * 0.5, fzPos, 0.22, h, 0.22,
+                    ang + fz.animPhase * 0.4, 0.0, TEX_SOLID, flameCol);
+        }
+    }
+
+    /**
+     * Направленный конус тактического фонарика игрока (клавиша L) — освещает стены, пол и ботов в 3D.
+     */
+    public void applyFlashlightBeam() {
+        double coneRadius = Math.min(width, height) * 0.36;
+        double coneR2 = coneRadius * coneRadius;
+        double invConeR2 = 1.0 / coneR2;
+
+        int x0 = Math.max(0, (int) (halfW - coneRadius));
+        int x1 = Math.min(width - 1, (int) (halfW + coneRadius));
+        int y0 = Math.max(0, (int) (halfH - coneRadius));
+        int y1 = Math.min(height - 1, (int) (halfH + coneRadius));
+
+        for (int y = y0; y <= y1; y++) {
+            int row = y * width;
+            double dy = y - halfH;
+            double dy2 = dy * dy;
+            for (int x = x0; x <= x1; x++) {
+                double dx = x - halfW;
+                double d2 = dx * dx + dy2;
+                if (d2 >= coneR2) continue;
+                int idx = row + x;
+                float z = zBuffer[idx];
+                if (z >= 29.0f) continue;
+
+                double radial = 1.0 - d2 * invConeR2;
+                double distAtten = 1.0 - (z / 29.0);
+                double intensity = radial * radial * distAtten;
+                int addR = (int) (intensity * 108.0);
+                int addG = (int) (intensity * 102.0);
+                int addB = (int) (intensity * 88.0);
+                int boost = 256 + (int) (intensity * 210.0);
+
+                int c = pixels[idx];
+                int r = Math.min(255, ((((c >> 16) & 0xFF) * boost) >> 8) + addR);
+                int g = Math.min(255, ((((c >> 8) & 0xFF) * boost) >> 8) + addG);
+                int b = Math.min(255, (((c & 0xFF) * boost) >> 8) + addB);
+                pixels[idx] = (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+
     public void draw3DLine(Vec3 a, Vec3 b, int rgb, int thickness) {
         double ax = (a.x - camX) * cosYaw - (a.z - camZ) * sinYaw;
         double az1 = (a.x - camX) * sinYaw + (a.z - camZ) * cosYaw;

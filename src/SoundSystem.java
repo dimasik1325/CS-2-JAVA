@@ -26,6 +26,7 @@ public class SoundSystem {
     private final byte[] sfxM4Silenced;
     private final byte[] sfxAwpBoom;
     private final byte[] sfxShotgun;
+    private final byte[] sfxMp9Shot;
     private final byte[] sfxGlockShot;
     private final byte[] sfxDeagleShot;
     private final byte[] sfxBotShot;
@@ -37,6 +38,11 @@ public class SoundSystem {
     private final byte[] sfxPlayerHurt;
     private final byte[] sfxExplosion;
     private final byte[] sfxSmokeHiss;
+    private final byte[] sfxFlashbang;
+    private final byte[] sfxMolotov;
+    private final byte[] sfxC4Beep;
+    private final byte[] sfxC4Urgent;
+    private final byte[] sfxC4Keypad;
     private final byte[] sfxFootstep;
     private final byte[] sfxShellClink;
     private final byte[] sfxBuyCash;
@@ -52,6 +58,7 @@ public class SoundSystem {
         this.sfxM4Silenced  = buildSilencedShot();
         this.sfxAwpBoom     = buildGunshot(0.46, 98.0,  24.0, 1.35, 9999L);
         this.sfxShotgun     = buildGunshot(0.28, 122.0, 34.0, 1.15, 4242L);
+        this.sfxMp9Shot     = buildGunshot(0.11, 290.0, 92.0, 0.68, 3131L);
         this.sfxGlockShot   = buildGunshot(0.14, 245.0, 76.0, 0.72, 2026L);
         this.sfxDeagleShot  = buildGunshot(0.29, 132.0, 36.0, 1.12, 7171L);
         this.sfxBotShot     = buildGunshot(0.17, 165.0, 52.0, 0.48, 7777L);
@@ -63,6 +70,11 @@ public class SoundSystem {
         this.sfxPlayerHurt  = buildHurtSound();
         this.sfxExplosion   = buildExplosionSound();
         this.sfxSmokeHiss   = buildSmokeSound();
+        this.sfxFlashbang   = buildFlashbangSound();
+        this.sfxMolotov     = buildMolotovSound();
+        this.sfxC4Beep      = buildToneClick(2680.0, 0.075, 0.72);
+        this.sfxC4Urgent    = buildToneClick(3180.0, 0.060, 0.85);
+        this.sfxC4Keypad    = buildKeypadSound();
         this.sfxFootstep    = buildFootstepSound();
         this.sfxShellClink  = buildShellClink();
         this.sfxBuyCash     = buildBuySound();
@@ -100,6 +112,7 @@ public class SoundSystem {
             case M4A1S:  playAsync(sfxM4Silenced, 0.90); break;
             case AWP:    playAsync(sfxAwpBoom, 1.0); break;
             case XM1014: playAsync(sfxShotgun, 0.98); break;
+            case MP9:    playAsync(sfxMp9Shot, 0.86); break;
             case GLOCK:  playAsync(sfxGlockShot, 0.90); break;
             case DEAGLE: playAsync(sfxDeagleShot, 1.0); break;
             case KNIFE:  playAsync(sfxKnifeSlash, 0.85); break;
@@ -120,6 +133,16 @@ public class SoundSystem {
         playAsync(sfxExplosion, atten);
     }
     public void playSmokeBloom() { playAsync(sfxSmokeHiss, 0.78); }
+    public void playFlashbang(double distance) {
+        double atten = Math.max(0.25, Math.min(1.0, 1.15 - distance / 46.0));
+        playAsync(sfxFlashbang, atten);
+    }
+    public void playMolotovShatter() { playAsync(sfxMolotov, 0.90); }
+    public void playC4Beep(boolean urgent, double distance) {
+        double atten = Math.max(0.18, Math.min(0.92, 1.05 - distance / 52.0));
+        playAsync(urgent ? sfxC4Urgent : sfxC4Beep, atten);
+    }
+    public void playC4Keypad() { playAsync(sfxC4Keypad, 0.85); }
     public void playFootstep() { playAsync(sfxFootstep, 0.36); }
     public void playShellClink() { playAsync(sfxShellClink, 0.28); }
     public void playBuy() { playAsync(sfxBuyCash, 0.80); }
@@ -394,6 +417,53 @@ public class SoundSystem {
             double f = notes[step];
             buf[i] = (Math.sin(2.0 * Math.PI * f * sec) * 0.55
                     + Math.sin(2.0 * Math.PI * f * 2.0 * sec) * 0.2) * env * 0.55;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildFlashbangSound() {
+        int count = (int) (SAMPLE_RATE * 0.62);
+        double[] buf = new double[count];
+        Random rng = new Random(1919L);
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double sec = i / SAMPLE_RATE;
+            double snap = Math.pow(Math.max(0.0, 1.0 - t * 6.5), 2.2) * (rng.nextDouble() * 2.0 - 1.0);
+            double ring = Math.sin(2.0 * Math.PI * 3650.0 * sec) * Math.pow(1.0 - t, 1.35) * 0.36;
+            buf[i] = snap * 0.92 + ring;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildMolotovSound() {
+        int count = (int) (SAMPLE_RATE * 0.52);
+        double[] buf = new double[count];
+        Random rng = new Random(2929L);
+        double lowRoar = 0.0;
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double sec = i / SAMPLE_RATE;
+            double glass = (t < 0.16)
+                    ? Math.sin(2.0 * Math.PI * (3400.0 + (i % 7) * 410.0) * sec) * (1.0 - t / 0.16) * 0.55
+                    : 0.0;
+            double white = rng.nextDouble() * 2.0 - 1.0;
+            lowRoar = lowRoar * 0.88 + white * 0.12;
+            double flameEnv = Math.sin(Math.min(1.0, t * 1.4) * Math.PI);
+            buf[i] = glass + lowRoar * flameEnv * 1.35;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildKeypadSound() {
+        int count = (int) (SAMPLE_RATE * 0.28);
+        double[] buf = new double[count];
+        double[] freqs = {1950.0, 2340.0, 2920.0};
+        for (int i = 0; i < count; i++) {
+            int step = Math.min(2, (i * 3) / count);
+            double sec = i / SAMPLE_RATE;
+            double local = ((i * 3.0) / count) - step;
+            double env = Math.max(0.0, 1.0 - local * 1.15);
+            buf[i] = Math.sin(2.0 * Math.PI * freqs[step] * sec) * env * 0.58;
         }
         return toPcmBytes(buf);
     }

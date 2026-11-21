@@ -13,7 +13,7 @@ import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
 /**
- * Точка входа в игру CS-2 JAVA 2.0 (Source 2 Tactical Edition).
+ * Точка входа в игру CS-2 JAVA 3.0 (Source 2 Tactical & Skins Edition).
  * Управляет окном JFrame, полноэкранным режимом F11 и запуском игрового движка Engine.
  */
 public class Main {
@@ -28,7 +28,7 @@ public class Main {
         System.setProperty("sun.java2d.uiScale", "1.0");
 
         SwingUtilities.invokeLater(() -> {
-            final JFrame frame = new JFrame("CS-2 JAVA 2.0 | Dust II Source 2 Edition");
+            final JFrame frame = new JFrame("CS-2 JAVA 3.0 | Dust II Source 2 Edition");
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
             frame.getContentPane().setBackground(Color.BLACK);
@@ -95,45 +95,71 @@ public class Main {
             Engine engine = new Engine(true);
             Player player = engine.getPlayer();
 
-            // 1. Главное меню с живой 3D-камерой над ареной Dust II
+            // 1. Главное меню 3.0 с живой 3D-камерой над ареной Dust II
             engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
             for (int i = 0; i < 35; i++) {
                 engine.updateGame(1.0 / 60.0);
             }
             saveTestScreenshot(engine, new File(dir, "01_main_menu.png"));
 
-            // 2. Экран Настроек Графики
-            engine.openSettingsScreen(false, 0);
-            saveTestScreenshot(engine, new File(dir, "02_graphics_settings.png"));
+            // 2. Интерактивная 3D-оружейная скинов (AK-47 | Азимов)
+            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.ASIIMOV;
+            engine.setCurrentScreen(Engine.AppScreen.SKIN_ARMORY);
+            for (int i = 0; i < 25; i++) {
+                engine.updateGame(1.0 / 60.0);
+            }
+            saveTestScreenshot(engine, new File(dir, "02_skin_armory_asiimov.png"));
 
-            // 3. Вход в матч: реалистичные тени на песке, облака, дым CS2 и выстрел из AK-47 с гильзами
+            // 3. Режим Операции C4: заложенная бомба C4 на Пленте A, горящий Молотов, ослепленный бот,
+            //    AK-47 | Азимов, счетчик StatTrak™ и карточки фрагов раунда CS2
             engine.launchMatchFromMenu();
-            player.getPosition().set(-1.2, 0.0, -7.2);
-            player.setAngles(0.06, -0.03);
-            engine.getSmokeClouds().add(new Vec3.SmokeCloud(new Vec3(-4.2, 0.2, -1.8), 3.4, 12.0));
+            Vec3 siteA = engine.getMap().getBombsiteASpot();
+            engine.setPlantedC4(new Vec3.BombC4(siteA, "A"));
+            player.setHasDefuseKit(true);
+            player.getPosition().set(siteA.x - 1.5, 0.0, siteA.z - 2.0);
+            Vec3 lookC4 = siteA.add(0.0, 0.4, 0.0).sub(player.getEyePosition()).normalize();
+            player.setAngles(Math.atan2(lookC4.x, lookC4.z), Math.asin(lookC4.y));
+
+            engine.getFireZones().add(new Vec3.FireZone(new Vec3(siteA.x + 1.8, 0.0, siteA.z + 1.1), 2.3, 7.0));
             Bot target = engine.getBots().get(0);
-            target.getPosition().set(0.1, 0.0, 4.8);
-            engine.updateGame(1.0 / 60.0);
-            Vec3 toBot = target.getPosition().add(0.0, 1.32, 0.0).sub(player.getEyePosition()).normalize();
-            player.setAngles(Math.atan2(toBot.x, toBot.z), Math.asin(toBot.y));
-            engine.tryFireCurrentWeapon(false);
-            saveTestScreenshot(engine, new File(dir, "03_combat_shadows_smoke.png"));
+            target.getPosition().set(siteA.x + 0.5, 0.0, siteA.z + 2.4);
+            target.applyFlashBlind(4.0);
+            player.recordKill(true);
+            player.recordKill(false);
+            for (int i = 0; i < 18; i++) engine.updateGame(1.0 / 60.0);
+            saveTestScreenshot(engine, new File(dir, "03_c4_planted_molotov_asiimov.png"));
 
-            // 4. Золотой закат + покупка AWP + оптический снайперский прицел ПКМ
-            engine.getSettings().timeOfDay = GameSettings.TimeOfDay.SUNSET;
-            player.addMoney(8000);
-            player.equipPurchasedWeapon(Weapon.Type.AWP);
+            // 4. Ночная операция + направленный 3D-фонарик [L] + новый ПП MP9 | Золотой Градиент
+            engine.getSettings().timeOfDay = GameSettings.TimeOfDay.NIGHT;
+            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.GOLD_FADE;
+            player.addMoney(5000);
+            player.equipPurchasedWeapon(Weapon.Type.MP9);
+            player.toggleFlashlight();
+            player.getPosition().set(-1.0, 0.0, -5.5);
+            player.setAngles(0.08, -0.04);
+            target.getPosition().set(-0.4, 0.0, 1.5);
             for (int i = 0; i < 20; i++) engine.updateGame(1.0 / 60.0);
-            player.getCurrentWeapon().toggleSecondaryAction();
-            saveTestScreenshot(engine, new File(dir, "04_awp_scope_sunset.png"));
+            saveTestScreenshot(engine, new File(dir, "04_night_flashlight_mp9_fade.png"));
 
-            // 5. Магазин закупки CS2 [B] + пистолет Desert Eagle в руках (Полдень)
+            // 5. Магазин закупки 3.0 (9 позиций: MP9, Flash, Molotov, Набор сапёра C4)
             engine.getSettings().timeOfDay = GameSettings.TimeOfDay.DAY;
-            player.equipPurchasedWeapon(Weapon.Type.DEAGLE);
-            for (int i = 0; i < 20; i++) engine.updateGame(1.0 / 60.0);
+            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.STANDARD;
+            if (player.isFlashlightOn()) player.toggleFlashlight();
+            for (int i = 0; i < 10; i++) engine.updateGame(1.0 / 60.0);
             engine.setBuyMenuOpen(true);
-            saveTestScreenshot(engine, new File(dir, "05_buy_menu_deagle.png"));
+            saveTestScreenshot(engine, new File(dir, "05_buy_menu_v3.png"));
             engine.setBuyMenuOpen(false);
+
+            // Проверка механики CS2: Дымовая шашка тушит огонь Молотова!
+            engine.getFireZones().clear();
+            engine.getSmokeClouds().clear();
+            Vec3 testSpot = new Vec3(0.0, 0.0, 0.0);
+            engine.getFireZones().add(new Vec3.FireZone(testSpot, 2.5, 7.0));
+            engine.getSmokeClouds().add(new Vec3.SmokeCloud(new Vec3(0.5, 0.2, 0.0), 3.6, 12.0));
+            for (int i = 0; i < 45; i++) engine.updateGame(1.0 / 30.0);
+            if (!engine.getFireZones().isEmpty()) {
+                throw new IllegalStateException("Smoke grenade must extinguish overlapping Molotov FireZone!");
+            }
 
             // Проверка блокировки обзора дымом (Smoke LOS check)
             Vec3 a = new Vec3(0, 1.5, -6);
@@ -159,7 +185,7 @@ public class Main {
             bg.dispose();
             engine.stop();
 
-            System.out.printf("CS-2 JAVA 2.0 SELF-TEST PASSED! %d HD frames rendered in %d ms (%.1f FPS avg)%n",
+            System.out.printf("CS-2 JAVA 3.0 SELF-TEST PASSED! %d HD frames rendered in %d ms (%.1f FPS avg)%n",
                     benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs));
         } catch (Exception ex) {
             ex.printStackTrace();

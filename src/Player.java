@@ -43,10 +43,14 @@ public class Player {
     };
     private int currentWeaponIndex = 0;
 
-    // Экономика и тактические гранаты
+    // Экономика, тактические гранаты, набор сапера и фонарик
     private int money = 2400;
     private int heGrenades = 1;
     private int smokeGrenades = 1;
+    private int flashGrenades = 1;
+    private int molotovGrenades = 1;
+    private boolean hasDefuseKit = false;
+    private boolean flashlightOn = false;
 
     // Анимации камеры, шагов и эффекты боя
     private double walkBobPhase = 0.0;
@@ -55,17 +59,19 @@ public class Player {
     private double swayX = 0.0;
     private double swayY = 0.0;
     private double damageFlash = 0.0;
+    private double flashBlindTimer = 0.0;
     private double cameraShake = 0.0;
     private double shakePhase = 0.0;
     private Vec3 lastDamageSource = null;
 
-    // Статистика матча и текущего раунда
+    // Статистика матча и текущего раунда (включая карточки фрагов CS2)
     private int kills = 0;
     private int deaths = 0;
     private int headshots = 0;
     private int shotsFired = 0;
     private int shotsHit = 0;
     private int roundKills = 0;
+    private final boolean[] roundKillHeadshots = new boolean[16];
 
     public Player(Vec3 spawnPos) {
         respawnForRound(spawnPos, true);
@@ -83,6 +89,7 @@ public class Player {
         this.health = 100;
         this.armor = 100;
         this.damageFlash = 0.0;
+        this.flashBlindTimer = 0.0;
         this.cameraShake = 0.0;
         this.lastDamageSource = null;
         this.roundKills = 0;
@@ -93,12 +100,16 @@ public class Player {
             this.weapons[2] = new Weapon(Weapon.Type.KNIFE);
             this.heGrenades = 1;
             this.smokeGrenades = 1;
+            this.flashGrenades = 1;
+            this.molotovGrenades = 1;
+            this.hasDefuseKit = false;
         } else {
             for (Weapon w : weapons) {
                 w.resetAmmo();
             }
             if (heGrenades < 1) heGrenades = 1;
             if (smokeGrenades < 1) smokeGrenades = 1;
+            if (flashGrenades < 1) flashGrenades = 1;
         }
 
         this.alive = true;
@@ -122,6 +133,10 @@ public class Player {
         this.weapons[2] = new Weapon(Weapon.Type.KNIFE);
         this.heGrenades = 1;
         this.smokeGrenades = 1;
+        this.flashGrenades = 1;
+        this.molotovGrenades = 1;
+        this.hasDefuseKit = false;
+        this.flashlightOn = false;
     }
 
     public void addMoney(int delta) {
@@ -170,6 +185,7 @@ public class Player {
             case XM1014: kick = 0.028; cameraShake = Math.max(cameraShake, 0.12); break;
             case AK47:   kick = 0.019; break;
             case M4A1S:  kick = 0.012; break;
+            case MP9:    kick = 0.009; break;
             case GLOCK:  kick = 0.010; break;
             default:     kick = 0.0; break;
         }
@@ -178,6 +194,10 @@ public class Player {
 
     public void addCameraShake(double amount) {
         this.cameraShake = Math.min(1.0, this.cameraShake + amount);
+    }
+
+    public void applyFlashBlind(double durationSeconds) {
+        this.flashBlindTimer = Math.max(this.flashBlindTimer, durationSeconds);
     }
 
     public void selectWeaponSlot(int index) {
@@ -208,6 +228,7 @@ public class Player {
                        boolean moveLeft, boolean moveRight,
                        boolean jumpRequested, boolean crouchHeld, boolean walkShiftHeld) {
         if (damageFlash > 0.0) damageFlash = Math.max(0.0, damageFlash - dt * 2.4);
+        if (flashBlindTimer > 0.0) flashBlindTimer = Math.max(0.0, flashBlindTimer - dt);
         if (cameraShake > 0.0) {
             cameraShake = Math.max(0.0, cameraShake - dt * 2.6);
             shakePhase += dt * 46.0;
@@ -376,10 +397,17 @@ public class Player {
 
     public int recordKill(boolean headshot, int cashReward) {
         kills++;
+        if (roundKills >= 0 && roundKills < roundKillHeadshots.length) {
+            roundKillHeadshots[roundKills] = headshot;
+        }
         roundKills++;
         if (headshot) headshots++;
         addMoney(cashReward);
         return roundKills;
+    }
+
+    public boolean isRoundKillHeadshot(int idx) {
+        return idx >= 0 && idx < roundKillHeadshots.length && roundKillHeadshots[idx];
     }
 
     public void recordKill(boolean headshot) {
@@ -403,8 +431,28 @@ public class Player {
         return true;
     }
 
+    public boolean consumeFlashGrenade() {
+        if (flashGrenades <= 0) return false;
+        flashGrenades--;
+        return true;
+    }
+
+    public boolean consumeMolotovGrenade() {
+        if (molotovGrenades <= 0) return false;
+        molotovGrenades--;
+        return true;
+    }
+
     public void addHeGrenade() { heGrenades = Math.min(2, heGrenades + 1); }
     public void addSmokeGrenade() { smokeGrenades = Math.min(2, smokeGrenades + 1); }
+    public void addFlashGrenade() { flashGrenades = Math.min(2, flashGrenades + 1); }
+    public void addMolotovGrenade() { molotovGrenades = Math.min(2, molotovGrenades + 1); }
+    public void setHasDefuseKit(boolean v) { this.hasDefuseKit = v; }
+    public boolean hasDefuseKit() { return hasDefuseKit; }
+    public void toggleFlashlight() { this.flashlightOn = !this.flashlightOn; }
+    public void setFlashlightOn(boolean v) { this.flashlightOn = v; }
+    public boolean isFlashlightOn() { return flashlightOn; }
+    public double getFlashBlindTimer() { return flashBlindTimer; }
 
     public double getKdRatio() {
         return deaths == 0 ? kills : (double) kills / deaths;
@@ -471,6 +519,8 @@ public class Player {
     public int getMoney() { return money; }
     public int getHeGrenades() { return heGrenades; }
     public int getSmokeGrenades() { return smokeGrenades; }
+    public int getFlashGrenades() { return flashGrenades; }
+    public int getMolotovGrenades() { return molotovGrenades; }
     public Weapon getCurrentWeapon() { return weapons[currentWeaponIndex]; }
     public Weapon[] getWeapons() { return weapons; }
     public int getCurrentWeaponIndex() { return currentWeaponIndex; }

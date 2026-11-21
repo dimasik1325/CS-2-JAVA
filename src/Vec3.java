@@ -348,10 +348,10 @@ public class Vec3 {
     }
 
     /**
-     * Брошенная 3D-граната: осколочная (HE) или дымовая (SMOKE).
+     * Брошенная 3D-граната: осколочная (HE), дымовая (SMOKE), светошумовая (FLASH) или зажигательная (MOLOTOV).
      */
     public static class Grenade {
-        public enum Kind { HE, SMOKE }
+        public enum Kind { HE, SMOKE, FLASH, MOLOTOV }
 
         public final Kind kind;
         public final Vec3 pos;
@@ -370,7 +370,7 @@ public class Vec3 {
         public boolean update(double dt, List<Box> boxes, double minX, double maxX, double minZ, double maxZ) {
             fuseTimer -= dt;
             if (fuseTimer <= 0.0) {
-                return true; // Срабатывание взрыва / дыма!
+                return true; // Срабатывание взрыва / дыма / вспышки!
             }
             vel.y -= 17.5 * dt;
             yaw += dt * 7.0;
@@ -396,10 +396,16 @@ public class Vec3 {
             double ny = pos.y + vel.y * dt;
             if (ny <= r) {
                 pos.y = r;
+                if (kind == Kind.MOLOTOV) {
+                    return true; // Коктейль Молотова разбивается сразу при ударе о землю!
+                }
                 vel.y = -vel.y * 0.42;
                 vel.x *= 0.78;
                 vel.z *= 0.78;
             } else if (hitsAny(boxes, pos.x, ny, pos.z, r)) {
+                if (kind == Kind.MOLOTOV && vel.y < 0.0) {
+                    return true;
+                }
                 vel.y = -vel.y * 0.42;
                 vel.x *= 0.80;
                 vel.z *= 0.80;
@@ -487,6 +493,59 @@ public class Vec3 {
             life -= dt;
             bobPhase += dt * 3.2;
             return life > 0.0;
+        }
+    }
+
+    /**
+     * Огненная зона от коктейля Молотова CS2: горит на земле, наносит урон и тушится дымовой гранатой!
+     */
+    public static class FireZone {
+        public final Vec3 center;
+        public final double maxRadius;
+        public double life;
+        public final double maxLife;
+        public double tickTimer = 0.0;
+        public double animPhase = 0.0;
+
+        public FireZone(Vec3 center, double maxRadius, double duration) {
+            this.center = new Vec3(center.x, Math.max(0.02, center.y), center.z);
+            this.maxRadius = maxRadius;
+            this.life = duration;
+            this.maxLife = duration;
+        }
+
+        public double getCurrentRadius() {
+            double age = maxLife - life;
+            double grow = Math.min(1.0, 0.35 + age * 1.6);
+            double fade = Math.min(1.0, life / 1.1);
+            return maxRadius * grow * fade;
+        }
+
+        public boolean update(double dt) {
+            life -= dt;
+            animPhase += dt * 9.0;
+            return life > 0.0;
+        }
+    }
+
+    /**
+     * Установленная взрывчатка C4 на Пленте A или Пленте B с таймером, маячком и прогрессом обезвреживания.
+     */
+    public static class BombC4 {
+        public final Vec3 pos;
+        public final String siteName;
+        public double countdown = 40.0;
+        public double beepTimer = 0.0;
+        public double blinkPhase = 0.0;
+        public double defuseProgress = 0.0;
+        public double defuseRequired = 5.0;
+        public boolean beingDefused = false;
+        public boolean defused = false;
+        public boolean exploded = false;
+
+        public BombC4(Vec3 pos, String siteName) {
+            this.pos = pos.copy();
+            this.siteName = siteName;
         }
     }
 }

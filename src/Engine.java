@@ -47,6 +47,7 @@ public class Engine extends Canvas implements Runnable {
 
     public enum AppScreen {
         MAIN_MENU,
+        SKIN_ARMORY,
         SETTINGS,
         ARSENAL_GUIDE,
         IN_GAME
@@ -120,10 +121,25 @@ public class Engine extends Canvas implements Runnable {
     private final List<Vec3.ShellCasing> shells = new ArrayList<>();
     private final List<Vec3.Grenade> grenades = new ArrayList<>();
     private final List<Vec3.SmokeCloud> smokeClouds = new ArrayList<>();
+    private final List<Vec3.FireZone> fireZones = new ArrayList<>();
     private final List<Vec3.Pickup> pickups = new ArrayList<>();
     private final List<DamagePopup> damagePopups = new ArrayList<>();
     private final List<KillFeedEntry> killFeed = new ArrayList<>();
     private final List<UiClickable> uiClickables = new ArrayList<>();
+
+    private Vec3.BombC4 plantedC4 = null;
+    private double dmPlayerRespawnTimer = 0.0;
+    private final Weapon[] armoryShowcaseWeapons = new Weapon[]{
+        new Weapon(Weapon.Type.AK47),
+        new Weapon(Weapon.Type.M4A1S),
+        new Weapon(Weapon.Type.AWP),
+        new Weapon(Weapon.Type.XM1014),
+        new Weapon(Weapon.Type.MP9),
+        new Weapon(Weapon.Type.DEAGLE),
+        new Weapon(Weapon.Type.GLOCK),
+        new Weapon(Weapon.Type.KNIFE)
+    };
+    private int armoryWeaponIdx = 0;
 
     private final SoundSystem soundSystem;
     private final Random rng = new Random(2026L);
@@ -339,9 +355,14 @@ public class Engine extends Canvas implements Runnable {
             return;
         }
 
-        if (currentScreen == AppScreen.ARSENAL_GUIDE) {
-            if (code == KeyEvent.VK_ESCAPE || code == KeyEvent.VK_ENTER || code == KeyEvent.VK_SPACE) {
+        if (currentScreen == AppScreen.ARSENAL_GUIDE || currentScreen == AppScreen.SKIN_ARMORY) {
+            if (code == KeyEvent.VK_ESCAPE || code == KeyEvent.VK_BACK_SPACE) {
+                settings.save();
                 currentScreen = AppScreen.MAIN_MENU;
+            } else if (currentScreen == AppScreen.SKIN_ARMORY && code == KeyEvent.VK_RIGHT) {
+                armoryWeaponIdx = (armoryWeaponIdx + 1) % armoryShowcaseWeapons.length;
+            } else if (currentScreen == AppScreen.SKIN_ARMORY && code == KeyEvent.VK_LEFT) {
+                armoryWeaponIdx = (armoryWeaponIdx + armoryShowcaseWeapons.length - 1) % armoryShowcaseWeapons.length;
             }
             return;
         }
@@ -432,6 +453,22 @@ public class Engine extends Canvas implements Runnable {
             throwGrenade(Vec3.Grenade.Kind.HE);
         } else if (code == KeyEvent.VK_5 || code == KeyEvent.VK_Q) {
             throwGrenade(Vec3.Grenade.Kind.SMOKE);
+        } else if (code == KeyEvent.VK_6 || code == KeyEvent.VK_V) {
+            throwGrenade(Vec3.Grenade.Kind.FLASH);
+        } else if (code == KeyEvent.VK_7 || code == KeyEvent.VK_X) {
+            throwGrenade(Vec3.Grenade.Kind.MOLOTOV);
+        } else if (code == KeyEvent.VK_L) {
+            if (player.isAlive()) {
+                player.toggleFlashlight();
+                soundSystem.playUiClick();
+            }
+        } else if (code == KeyEvent.VK_H) {
+            int nextSkin = (settings.weaponSkin.ordinal() + 1) % GameSettings.WeaponSkin.values().length;
+            settings.weaponSkin = GameSettings.WeaponSkin.values()[nextSkin];
+            settings.save();
+            soundSystem.playUiClick();
+            streakBannerText = "СКИН ОРУЖИЯ: " + settings.weaponSkin.label.toUpperCase();
+            streakBannerTimer = 1.6;
         } else if (code == KeyEvent.VK_F) {
             if (player.isAlive()) player.getCurrentWeapon().triggerInspect();
         } else if (code == KeyEvent.VK_R) {
@@ -447,10 +484,11 @@ public class Engine extends Canvas implements Runnable {
             case KeyEvent.VK_2: tryPurchaseWeapon(Weapon.Type.M4A1S); break;
             case KeyEvent.VK_3: tryPurchaseWeapon(Weapon.Type.AWP); break;
             case KeyEvent.VK_4: tryPurchaseWeapon(Weapon.Type.XM1014); break;
-            case KeyEvent.VK_5: tryPurchaseWeapon(Weapon.Type.DEAGLE); break;
-            case KeyEvent.VK_6: tryPurchaseUtility(1); break;
-            case KeyEvent.VK_7: tryPurchaseUtility(2); break;
-            case KeyEvent.VK_8: tryPurchaseUtility(3); break;
+            case KeyEvent.VK_5: tryPurchaseWeapon(Weapon.Type.MP9); break;
+            case KeyEvent.VK_6: tryPurchaseWeapon(Weapon.Type.DEAGLE); break;
+            case KeyEvent.VK_7: tryPurchaseUtility(1); break;
+            case KeyEvent.VK_8: tryPurchaseUtility(2); break;
+            case KeyEvent.VK_9: tryPurchaseUtility(3); break;
             default: break;
         }
     }
@@ -460,7 +498,8 @@ public class Engine extends Canvas implements Runnable {
         if (player.getCurrentWeapon().getType() == type) {
             return;
         }
-        if (player.spendMoney(sample.getPrice())) {
+        int cost = (settings.gameMode == GameSettings.GameMode.DEATHMATCH) ? 0 : sample.getPrice();
+        if (player.spendMoney(cost)) {
             player.equipPurchasedWeapon(type);
             soundSystem.playBuy();
         } else {
@@ -469,19 +508,23 @@ public class Engine extends Canvas implements Runnable {
     }
 
     private void tryPurchaseUtility(int kind) {
-        if (kind == 1 && player.getHeGrenades() < 2) {
-            if (player.spendMoney(300)) {
+        boolean freeDm = (settings.gameMode == GameSettings.GameMode.DEATHMATCH);
+        if (kind == 1 && (player.getHeGrenades() < 2 || player.getFlashGrenades() < 2)) {
+            if (player.spendMoney(freeDm ? 0 : 400)) {
                 player.addHeGrenade();
+                player.addFlashGrenade();
                 soundSystem.playBuy();
             } else soundSystem.playEmptyClick();
-        } else if (kind == 2 && player.getSmokeGrenades() < 2) {
-            if (player.spendMoney(300)) {
+        } else if (kind == 2 && (player.getSmokeGrenades() < 2 || player.getMolotovGrenades() < 2)) {
+            if (player.spendMoney(freeDm ? 0 : 600)) {
                 player.addSmokeGrenade();
+                player.addMolotovGrenade();
                 soundSystem.playBuy();
             } else soundSystem.playEmptyClick();
-        } else if (kind == 3 && (player.getHealth() < 100 || player.getArmor() < 100)) {
-            if (player.spendMoney(650)) {
+        } else if (kind == 3 && (player.getHealth() < 100 || player.getArmor() < 100 || !player.hasDefuseKit())) {
+            if (player.spendMoney(freeDm ? 0 : 850)) {
                 player.healAndRestoreArmor(100, 100);
+                player.setHasDefuseKit(true);
                 soundSystem.playBuy();
             } else soundSystem.playEmptyClick();
         } else {
@@ -489,16 +532,23 @@ public class Engine extends Canvas implements Runnable {
         }
     }
 
-    private void throwGrenade(Vec3.Grenade.Kind kind) {
+    public void throwGrenade(Vec3.Grenade.Kind kind) {
         if (!player.isAlive() || matchState != MatchState.PLAYING) return;
-        boolean ok = (kind == Vec3.Grenade.Kind.HE) ? player.consumeHeGrenade() : player.consumeSmokeGrenade();
+        boolean ok;
+        double fuse;
+        switch (kind) {
+            case HE:      ok = player.consumeHeGrenade();      fuse = 1.65; break;
+            case SMOKE:   ok = player.consumeSmokeGrenade();   fuse = 1.35; break;
+            case FLASH:   ok = player.consumeFlashGrenade();   fuse = 1.15; break;
+            case MOLOTOV:
+            default:      ok = player.consumeMolotovGrenade(); fuse = 2.60; break;
+        }
         if (!ok) {
             soundSystem.playEmptyClick();
             return;
         }
         Vec3 start = player.getEyePosition().add(player.getLookDirection().scale(0.55));
         Vec3 vel = player.getLookDirection().scale(16.8).add(0.0, 2.8, 0.0);
-        double fuse = (kind == Vec3.Grenade.Kind.HE) ? 1.65 : 1.35;
         grenades.add(new Vec3.Grenade(kind, start, vel, fuse));
         soundSystem.playWeaponShot(Weapon.Type.KNIFE);
     }
@@ -621,7 +671,7 @@ public class Engine extends Canvas implements Runnable {
 
     private void setupRound(boolean resetPlayerWeapons) {
         this.matchState = MatchState.PLAYING;
-        this.roundTimeLeft = ROUND_TIME_SECONDS;
+        this.roundTimeLeft = (settings.gameMode == GameSettings.GameMode.DEATHMATCH) ? 180.0 : ROUND_TIME_SECONDS;
         this.roundBannerTimer = 2.2;
         this.roundOverTimer = 0.0;
         this.buyMenuOpen = false;
@@ -631,12 +681,18 @@ public class Engine extends Canvas implements Runnable {
         this.shells.clear();
         this.grenades.clear();
         this.smokeClouds.clear();
+        this.fireZones.clear();
         this.pickups.clear();
         this.damagePopups.clear();
+        this.plantedC4 = null;
+        this.dmPlayerRespawnTimer = 0.0;
         this.hitMarkerTimer = 0.0;
         this.streakBannerTimer = 0.0;
 
         player.respawnForRound(map.getPlayerSpawn(), resetPlayerWeapons);
+        if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
+            player.addMoney(16000);
+        }
 
         List<Vec3> spawns = map.getBotSpawns();
         List<Vec3> waypoints = map.getPatrolWaypoints();
@@ -652,6 +708,12 @@ public class Engine extends Canvas implements Runnable {
             } else {
                 bots.add(new Bot(BOT_NAMES[i % BOT_NAMES.length], sp, wp, 1000L + i * 37L));
             }
+        }
+
+        if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL && !bots.isEmpty()) {
+            boolean goSiteA = (currentRound % 2 == 1);
+            Vec3 targetSite = goSiteA ? map.getBombsiteASpot() : map.getBombsiteBSpot();
+            bots.get(0).assignBombCarrier(targetSite, goSiteA ? "A" : "B");
         }
     }
 
@@ -786,12 +848,58 @@ public class Engine extends Canvas implements Runnable {
             if (kf.timer <= 0.0) it.remove();
         }
 
-        // Обновление брошенных гранат HE и Smoke
+        // Обновление брошенных гранат HE, Smoke, Flashbang и Molotov
         for (Iterator<Vec3.Grenade> it = grenades.iterator(); it.hasNext(); ) {
             Vec3.Grenade gr = it.next();
             if (gr.update(dt, map.getBoxes(), Map.MIN_X, Map.MAX_X, Map.MIN_Z, Map.MAX_Z)) {
                 triggerGrenadeDetonation(gr);
                 it.remove();
+            }
+        }
+
+        // Обновление огненных зон Молотова (тушатся дымом Smoke и наносят периодический урон от огня!)
+        for (Iterator<Vec3.FireZone> it = fireZones.iterator(); it.hasNext(); ) {
+            Vec3.FireZone fz = it.next();
+            if (!fz.update(dt)) {
+                it.remove();
+                continue;
+            }
+            boolean extinguishedBySmoke = false;
+            for (int sIdx = 0; sIdx < smokeClouds.size(); sIdx++) {
+                Vec3.SmokeCloud sc = smokeClouds.get(sIdx);
+                if (sc.center.distXZ(fz.center) < sc.getCurrentRadius() + fz.getCurrentRadius() * 0.55) {
+                    extinguishedBySmoke = true;
+                    break;
+                }
+            }
+            if (extinguishedBySmoke) {
+                soundSystem.playSmokeBloom();
+                spawnHitParticles(fz.center.add(0, 0.3, 0), new Vec3(0, 1, 0), 0xDCE3EB, 12);
+                it.remove();
+                continue;
+            }
+
+            fz.tickTimer += dt;
+            if (fz.tickTimer >= 0.28) {
+                fz.tickTimer = 0.0;
+                double fireRad = fz.getCurrentRadius();
+                for (int bIdx = 0; bIdx < bots.size(); bIdx++) {
+                    Bot b = bots.get(bIdx);
+                    if (!b.isAlive()) continue;
+                    if (b.getPosition().distXZ(fz.center) <= fireRad && Math.abs(b.getPosition().y - fz.center.y) < 1.3) {
+                        int burnDmg = 9;
+                        if (settings.showDamageNumbers) {
+                            damagePopups.add(new DamagePopup(b.getPosition().add(0, 1.85, 0), burnDmg, false));
+                        }
+                        if (b.takeDamage(burnDmg, player.getPosition())) {
+                            onBotKilledByPlayer(b, "Молотов", false, 300);
+                        }
+                    }
+                }
+                if (player.isAlive() && player.getPosition().distXZ(fz.center) <= fireRad
+                        && Math.abs(player.getPosition().y - fz.center.y) < 1.3) {
+                    player.takeDamage(5, fz.center);
+                }
             }
         }
 
@@ -839,10 +947,23 @@ public class Engine extends Canvas implements Runnable {
         }
 
         int aliveBots = 0;
+        boolean anyBotHasC4 = false;
         for (int i = 0; i < bots.size(); i++) {
             Bot bot = bots.get(i);
             Bot.ShotEvent shot = bot.update(dt, map, player, bots, smokeClouds, settings.botDifficulty);
-            if (bot.isAlive()) aliveBots++;
+            if (bot.isAlive()) {
+                aliveBots++;
+                if (bot.isCarryingC4()) anyBotHasC4 = true;
+                if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL
+                        && plantedC4 == null && bot.consumeC4PlantReady()) {
+                    plantC4AtSpot(bot.getC4TargetSpot(), bot.getC4SiteName());
+                }
+            } else if (settings.gameMode == GameSettings.GameMode.DEATHMATCH && bot.getRespawnTimer() <= 0.0) {
+                List<Vec3> spList = map.getBotSpawns();
+                Vec3 rsp = spList.get(rng.nextInt(spList.size()));
+                bot.respawn(rsp, rng.nextInt(Math.max(1, map.getPatrolWaypoints().size())));
+                aliveBots++;
+            }
 
             if (shot != null && matchState == MatchState.PLAYING) {
                 tracers.add(new Vec3.Tracer(shot.muzzlePos, shot.endPos, 0xFF9F38, 0.085));
@@ -854,6 +975,9 @@ public class Engine extends Canvas implements Runnable {
                     spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xE03030, 5);
                     if (wasAlive && !player.isAlive()) {
                         addKillFeed(bot.getName(), "AK-47", "ВЫ", false, true);
+                        if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
+                            dmPlayerRespawnTimer = 1.8;
+                        }
                     }
                 } else {
                     spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xE2C48E, 4);
@@ -861,15 +985,57 @@ public class Engine extends Canvas implements Runnable {
             }
         }
 
+        // Если носитель C4 убит до закладки, передаем задачу ближайшему живому боту
+        if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL && plantedC4 == null && !anyBotHasC4 && aliveBots > 0) {
+            for (int i = 0; i < bots.size(); i++) {
+                if (bots.get(i).isAlive()) {
+                    boolean goSiteA = (currentRound % 2 == 1);
+                    bots.get(i).assignBombCarrier(goSiteA ? map.getBombsiteASpot() : map.getBombsiteBSpot(), goSiteA ? "A" : "B");
+                    break;
+                }
+            }
+        }
+
+        // Обновление установленной бомбы C4 (пикающий таймер, обезвреживание клавишей E и взрыв)
+        if (plantedC4 != null && matchState == MatchState.PLAYING) {
+            updatePlantedC4(dt);
+        }
+
         if (matchState == MatchState.PLAYING) {
-            roundTimeLeft -= dt;
-            if (!player.isAlive()) {
-                finishRound(false, "Игрок погиб в бою (+$1900 бонус раунда)");
-            } else if (aliveBots == 0) {
-                finishRound(true, "Все противники нейтрализованы! (+$3250 бонус победы)");
-            } else if (roundTimeLeft <= 0.0) {
-                roundTimeLeft = 0.0;
-                finishRound(false, "Время раунда истекло (+$1900)");
+            if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
+                roundTimeLeft -= dt;
+                if (!player.isAlive()) {
+                    dmPlayerRespawnTimer -= dt;
+                    if (dmPlayerRespawnTimer <= 0.0) {
+                        player.respawnForRound(map.getPlayerSpawn(), false);
+                        player.addMoney(16000);
+                    }
+                }
+                if (player.getKills() >= 25) {
+                    playerRoundWins = settings.roundsToWin;
+                    matchState = MatchState.MATCH_VICTORY;
+                    setMouseCaptured(false);
+                } else if (roundTimeLeft <= 0.0) {
+                    roundTimeLeft = 0.0;
+                    matchState = MatchState.MATCH_VICTORY;
+                    setMouseCaptured(false);
+                }
+            } else {
+                if (plantedC4 == null) {
+                    roundTimeLeft -= dt;
+                }
+                if (!player.isAlive()) {
+                    finishRound(false, "Игрок погиб в бою (+$1900 бонус раунда)");
+                } else if (plantedC4 == null && aliveBots == 0) {
+                    finishRound(true, "Все противники нейтрализованы! (+$3250 бонус победы)");
+                } else if (plantedC4 == null && roundTimeLeft <= 0.0) {
+                    roundTimeLeft = 0.0;
+                    if (settings.gameMode == GameSettings.GameMode.BOMB_DEFUSAL) {
+                        finishRound(true, "Время истекло — Пленты A и B успешно защищены! (+$3250)");
+                    } else {
+                        finishRound(false, "Время раунда истекло (+$1900)");
+                    }
+                }
             }
         } else if (matchState == MatchState.ROUND_OVER) {
             roundOverTimer -= dt;
@@ -879,10 +1045,122 @@ public class Engine extends Canvas implements Runnable {
         }
     }
 
+    public void plantC4AtSpot(Vec3 spot, String siteName) {
+        this.plantedC4 = new Vec3.BombC4(new Vec3(spot.x, spot.y + 0.08, spot.z), siteName);
+        soundSystem.playC4Keypad();
+        streakBannerText = "⚠ БОМБА C4 ЗАЛОЖЕНА НА ПЛЕНТЕ " + siteName + "! ОБЕЗВРЕДЬТЕ НА [E]! ⚠";
+        streakBannerTimer = 4.2;
+    }
+
+    private void updatePlantedC4(double dt) {
+        plantedC4.countdown -= dt;
+        plantedC4.blinkPhase += dt * (plantedC4.countdown < 10.0 ? 18.0 : 8.5);
+        plantedC4.beepTimer -= dt;
+        if (plantedC4.beepTimer <= 0.0 && plantedC4.countdown > 0.0) {
+            double interval = Math.max(0.13, Math.min(1.05, plantedC4.countdown / 34.0));
+            plantedC4.beepTimer = interval;
+            soundSystem.playC4Beep(plantedC4.countdown < 10.0, player.getPosition().dist(plantedC4.pos));
+        }
+
+        // Обезвреживание при зажатой клавише E рядом с бомбой C4
+        boolean nearC4 = player.isAlive() && player.getPosition().dist(plantedC4.pos) < 2.95;
+        if (nearC4 && keys[KeyEvent.VK_E] && !buyMenuOpen) {
+            if (!plantedC4.beingDefused) {
+                soundSystem.playC4Keypad();
+            }
+            plantedC4.beingDefused = true;
+            plantedC4.defuseRequired = player.hasDefuseKit() ? 5.0 : 10.0;
+            plantedC4.defuseProgress += dt;
+            if (plantedC4.defuseProgress >= plantedC4.defuseRequired) {
+                plantedC4.defused = true;
+                soundSystem.playC4Keypad();
+                player.addMoney(300);
+                plantedC4 = null;
+                finishRound(true, "БОМБА C4 УСПЕШНО ОБЕЗВРЕЖЕНА! СПЕЦНАЗ ПОБЕДИЛ (+$3550)");
+                return;
+            }
+        } else {
+            plantedC4.beingDefused = false;
+            plantedC4.defuseProgress = Math.max(0.0, plantedC4.defuseProgress - dt * 2.5);
+        }
+
+        if (plantedC4.countdown <= 0.0) {
+            Vec3 blastPos = plantedC4.pos.copy();
+            String site = plantedC4.siteName;
+            plantedC4 = null;
+            soundSystem.playExplosion(0.0);
+            player.addCameraShake(1.0);
+            for (int i = 0; i < 60; i++) {
+                double ang = rng.nextDouble() * Math.PI * 2.0;
+                double spd = 5.0 + rng.nextDouble() * 14.0;
+                int col = (i % 3 == 0) ? 0xFFF3A1 : ((i % 2 == 0) ? 0xFF6B1A : 0x3E3A36);
+                particles.add(new Vec3.Particle(
+                        blastPos.x, blastPos.y + 0.25, blastPos.z,
+                        Math.cos(ang) * spd, 4.0 + rng.nextDouble() * 11.0, Math.sin(ang) * spd,
+                        col, 0.22, 0.95));
+            }
+            if (player.isAlive() && player.getPosition().dist(blastPos) < 16.0) {
+                player.takeDamage(140, blastPos);
+            }
+            finishRound(false, "ВЗРЫВ БОМБЫ C4 НА ПЛЕНТЕ " + site + "! ТЕРРОРИСТЫ ПОБЕДИЛИ");
+        }
+    }
+
     private void triggerGrenadeDetonation(Vec3.Grenade gr) {
         if (gr.kind == Vec3.Grenade.Kind.SMOKE) {
             smokeClouds.add(new Vec3.SmokeCloud(gr.pos, 4.3, 14.5));
             soundSystem.playSmokeBloom();
+            return;
+        }
+
+        if (gr.kind == Vec3.Grenade.Kind.MOLOTOV) {
+            fireZones.add(new Vec3.FireZone(gr.pos, 3.25, 7.6));
+            soundSystem.playMolotovShatter();
+            if (settings.decalsAndShells && gr.pos.y < 0.6) {
+                addBulletDecal(new Vec3(gr.pos.x, 0.005, gr.pos.z), new Vec3(0, 1, 0), 1.45, 0x2B1E16);
+            }
+            for (int i = 0; i < 18; i++) {
+                double ang = rng.nextDouble() * Math.PI * 2.0;
+                double spd = 2.0 + rng.nextDouble() * 5.0;
+                particles.add(new Vec3.Particle(
+                        gr.pos.x, gr.pos.y + 0.15, gr.pos.z,
+                        Math.cos(ang) * spd, 2.2 + rng.nextDouble() * 4.2, Math.sin(ang) * spd,
+                        0xFF8C1A, 0.11, 0.42));
+            }
+            return;
+        }
+
+        if (gr.kind == Vec3.Grenade.Kind.FLASH) {
+            double distToPlayer = gr.pos.dist(player.getPosition());
+            soundSystem.playFlashbang(distToPlayer);
+            for (int i = 0; i < 16; i++) {
+                double ang = rng.nextDouble() * Math.PI * 2.0;
+                particles.add(new Vec3.Particle(
+                        gr.pos.x, gr.pos.y + 0.12, gr.pos.z,
+                        Math.cos(ang) * 5.5, 2.5 + rng.nextDouble() * 4.0, Math.sin(ang) * 5.5,
+                        0xFFFFFF, 0.12, 0.24));
+            }
+            // Ослепление всех ботов в прямой видимости (до 18 метров)
+            for (int i = 0; i < bots.size(); i++) {
+                Bot b = bots.get(i);
+                if (!b.isAlive()) continue;
+                double d = b.getEyePosition().dist(gr.pos);
+                if (d < 18.5 && map.hasLineOfSight(gr.pos.add(0, 0.2, 0), b.getEyePosition(), smokeClouds)) {
+                    double dur = Math.max(1.8, (1.0 - d / 20.0) * 4.8);
+                    b.applyFlashBlind(dur);
+                }
+            }
+            // Учет поворота головы игрока (если отвернуться от флешки — почти не слепит, как в CS2!)
+            if (player.isAlive() && distToPlayer < 19.0
+                    && map.hasLineOfSight(gr.pos.add(0, 0.2, 0), player.getEyePosition(), smokeClouds)) {
+                Vec3 toFlash = gr.pos.sub(player.getEyePosition()).normalize();
+                double facing = player.getLookDirection().dot(toFlash);
+                if (facing > 0.15) {
+                    player.applyFlashBlind(facing * (1.0 - distToPlayer / 21.0) * 2.6);
+                } else {
+                    player.applyFlashBlind(0.28);
+                }
+            }
             return;
         }
 
@@ -935,6 +1213,9 @@ public class Engine extends Canvas implements Runnable {
     }
 
     private void onBotKilledByPlayer(Bot victim, String weaponLabel, boolean headshot, int cashReward) {
+        if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
+            victim.setRespawnTimer(2.4);
+        }
         int streak = player.recordKill(headshot, cashReward);
         addKillFeed("ВЫ", weaponLabel, victim.getName(), headshot, true);
 
@@ -1273,14 +1554,26 @@ public class Engine extends Canvas implements Runnable {
         // 2. Стены, ящики, ворота и архитектура Dust II
         map.renderStructures(renderer);
 
-        // 3. Следы от пуль (декали)
+        // 3. Следы от пуль (декали) и огненные зоны Молотова
         if (settings.decalsAndShells) {
             for (int i = 0; i < decals.size(); i++) {
                 renderer.drawDecal(decals.get(i));
             }
         }
+        for (int i = 0; i < fireZones.size(); i++) {
+            renderer.drawFireZone(fireZones.get(i));
+        }
 
-        // 4. Подбираемые аптечки и боеприпасы
+        // 4. Установленная взрывчатка C4 на пленте + подбираемые аптечки и боеприпасы
+        if (plantedC4 != null) {
+            Vec3 cp = plantedC4.pos;
+            renderer.drawOrientedWorldBox(cp.x, cp.y + 0.06, cp.z, 0.36, 0.14, 0.26, 0.35, 0.0, Renderer3D.TEX_SOLID, 0xC2A35E);
+            renderer.drawOrientedWorldBox(cp.x, cp.y + 0.14, cp.z, 0.16, 0.04, 0.14, 0.35, 0.0, Renderer3D.TEX_SOLID, 0x262C34);
+            boolean ledOn = Math.sin(plantedC4.blinkPhase) > 0.0;
+            if (ledOn) {
+                renderer.drawOrientedWorldBox(cp.x, cp.y + 0.20, cp.z, 0.12, 0.12, 0.12, 0.0, 0.0, Renderer3D.TEX_SOLID, 0xFF2B22);
+            }
+        }
         for (int i = 0; i < pickups.size(); i++) {
             Vec3.Pickup pk = pickups.get(i);
             double py = pk.pos.y + 0.22 + Math.sin(pk.bobPhase) * 0.06;
@@ -1288,10 +1581,16 @@ public class Engine extends Canvas implements Runnable {
             renderer.drawOrientedWorldBox(pk.pos.x, py, pk.pos.z, 0.36, 0.24, 0.36, pk.bobPhase * 0.7, 0.0, Renderer3D.TEX_SOLID, col);
         }
 
-        // 5. Летящие гранаты и 3D-гильзы
+        // 5. Летящие гранаты (HE, Smoke, Flash, Molotov) и 3D-гильзы
         for (int i = 0; i < grenades.size(); i++) {
             Vec3.Grenade gr = grenades.get(i);
-            int gCol = (gr.kind == Vec3.Grenade.Kind.HE) ? 0x455A38 : 0x707882;
+            int gCol;
+            switch (gr.kind) {
+                case HE:      gCol = 0x455A38; break;
+                case SMOKE:   gCol = 0x707882; break;
+                case FLASH:   gCol = 0xE6EEF6; break;
+                default:      gCol = 0xDF5A1E; break;
+            }
             renderer.drawOrientedWorldBox(gr.pos.x, gr.pos.y, gr.pos.z, 0.16, 0.22, 0.16, gr.yaw, gr.yaw * 0.8, Renderer3D.TEX_SOLID, gCol);
         }
         if (settings.decalsAndShells) {
@@ -1318,7 +1617,12 @@ public class Engine extends Canvas implements Runnable {
             renderer.drawSmokeCloud(smokeClouds.get(i));
         }
 
-        // 8. Модель оружия от первого лица
+        // 7.5. Направленный луч тактического 3D-фонарика (клавиша L)
+        if (currentScreen == AppScreen.IN_GAME && player.isAlive() && player.isFlashlightOn()) {
+            renderer.applyFlashlightBeam();
+        }
+
+        // 8. Модель оружия от первого лица (с активным скином CS2) или 3D-витрина скинов в меню
         if (currentScreen == AppScreen.IN_GAME && player.isAlive()) {
             renderer.clearDepthBuffer();
             player.getCurrentWeapon().renderViewModel(
@@ -1326,8 +1630,14 @@ public class Engine extends Canvas implements Runnable {
                 player.getWalkBobPhase(),
                 player.getWalkSpeedNormalized(),
                 player.getSwayX(),
-                player.getSwayY()
+                player.getSwayY(),
+                settings.weaponSkin
             );
+        } else if (currentScreen == AppScreen.SKIN_ARMORY) {
+            renderer.clearDepthBuffer();
+            renderer.setGraphicsFlags(settings.fogAndVignette, settings.skyCloudsAndSunFlare, false, globalAnimTime);
+            armoryShowcaseWeapons[armoryWeaponIdx].renderShowcaseModel(
+                    renderer, globalAnimTime * 1.15, settings.weaponSkin);
         }
 
         // Вывод 3D-буфера с выбранным в настройках сглаживанием
@@ -1347,6 +1657,8 @@ public class Engine extends Canvas implements Runnable {
         // Отрисовка текущего экрана UI
         if (currentScreen == AppScreen.MAIN_MENU) {
             drawMainMenuScreen(g, outW, outH);
+        } else if (currentScreen == AppScreen.SKIN_ARMORY) {
+            drawSkinArmoryScreen(g, outW, outH);
         } else if (currentScreen == AppScreen.SETTINGS) {
             drawSettingsScreen(g, outW, outH);
         } else if (currentScreen == AppScreen.ARSENAL_GUIDE) {
@@ -1398,40 +1710,45 @@ public class Engine extends Canvas implements Runnable {
 
         int btnX = 34;
         int btnW = leftW - 68;
-        int btnY = 132;
+        int btnY = 122;
 
-        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 54),
+        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 52),
                 "▶  ИГРАТЬ (НАЧАТЬ МАТЧ)", new Color(232, 152, 36), true, this::launchMatchFromMenu);
-        btnY += 68;
-
-        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 46),
-                "⚙  НАСТРОЙКИ ГРАФИКИ", new Color(42, 108, 178), false, () -> openSettingsScreen(false, 0));
-        btnY += 58;
-
-        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 46),
-                "◆  НАСТРОЙКИ ИГРЫ И МЫШИ", new Color(44, 62, 86), false, () -> openSettingsScreen(false, 1));
-        btnY += 58;
-
-        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 46),
-                "♪  НАСТРОЙКИ АУДИО", new Color(44, 62, 86), false, () -> openSettingsScreen(false, 2));
-        btnY += 58;
-
-        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 46),
-                "☰  АРСЕНАЛ И УПРАВЛЕНИЕ", new Color(44, 62, 86), false, () -> currentScreen = AppScreen.ARSENAL_GUIDE);
-        btnY += 66;
+        btnY += 62;
 
         addMenuButton(g, new Rectangle(btnX, btnY, btnW, 44),
+                "★  СКИНЫ ОРУЖИЯ (3D ВИТРИНА)", new Color(138, 56, 168), false,
+                () -> currentScreen = AppScreen.SKIN_ARMORY);
+        btnY += 54;
+
+        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 44),
+                "⚙  НАСТРОЙКИ ГРАФИКИ", new Color(42, 108, 178), false, () -> openSettingsScreen(false, 0));
+        btnY += 54;
+
+        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 44),
+                "◆  НАСТРОЙКИ ИГРЫ И МЫШИ", new Color(44, 62, 86), false, () -> openSettingsScreen(false, 1));
+        btnY += 54;
+
+        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 44),
+                "♪  НАСТРОЙКИ АУДИО", new Color(44, 62, 86), false, () -> openSettingsScreen(false, 2));
+        btnY += 54;
+
+        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 44),
+                "☰  АРСЕНАЛ И УПРАВЛЕНИЕ", new Color(44, 62, 86), false, () -> currentScreen = AppScreen.ARSENAL_GUIDE);
+        btnY += 58;
+
+        addMenuButton(g, new Rectangle(btnX, btnY, btnW, 42),
                 "✖  ВЫЙТИ НА РАБОЧИЙ СТОЛ", new Color(118, 42, 46), false, this::shutdownAndExit);
 
-        // Нижняя сводка графики
+        // Нижняя сводка графики и скина
         g.setFont(new Font("SansSerif", Font.PLAIN, 12));
         g.setColor(new Color(165, 178, 196));
         g.drawString("Рендер: " + settings.resolutionScale.label + " • " + currentFps + " FPS", 34, outH - 42);
-        g.drawString("Тени: " + settings.shadowMode.label + " • F11 Полный экран", 34, outH - 22);
+        g.drawString("Скин: " + settings.weaponSkin.label + " • F11 Полный экран", 34, outH - 22);
 
         // Правая карточка быстрой настройки параметров боя (с живым предпросмотром 3D-сцены!)
-        int cardW = 456;
-        int cardH = 310;
+        int cardW = 468;
+        int cardH = 352;
         int cardX = outW - cardW - 34;
         int cardY = outH - cardH - 34;
 
@@ -1442,22 +1759,30 @@ public class Engine extends Canvas implements Runnable {
 
         g.setFont(new Font("SansSerif", Font.BOLD, 17));
         g.setColor(new Color(248, 204, 84));
-        g.drawString("ПАРАМЕТРЫ ОПЕРАЦИИ: DUST II", cardX + 24, cardY + 34);
+        g.drawString("ПАРАМЕТРЫ ОПЕРАЦИИ: DUST II", cardX + 24, cardY + 32);
 
-        int rowY = cardY + 58;
+        int rowY = cardY + 52;
+        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Режим игры", settings.gameMode.label, () -> {
+            int ord = (settings.gameMode.ordinal() + 1) % GameSettings.GameMode.values().length;
+            settings.gameMode = GameSettings.GameMode.values()[ord];
+            settings.save();
+            startNewMatch();
+        });
+        rowY += 46;
+
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Сложность ИИ", settings.botDifficulty.label, () -> {
             int ord = (settings.botDifficulty.ordinal() + 1) % GameSettings.BotDifficulty.values().length;
             settings.botDifficulty = GameSettings.BotDifficulty.values()[ord];
             settings.save();
         });
-        rowY += 50;
+        rowY += 46;
 
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Противников", settings.botCount + " ботов", () -> {
             settings.botCount = (settings.botCount >= 8) ? 3 : settings.botCount + 1;
             settings.save();
             startNewMatch();
         });
-        rowY += 50;
+        rowY += 46;
 
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Освещение карты", settings.timeOfDay.label, () -> {
             int ord = (settings.timeOfDay.ordinal() + 1) % GameSettings.TimeOfDay.values().length;
@@ -1465,7 +1790,7 @@ public class Engine extends Canvas implements Runnable {
             renderer.applyTimeOfDay(settings.timeOfDay);
             settings.save();
         });
-        rowY += 50;
+        rowY += 46;
 
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Матч до побед", settings.roundsToWin + " раундов", () -> {
             if (settings.roundsToWin == 3) settings.roundsToWin = 5;
@@ -1474,9 +1799,95 @@ public class Engine extends Canvas implements Runnable {
             settings.save();
         });
 
-        drawCenteredText(g, "AWP • M4A1-S • Deagle • Магазин [B] • Гранаты [G / Q]",
-                cardX + cardW / 2, cardY + cardH - 17,
+        drawCenteredText(g, "C4 [E] • Flash [V] • Молотов [X] • Фонарик [L] • Скины [H]",
+                cardX + cardW / 2, cardY + cardH - 16,
                 new Font("SansSerif", Font.PLAIN, 12), new Color(184, 198, 216));
+    }
+
+    // =========================================================================
+    //  1.5. 3D ОРУЖЕЙНАЯ СКИНОВ CS2 (ИНТЕРАКТИВНЫЙ ВРАЩАЮЩИЙСЯ СТЕНД)
+    // =========================================================================
+    private void drawSkinArmoryScreen(Graphics2D g, int outW, int outH) {
+        // Левая панель выбора пушки и скина, справа — открытое окно с живой 3D-моделью оружия!
+        int panelW = 430;
+        g.setColor(new Color(11, 15, 24, 228));
+        g.fillRect(0, 0, panelW, outH);
+        g.setColor(new Color(196, 108, 255, 175));
+        g.fillRect(panelW - 2, 0, 2, outH);
+
+        g.setFont(new Font("SansSerif", Font.BOLD, 24));
+        g.setColor(Color.WHITE);
+        g.drawString("3D ОРУЖЕЙНАЯ СКИНОВ", 30, 46);
+        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setColor(new Color(214, 152, 255));
+        g.drawString("КОЛЛЕКЦИОННЫЕ РАСКРАСКИ CS-2 JAVA", 30, 66);
+
+        g.setFont(new Font("SansSerif", Font.BOLD, 13));
+        g.setColor(new Color(185, 198, 216));
+        g.drawString("ВЫБЕРИТЕ ОРУЖИЕ ДЛЯ 3D-ОСМОТРА:", 30, 98);
+
+        int wx = 30, wy = 108;
+        int btnW = (panelW - 72) / 2;
+        for (int i = 0; i < armoryShowcaseWeapons.length; i++) {
+            final int idx = i;
+            Weapon w = armoryShowcaseWeapons[i];
+            int col = i % 2;
+            int row = i / 2;
+            Rectangle r = new Rectangle(wx + col * (btnW + 12), wy + row * 42, btnW, 35);
+            boolean sel = (armoryWeaponIdx == i);
+            addMenuButton(g, r, w.getDisplayName(),
+                    sel ? new Color(228, 152, 38) : new Color(34, 45, 62), sel,
+                    () -> armoryWeaponIdx = idx);
+        }
+
+        int sy = 294;
+        g.setFont(new Font("SansSerif", Font.BOLD, 13));
+        g.setColor(new Color(185, 198, 216));
+        g.drawString("КОЛЛЕКЦИОННЫЙ СКИН (ДЛЯ ВСЕГО АРСЕНАЛА):", 30, sy);
+        sy += 12;
+
+        GameSettings.WeaponSkin[] allSkins = GameSettings.WeaponSkin.values();
+        for (int i = 0; i < allSkins.length; i++) {
+            final GameSettings.WeaponSkin sk = allSkins[i];
+            boolean active = (settings.weaponSkin == sk);
+            Color base = active ? new Color(142, 58, 178) : new Color(28, 38, 52);
+            addMenuButton(g, new Rectangle(30, sy + i * 43, panelW - 60, 36),
+                    (active ? "★ " : "   ") + sk.label, base, false, () -> {
+                        settings.weaponSkin = sk;
+                        settings.save();
+                    });
+        }
+
+        addMenuButton(g, new Rectangle(30, outH - 66, panelW - 60, 44),
+                "← СОХРАНИТЬ СКИН И В ГЛАВНОЕ МЕНЮ", new Color(56, 156, 96), false, () -> {
+            settings.save();
+            currentScreen = AppScreen.MAIN_MENU;
+        });
+
+        // Информационная карточка ТТХ выбранного оружия снизу справа под 3D-моделью
+        Weapon cw = armoryShowcaseWeapons[armoryWeaponIdx];
+        int infoW = 640, infoH = 112;
+        int infoX = panelW + (outW - panelW - infoW) / 2;
+        int infoY = outH - infoH - 32;
+
+        g.setColor(new Color(12, 16, 25, 216));
+        g.fillRoundRect(infoX, infoY, infoW, infoH, 16, 16);
+        g.setColor(new Color(245, 194, 72, 165));
+        g.drawRoundRect(infoX, infoY, infoW, infoH, 16, 16);
+
+        String fullTitle = cw.getDisplayName().toUpperCase() + "  |  " + settings.weaponSkin.label.toUpperCase();
+        drawCenteredText(g, fullTitle, infoX + infoW / 2, infoY + 34,
+                new Font("SansSerif", Font.BOLD, 20), new Color(252, 212, 92));
+
+        String statsLine = cw.isMelee()
+                ? "Урон ЛКМ: 55  •  Выпад ПКМ: 92 / 155 HS  •  Награда: $1500  •  Скорость: +15%"
+                : String.format("Урон (тело / голова): %d / %d   •   Цена: $%d   •   Награда за фраг: $%d",
+                        cw.getBodyDamage(), cw.getHeadDamage(), cw.getPrice(), cw.getKillReward());
+        drawCenteredText(g, statsLine, infoX + infoW / 2, infoY + 66,
+                new Font("SansSerif", Font.PLAIN, 14), new Color(224, 232, 244));
+        drawCenteredText(g, "Подсказка: в бою клавиша [H] мгновенно переключает скин, а [F] запускает осмотр!",
+                infoX + infoW / 2, infoY + 94,
+                new Font("SansSerif", Font.PLAIN, 12), new Color(168, 184, 204));
     }
 
     // =========================================================================
@@ -1703,29 +2114,29 @@ public class Engine extends Canvas implements Runnable {
                 new Font("SansSerif", Font.BOLD, 22), new Color(248, 206, 88));
 
         String[] leftLines = {
-            "УПРАВЛЕНИЕ ПЕРСОНАЖЕМ И ОГНЕМ:",
-            "• WASD — Передвижение по арене",
-            "• Space — Прыжок (каскады ящиков Dust II)",
-            "• Ctrl (или C) — Приседание за укрытиями",
+            "УПРАВЛЕНИЕ ПЕРСОНАЖЕМ И ГРАНАТАМИ:",
+            "• WASD / Space / Ctrl — Бег, прыжок, приседание",
             "• Shift — Тихий шаг (без шума + высокая кучность)",
             "• ЛКМ — Стрельба / Быстрый взмах ножом",
-            "• ПКМ — Оптический зум AWP / Прицел ADS / Удар ножом",
-            "• R — Перезарядка магазина",
-            "• F — Осмотр 3D-модели оружия в руках (Inspect)",
-            "• B — Открыть магазин закупки оружия ($)",
-            "• 4 (или G) — Бросок осколочной гранаты HE",
-            "• 5 (или Q) — Дымовая шашка CS2 (скрывает от ботов!)"
+            "• ПКМ — Оптический зум AWP / Прицел ADS / Выпад ножом",
+            "• E (зажать у бомбы) — Обезвреживание C4 на пленте",
+            "• B — Магазин закупки ($), F — Осмотр, H — Скин",
+            "• L — Тактический 3D-фонарик (для Ночной операции!)",
+            "• 4 / G — Осколочная граната HE",
+            "• 5 / Q — Дымовая шашка Smoke (тушит Молотов!)",
+            "• 6 / V — Светошумовая Flashbang (слепит врагов!)",
+            "• 7 / X — Зажигательный Молотов (горящая зона)"
         };
 
         String[] rightLines = {
-            "ВООРУЖЕНИЕ И СНАРЯЖЕНИЕ (МАГАЗИН [B]):",
-            "• AK-47 ($2700) — Автомат, ваншот в голову (116 ед.)",
-            "• M4A1-S ($2900) — Бесшумный глушитель, мягкая отдача",
-            "• AWP ($4750) — Снайперская, 1 выстрел = ликвидация",
-            "• XM1014 ($2000) — Авто-дробовик (8 картечин за залп)",
-            "• Desert Eagle ($700) — Крупный калибр (186 в голову)",
-            "• Glock-18 ($200) — Скорострельный табельный пистолет",
-            "• Боевой нож — +15% к скорости бега, $1500 за фраг",
+            "ВООРУЖЕНИЕ И РЕЖИМЫ (МАГАЗИН [B]):",
+            "• AK-47 ($2700) • M4A1-S с глушителем ($2900)",
+            "• AWP ($4750) — Снайперский зум 2.8X / 6.0X на ПКМ",
+            "• XM1014 ($2000) — Дробовик (8 картечин за залп)",
+            "• MP9 ($1250) — Скорострельный ПП ($600 за фраг)",
+            "• Desert Eagle ($700) • Glock-18 ($200) • Нож ($1500)",
+            "• Набор сапёра C4 — Ускоряет разминирование в 2 раза",
+            "• 5 коллекционных скинов CS2 (Asiimov, Fade, Redline)",
             "",
             "СИСТЕМНЫЕ КЛАВИШИ:",
             "• Tab — Таблица счета   • F5 — Быстрый рестарт",
@@ -1835,8 +2246,8 @@ public class Engine extends Canvas implements Runnable {
         g.setColor(new Color(8, 12, 18, 186));
         g.fillRect(0, 0, outW, outH);
 
-        int bw = 660;
-        int bh = 470;
+        int bw = 690;
+        int bh = 516;
         int bx = outW / 2 - bw / 2;
         int by = outH / 2 - bh / 2;
 
@@ -1847,36 +2258,39 @@ public class Engine extends Canvas implements Runnable {
 
         g.setFont(new Font("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("МАГАЗИН СНАРЯЖЕНИЯ CS2", bx + 28, by + 40);
+        g.drawString("МАГАЗИН СНАРЯЖЕНИЯ CS2", bx + 28, by + 38);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 22));
+        boolean freeDm = (settings.gameMode == GameSettings.GameMode.DEATHMATCH);
+        g.setFont(new Font("Monospaced", Font.BOLD, 21));
         g.setColor(new Color(104, 240, 136));
-        String cashStr = "БАЛАНС: $" + player.getMoney();
-        g.drawString(cashStr, bx + bw - g.getFontMetrics().stringWidth(cashStr) - 28, by + 40);
+        String cashStr = freeDm ? "РЕЖИМ DM: БЕСПЛАТНО" : ("БАЛАНС: $" + player.getMoney());
+        g.drawString(cashStr, bx + bw - g.getFontMetrics().stringWidth(cashStr) - 28, by + 38);
 
         int itemX = bx + 28;
         int itemW = bw - 56;
-        int iy = by + 64;
-        int step = 44;
+        int iy = by + 58;
+        int step = 43;
 
-        drawBuyRow(g, itemX, iy, itemW, "[1] AK-47 — Штурмовая винтовка (ваншот в голову)", 2700,
+        drawBuyRow(g, itemX, iy, itemW, "[1] AK-47 — Штурмовая винтовка (ваншот в голову)", freeDm ? 0 : 2700,
                 () -> tryPurchaseWeapon(Weapon.Type.AK47)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[2] M4A1-S — Винтовка спецназа с глушителем", 2900,
+        drawBuyRow(g, itemX, iy, itemW, "[2] M4A1-S — Винтовка спецназа с глушителем", freeDm ? 0 : 2900,
                 () -> tryPurchaseWeapon(Weapon.Type.M4A1S)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[3] AWP — Снайперская винтовка с оптическим прицелом ПКМ", 4750,
+        drawBuyRow(g, itemX, iy, itemW, "[3] AWP — Снайперская винтовка с оптическим прицелом ПКМ", freeDm ? 0 : 4750,
                 () -> tryPurchaseWeapon(Weapon.Type.AWP)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[4] XM1014 — Полуавтоматический дробовик (8 картечин)", 2000,
+        drawBuyRow(g, itemX, iy, itemW, "[4] XM1014 — Полуавтоматический дробовик (8 картечин)", freeDm ? 0 : 2000,
                 () -> tryPurchaseWeapon(Weapon.Type.XM1014)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[5] Desert Eagle — Крупнокалиберный пистолет", 700,
+        drawBuyRow(g, itemX, iy, itemW, "[5] MP9 — Скорострельный ПП спецназа ($600 за фраг)", freeDm ? 0 : 1250,
+                () -> tryPurchaseWeapon(Weapon.Type.MP9)); iy += step;
+        drawBuyRow(g, itemX, iy, itemW, "[6] Desert Eagle — Крупнокалиберный пистолет", freeDm ? 0 : 700,
                 () -> tryPurchaseWeapon(Weapon.Type.DEAGLE)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[6] Осколочная граната HE (бросок на 4 / G)", 300,
+        drawBuyRow(g, itemX, iy, itemW, "[7] Набор гранат: Осколочная HE [G] + Светошумовая Flash [V]", freeDm ? 0 : 400,
                 () -> tryPurchaseUtility(1)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[7] Дымовая граната Smoke (бросок на 5 / Q)", 300,
+        drawBuyRow(g, itemX, iy, itemW, "[8] Набор гранат: Дым Smoke [Q] + Зажигательный Молотов [X]", freeDm ? 0 : 600,
                 () -> tryPurchaseUtility(2)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[8] Полный комплект брони + аптечка (100 HP / 100 AP)", 650,
+        drawBuyRow(g, itemX, iy, itemW, "[9] Броня 100 AP + Аптечка + Набор сапёра C4 (5 сек размин.)", freeDm ? 0 : 850,
                 () -> tryPurchaseUtility(3));
 
-        addMenuButton(g, new Rectangle(bx + bw / 2 - 140, by + bh - 52, 280, 38),
+        addMenuButton(g, new Rectangle(bx + bw / 2 - 140, by + bh - 50, 280, 38),
                 "ЗАКРЫТЬ МАГАЗИН (B / ESC)", new Color(54, 72, 96), false, () -> {
             buyMenuOpen = false;
             setMouseCaptured(true);
@@ -1938,13 +2352,24 @@ public class Engine extends Canvas implements Runnable {
                 g.setColor(b.getHealth() > 45 ? new Color(235, 72, 65) : new Color(255, 165, 45));
                 g.fillRect(bx, by, (int) ((barW * b.getHealth()) / 100.0), barH);
 
-                if (aimedAt) {
-                    String tag = b.getName() + " (" + b.getHealth() + " HP)";
+                if (b.isBlinded()) {
+                    drawCenteredText(g, "★ ОСЛЕПЛЁН ★", sx, by - 6,
+                            new Font("SansSerif", Font.BOLD, 11), new Color(255, 245, 150));
+                } else if (aimedAt || b.isCarryingC4()) {
+                    String tag = b.getName() + " (" + b.getHealth() + " HP)" + (b.isCarryingC4() ? " [C4]" : "");
                     FontMetrics fm = g.getFontMetrics();
-                    g.setColor(new Color(255, 220, 210));
+                    g.setColor(b.isCarryingC4() ? new Color(255, 212, 92) : new Color(255, 220, 210));
                     g.drawString(tag, sx - fm.stringWidth(tag) / 2, by - 5);
                 }
             }
+        }
+
+        // 3D-маркер заложенной бомбы C4 на пленте
+        if (plantedC4 != null && renderer.projectToScreen(plantedC4.pos.x, plantedC4.pos.y + 0.55, plantedC4.pos.z, proj)) {
+            int sx = (int) (proj[0] * scaleX);
+            int sy = (int) (proj[1] * scaleY);
+            drawCenteredText(g, "▼ C4 ПЛЕНТ " + plantedC4.siteName + " (" + String.format("%.1fс", Math.max(0.0, plantedC4.countdown)) + ")",
+                    sx, sy, new Font("SansSerif", Font.BOLD, 13), new Color(255, 92, 82));
         }
 
         // Всплывающие цифры урона
@@ -1998,6 +2423,14 @@ public class Engine extends Canvas implements Runnable {
 
         if (!player.isAlive()) {
             g.setColor(new Color(95, 12, 12, 95));
+            g.fillRect(0, 0, outW, outH);
+        }
+
+        // Светошумовая вспышка от Flashbang
+        double blindT = player.getFlashBlindTimer();
+        if (blindT > 0.01) {
+            int flashAlpha = Math.max(0, Math.min(242, (int) (blindT * 185.0)));
+            g.setColor(new Color(255, 253, 246, flashAlpha));
             g.fillRect(0, 0, outW, outH);
         }
     }
@@ -2081,28 +2514,69 @@ public class Engine extends Canvas implements Runnable {
         g.setFont(new Font("SansSerif", Font.BOLD, 24));
         g.drawString(String.valueOf(botRoundWins), topX + topW - 76, topY + 38);
 
-        int totalSec = Math.max(0, (int) Math.ceil(roundTimeLeft));
-        String timeStr = String.format("%02d:%02d", totalSec / 60, totalSec % 60);
-        drawCenteredText(g, timeStr, outW / 2, topY + 30,
-                new Font("Monospaced", Font.BOLD, 22), totalSec <= 15 ? new Color(255, 95, 85) : Color.WHITE);
+        if (plantedC4 != null) {
+            boolean blink = Math.sin(plantedC4.blinkPhase) > 0.0;
+            String c4Str = String.format("C4: %04.1f", Math.max(0.0, plantedC4.countdown));
+            drawCenteredText(g, c4Str, outW / 2, topY + 30,
+                    new Font("Monospaced", Font.BOLD, 21), blink ? new Color(255, 76, 68) : new Color(255, 206, 92));
+            String subStr = "⚠ ПЛЕНТ " + plantedC4.siteName + " ЗАМИНИРОВАН! ПОДОЙДИТЕ И ЗАЖМИТЕ [E]";
+            drawCenteredText(g, subStr, outW / 2, topY + 49,
+                    new Font("SansSerif", Font.BOLD, 10), new Color(255, 185, 175));
+        } else {
+            int totalSec = Math.max(0, (int) Math.ceil(roundTimeLeft));
+            String timeStr = String.format("%02d:%02d", totalSec / 60, totalSec % 60);
+            drawCenteredText(g, timeStr, outW / 2, topY + 30,
+                    new Font("Monospaced", Font.BOLD, 22), totalSec <= 15 ? new Color(255, 95, 85) : Color.WHITE);
 
-        String subStr = "РАУНД " + currentRound + " (ДО " + settings.roundsToWin + ") • ВРАГОВ: " + countAliveBots();
-        drawCenteredText(g, subStr, outW / 2, topY + 49,
-                new Font("SansSerif", Font.BOLD, 11), new Color(205, 214, 226));
+            String subStr = (settings.gameMode == GameSettings.GameMode.DEATHMATCH)
+                    ? ("БОЙ НАСМЕРТЬ (ДО 25 ФРАГОВ) • СЧЕТ: " + player.getKills() + "/25")
+                    : ("РАУНД " + currentRound + " (ДО " + settings.roundsToWin + ") • ВРАГОВ: " + countAliveBots());
+            drawCenteredText(g, subStr, outW / 2, topY + 49,
+                    new Font("SansSerif", Font.BOLD, 11), new Color(205, 214, 226));
+        }
+
+        // Индикатор обезвреживания C4 по клавише E
+        if (plantedC4 != null && player.isAlive() && player.getPosition().dist(plantedC4.pos) < 2.95) {
+            int dw = 340, dh = 54;
+            int dx = outW / 2 - dw / 2, dy = outH / 2 + 56;
+            g.setColor(new Color(10, 16, 24, 226));
+            g.fillRoundRect(dx, dy, dw, dh, 12, 12);
+            g.setColor(new Color(82, 220, 255));
+            g.drawRoundRect(dx, dy, dw, dh, 12, 12);
+
+            if (plantedC4.beingDefused) {
+                double p = Math.min(1.0, plantedC4.defuseProgress / plantedC4.defuseRequired);
+                drawCenteredText(g, String.format("ОБЕЗВРЕЖИВАНИЕ C4... %.1f с",
+                        Math.max(0.0, plantedC4.defuseRequired - plantedC4.defuseProgress)),
+                        outW / 2, dy + 22, new Font("SansSerif", Font.BOLD, 13), new Color(110, 235, 255));
+                g.setColor(new Color(32, 46, 62));
+                g.fillRoundRect(dx + 20, dy + 32, dw - 40, 11, 6, 6);
+                g.setColor(new Color(72, 226, 255));
+                g.fillRoundRect(dx + 20, dy + 32, (int) ((dw - 40) * p), 11, 6, 6);
+            } else {
+                String kitNote = player.hasDefuseKit() ? " (Набор сапёра: 5 сек)" : " (Без набора: 10 сек)";
+                drawCenteredText(g, "ЗАЖМИТЕ [E] — ОБЕЗВРЕДИТЬ БОМБУ C4", outW / 2, dy + 24,
+                        new Font("SansSerif", Font.BOLD, 13), new Color(120, 240, 175));
+                drawCenteredText(g, "Дистанция в норме" + kitNote, outW / 2, dy + 43,
+                        new Font("SansSerif", Font.PLAIN, 11), new Color(205, 218, 232));
+            }
+        }
 
         // 2. Панель денег CS2 + здоровья HP и брони AP (снизу слева)
         int hpW = 302, hpH = 74;
         int hpX = 20, hpY = outH - hpH - 22;
 
-        // Плашка валюты $ и кнопки магазина [B]
+        // Плашка валюты $, набора сапёра и фонарика [L]
         g.setColor(new Color(14, 20, 26, 208));
-        g.fillRoundRect(hpX, hpY - 38, 220, 32, 10, 10);
+        g.fillRoundRect(hpX, hpY - 38, 326, 32, 10, 10);
         g.setFont(new Font("Monospaced", Font.BOLD, 17));
         g.setColor(new Color(102, 242, 136));
-        g.drawString("$ " + player.getMoney(), hpX + 14, hpY - 17);
+        g.drawString("$ " + player.getMoney(), hpX + 12, hpY - 17);
         g.setFont(new Font("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(245, 202, 86));
-        g.drawString("[B] МАГАЗИН", hpX + 124, hpY - 17);
+        String rightBadge = "[B] Маг." + (player.hasDefuseKit() ? " • Щипцы C4" : "")
+                + (player.isFlashlightOn() ? " • [L] Свет ВКЛ" : " • [L] Свет");
+        g.drawString(rightBadge, hpX + 98, hpY - 17);
 
         g.setColor(new Color(14, 18, 25, 214));
         g.fillRoundRect(hpX, hpY, hpW, hpH, 12, 12);
@@ -2135,8 +2609,8 @@ public class Engine extends Canvas implements Runnable {
         g.setColor(new Color(82, 168, 250));
         g.fillRoundRect(barStartX, hpY + 55, (int) (barWidth * (ap / 100.0)), 7, 4, 4);
 
-        // 3. Панель оружия, патронов и гранат (снизу справа)
-        int amW = 316, amH = 114;
+        // 3. Панель оружия, StatTrak™, патронов и всех 4 гранат CS2 (снизу справа)
+        int amW = 338, amH = 124;
         int amX = outW - amW - 20, amY = outH - amH - 22;
 
         g.setColor(new Color(14, 18, 25, 214));
@@ -2149,13 +2623,23 @@ public class Engine extends Canvas implements Runnable {
         g.setColor(new Color(248, 202, 82));
         g.drawString(activeWeapon.getDisplayName().toUpperCase(), amX + 16, amY + 23);
 
-        // Гранаты справа сверху в карточке оружия
+        // Оранжевый цифровой счетчик StatTrak™
+        g.setColor(new Color(42, 24, 14, 220));
+        g.fillRoundRect(amX + 196, amY + 8, 128, 20, 6, 6);
+        g.setColor(new Color(255, 132, 36));
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.drawString(String.format("StatTrak™ %04d", player.getKills()), amX + 204, amY + 22);
+
+        // Строка всех 4 гранат CS2
         g.setFont(new Font("SansSerif", Font.BOLD, 11));
-        g.setColor(new Color(210, 224, 238));
-        g.drawString("[G] HE:" + player.getHeGrenades() + "  [Q] Дым:" + player.getSmokeGrenades(), amX + 166, amY + 22);
+        g.setColor(new Color(206, 220, 236));
+        String nades = String.format("[G]HE:%d  [Q]Дым:%d  [V]Флеш:%d  [X]Огонь:%d",
+                player.getHeGrenades(), player.getSmokeGrenades(),
+                player.getFlashGrenades(), player.getMolotovGrenades());
+        g.drawString(nades, amX + 16, amY + 82);
 
         if (activeWeapon.isMelee()) {
-            g.setFont(new Font("SansSerif", Font.BOLD, 24));
+            g.setFont(new Font("SansSerif", Font.BOLD, 22));
             g.setColor(Color.WHITE);
             g.drawString("ЛКМ / ПКМ УДАР", amX + 16, amY + 57);
         } else {
@@ -2170,22 +2654,43 @@ public class Engine extends Canvas implements Runnable {
 
             g.setFont(new Font("SansSerif", Font.PLAIN, 11));
             g.setColor(new Color(160, 178, 198));
-            g.drawString("[ПКМ] Прицел  [F] Осмотр", amX + 158, amY + 55);
+            g.drawString("[ПКМ] Зум  [F] Осмотр  [H] Скин", amX + 146, amY + 56);
         }
 
         Weapon[] allW = player.getWeapons();
-        int slotW = 92;
+        int slotW = 99;
         for (int i = 0; i < allW.length; i++) {
             int sx = amX + 14 + i * (slotW + 6);
-            int sy = amY + 82;
+            int sy = amY + 93;
             boolean sel = (i == player.getCurrentWeaponIndex());
             g.setColor(sel ? new Color(245, 188, 66, 228) : new Color(36, 44, 56, 190));
             g.fillRoundRect(sx, sy, slotW, 22, 6, 6);
             g.setFont(new Font("SansSerif", Font.BOLD, 11));
             g.setColor(sel ? new Color(18, 20, 24) : new Color(196, 206, 218));
-            String shortName = (i == 2) ? "Нож" : (allW[i].getDisplayName().length() > 8
-                    ? allW[i].getDisplayName().substring(0, 7) : allW[i].getDisplayName());
+            String shortName = (i == 2) ? "Нож" : (allW[i].getDisplayName().length() > 9
+                    ? allW[i].getDisplayName().substring(0, 8) : allW[i].getDisplayName());
             g.drawString((i + 1) + ": " + shortName, sx + 6, sy + 15);
+        }
+
+        // 4. Фирменные карточки фрагов раунда CS2 внизу по центру экрана!
+        int rk = Math.min(8, player.getRoundKills());
+        if (rk > 0) {
+            int cardW = 36, cardGap = 6;
+            int totalW = rk * cardW + (rk - 1) * cardGap;
+            int startX = outW / 2 - totalW / 2;
+            int cardY = outH - 64;
+            for (int i = 0; i < rk; i++) {
+                boolean hs = player.isRoundKillHeadshot(i);
+                int cx = startX + i * (cardW + cardGap);
+                g.setColor(hs ? new Color(245, 172, 38, 228) : new Color(34, 48, 68, 224));
+                g.fillRoundRect(cx, cardY, cardW, 42, 8, 8);
+                g.setColor(hs ? new Color(255, 236, 140) : new Color(104, 196, 255));
+                g.drawRoundRect(cx, cardY, cardW, 42, 8, 8);
+                drawCenteredText(g, "☠", cx + cardW / 2, cardY + 23,
+                        new Font("SansSerif", Font.BOLD, 17), Color.WHITE);
+                drawCenteredText(g, hs ? "HS" : ("K" + (i + 1)), cx + cardW / 2, cardY + 37,
+                        new Font("SansSerif", Font.BOLD, 9), hs ? new Color(24, 18, 10) : new Color(215, 230, 248));
+            }
         }
     }
 
@@ -2215,7 +2720,15 @@ public class Engine extends Canvas implements Runnable {
             g.fillRect(bx0, bz0, bw, bh);
         }
 
-        // Дымовые завесы на радаре
+        // Дымовые завесы, огонь Молотова и мигающий маяк бомбы C4 на радаре
+        for (int i = 0; i < fireZones.size(); i++) {
+            Vec3.FireZone fz = fireZones.get(i);
+            int fx = rx + pad + (int) (((fz.center.x - Map.MIN_X) / span) * inner);
+            int fzR = ry + pad + (int) (((Map.MAX_Z - fz.center.z) / span) * inner);
+            int fr = Math.max(4, (int) ((fz.getCurrentRadius() / span) * inner));
+            g.setColor(new Color(255, 108, 28, 175));
+            g.fillOval(fx - fr, fzR - fr, fr * 2, fr * 2);
+        }
         for (int i = 0; i < smokeClouds.size(); i++) {
             Vec3.SmokeCloud sc = smokeClouds.get(i);
             int sx = rx + pad + (int) (((sc.center.x - Map.MIN_X) / span) * inner);
@@ -2223,6 +2736,12 @@ public class Engine extends Canvas implements Runnable {
             int sr = Math.max(4, (int) ((sc.getCurrentRadius() / span) * inner));
             g.setColor(new Color(200, 210, 220, 145));
             g.fillOval(sx - sr, sz - sr, sr * 2, sr * 2);
+        }
+        if (plantedC4 != null) {
+            int cx = rx + pad + (int) (((plantedC4.pos.x - Map.MIN_X) / span) * inner);
+            int cz = ry + pad + (int) (((Map.MAX_Z - plantedC4.pos.z) / span) * inner);
+            g.setColor(Math.sin(plantedC4.blinkPhase) > 0.0 ? new Color(255, 52, 42) : new Color(255, 215, 75));
+            g.fillOval(cx - 5, cz - 5, 10, 10);
         }
 
         Vec3 eye = player.getEyePosition();
@@ -2549,6 +3068,9 @@ public class Engine extends Canvas implements Runnable {
     public Map getMap() { return map; }
     public List<Bot> getBots() { return bots; }
     public List<Vec3.SmokeCloud> getSmokeClouds() { return smokeClouds; }
+    public List<Vec3.FireZone> getFireZones() { return fireZones; }
+    public Vec3.BombC4 getPlantedC4() { return plantedC4; }
+    public void setPlantedC4(Vec3.BombC4 c4) { this.plantedC4 = c4; }
     public MatchState getMatchState() { return matchState; }
     public int getPlayerRoundWins() { return playerRoundWins; }
     public int getBotRoundWins() { return botRoundWins; }

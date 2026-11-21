@@ -74,6 +74,15 @@ public class Bot {
     private double muzzleFlashTimer = 0.0;
     private double healthBarTimer = 0.0;
     private double deathAnimProgress = 0.0;
+    private double blindTimer = 0.0;
+    private double respawnTimer = 0.0;
+
+    // Миссия установки взрывчатки C4 (для режима Операция C4)
+    private boolean carryingC4 = false;
+    private Vec3 c4TargetSpot = null;
+    private String c4SiteName = "A";
+    private double c4PlantTimer = 0.0;
+    private boolean c4PlantCompleted = false;
 
     public Bot(String name, Vec3 spawnPos, int initialWaypoint, long seed) {
         this.name = name;
@@ -101,6 +110,35 @@ public class Bot {
         this.muzzleFlashTimer = 0.0;
         this.healthBarTimer = 0.0;
         this.deathAnimProgress = 0.0;
+        this.blindTimer = 0.0;
+        this.respawnTimer = 0.0;
+        this.carryingC4 = false;
+        this.c4TargetSpot = null;
+        this.c4PlantTimer = 0.0;
+        this.c4PlantCompleted = false;
+    }
+
+    public void assignBombCarrier(Vec3 siteSpot, String siteName) {
+        this.carryingC4 = true;
+        this.c4TargetSpot = siteSpot.copy();
+        this.c4SiteName = siteName;
+        this.c4PlantTimer = 0.0;
+        this.c4PlantCompleted = false;
+    }
+
+    public void applyFlashBlind(double seconds) {
+        if (!alive) return;
+        this.blindTimer = Math.max(this.blindTimer, seconds);
+        this.healthBarTimer = Math.max(this.healthBarTimer, seconds);
+    }
+
+    public boolean consumeC4PlantReady() {
+        if (c4PlantCompleted) {
+            c4PlantCompleted = false;
+            carryingC4 = false;
+            return true;
+        }
+        return false;
     }
 
     public void notifyPlayerGunshot(Vec3 shotPos, boolean silenced) {
@@ -118,12 +156,29 @@ public class Bot {
         if (hitFlashTimer > 0.0) hitFlashTimer = Math.max(0.0, hitFlashTimer - dt);
         if (muzzleFlashTimer > 0.0) muzzleFlashTimer = Math.max(0.0, muzzleFlashTimer - dt);
         if (healthBarTimer > 0.0) healthBarTimer = Math.max(0.0, healthBarTimer - dt);
+        if (blindTimer > 0.0) blindTimer = Math.max(0.0, blindTimer - dt);
 
         if (!alive) {
             if (deathAnimProgress < 1.0) {
                 deathAnimProgress = Math.min(1.0, deathAnimProgress + dt * 2.35);
             }
+            if (respawnTimer > 0.0) {
+                respawnTimer = Math.max(0.0, respawnTimer - dt);
+            }
             applyVerticalPhysics(dt, map);
+            return null;
+        }
+
+        // Если бот ослеплен светошумовой гранатой Flashbang — теряет ориентацию и отступает вслепую!
+        if (blindTimer > 0.15) {
+            c4PlantTimer = 0.0;
+            yaw += Math.sin(blindTimer * 7.0) * dt * 2.4;
+            double blindMoveX = Math.cos(yaw) * strafeDir * 1.9;
+            double blindMoveZ = -Math.sin(yaw) * strafeDir * 1.9;
+            tryMoveBotAxis(map, blindMoveX * dt, 0.0);
+            tryMoveBotAxis(map, 0.0, blindMoveZ * dt);
+            applyVerticalPhysics(dt, map);
+            walkPhase += dt * 3.8;
             return null;
         }
 
@@ -188,6 +243,24 @@ public class Bot {
                         fireCooldown = 0.16 + rng.nextDouble() * 0.05;
                     }
                 }
+            }
+        } else if (carryingC4 && c4TargetSpot != null) {
+            // Приоритет носителя бомбы C4: продвижение на Плент A или Плент B и закладка взрывчатки!
+            double dx = c4TargetSpot.x - position.x;
+            double dz = c4TargetSpot.z - position.z;
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist < 1.75) {
+                c4PlantTimer += dt;
+                yaw += dt * 1.2;
+                if (c4PlantTimer >= 2.6) {
+                    c4PlantCompleted = true;
+                }
+            } else {
+                c4PlantTimer = 0.0;
+                double targetYaw = Math.atan2(dx, dz);
+                yaw = turnSmoothly(yaw, targetYaw, dt * 5.6);
+                moveX = (dx / dist) * (PATROL_SPEED * 1.18);
+                moveZ = (dz / dist) * (PATROL_SPEED * 1.18);
             }
         } else if (state == State.SEARCH) {
             searchTimer -= dt;
@@ -459,12 +532,22 @@ public class Bot {
         r.drawOrientedWorldBox(bx - rightX * 0.14, by + 0.08, bz - rightZ * 0.14, 0.19, 0.16, 0.26, yaw, legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
         r.drawOrientedWorldBox(bx + rightX * 0.14, by + 0.08, bz + rightZ * 0.14, 0.19, 0.16, 0.26, yaw, -legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
 
-        // Торс, разгрузка и тактический рюкзак за спиной
+        // Торс, разгрузка и тактический рюкзак за спиной (+ пакет C4 если бот-подрывник!)
         r.drawOrientedWorldBox(bx, by + 1.06, bz, 0.46, 0.64, 0.28, yaw, 0.0, Renderer3D.TEX_SOLID, shirtColor);
         r.drawOrientedWorldBox(bx, by + 1.08, bz, 0.48, 0.48, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, vestColor);
         r.drawOrientedWorldBox(bx - sinY * 0.20, by + 1.10, bz - cosY * 0.20, 0.32, 0.38, 0.15, yaw, 0.0, Renderer3D.TEX_SOLID, packColor);
+        if (carryingC4) {
+            r.drawOrientedWorldBox(bx - sinY * 0.28, by + 1.12, bz - cosY * 0.28, 0.24, 0.18, 0.10, yaw, 0.0, Renderer3D.TEX_SOLID, 0xC2A35E);
+            r.drawOrientedWorldBox(bx - sinY * 0.33, by + 1.16, bz - cosY * 0.33, 0.06, 0.06, 0.04, yaw, 0.0, Renderer3D.TEX_SOLID, 0xFF3322);
+        }
 
-        r.drawOrientedWorldBox(bx - rightX * 0.29 + sinY * 0.14, by + 1.16, bz - rightZ * 0.29 + cosY * 0.14, 0.15, 0.22, 0.42, yaw + 0.18, 0.0, Renderer3D.TEX_SOLID, shirtColor);
+        if (blindTimer > 0.15) {
+            // Ослепленный бот закрывает глаза левой рукой!
+            r.drawOrientedWorldBox(bx - rightX * 0.18 + sinY * 0.22, by + 1.54, bz - rightZ * 0.18 + cosY * 0.22,
+                    0.34, 0.14, 0.18, yaw, 0.25, Renderer3D.TEX_SOLID, shirtColor);
+        } else {
+            r.drawOrientedWorldBox(bx - rightX * 0.29 + sinY * 0.14, by + 1.16, bz - rightZ * 0.29 + cosY * 0.14, 0.15, 0.22, 0.42, yaw + 0.18, 0.0, Renderer3D.TEX_SOLID, shirtColor);
+        }
         r.drawOrientedWorldBox(bx + rightX * 0.27 + sinY * 0.15, by + 1.14, bz + rightZ * 0.27 + cosY * 0.15, 0.15, 0.22, 0.44, yaw - 0.12, 0.0, Renderer3D.TEX_SOLID, shirtColor);
 
         r.drawOrientedWorldBox(bx, by + 1.57, bz, 0.31, 0.34, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, maskColor);
@@ -516,6 +599,12 @@ public class Bot {
     public int getHealth() { return health; }
     public boolean isAlive() { return alive; }
     public State getState() { return state; }
-    public boolean shouldShowHealthBar() { return alive && (health < 100 || healthBarTimer > 0.0); }
+    public boolean shouldShowHealthBar() { return alive && (health < 100 || healthBarTimer > 0.0 || blindTimer > 0.1); }
     public boolean isFiringRecently() { return muzzleFlashTimer > 0.0; }
+    public boolean isBlinded() { return alive && blindTimer > 0.15; }
+    public boolean isCarryingC4() { return alive && carryingC4; }
+    public String getC4SiteName() { return c4SiteName; }
+    public Vec3 getC4TargetSpot() { return c4TargetSpot; }
+    public void setRespawnTimer(double t) { this.respawnTimer = t; }
+    public double getRespawnTimer() { return respawnTimer; }
 }

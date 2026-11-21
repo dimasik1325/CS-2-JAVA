@@ -27,6 +27,8 @@ public class Map {
     public Vec3 getPlayerSpawn() { return playerSpawn.copy(); }
     public List<Vec3> getBotSpawns() { return botSpawns; }
     public List<Vec3> getPatrolWaypoints() { return patrolWaypoints; }
+    public Vec3 getBombsiteASpot() { return new Vec3(17.2, 0.56, 14.6); }
+    public Vec3 getBombsiteBSpot() { return new Vec3(-16.2, 0.0, 13.6); }
 
     private void addWall(double x0, double y0, double z0, double x1, double y1, double z1) {
         boxes.add(new Vec3.Box(x0, y0, z0, x1, y1, z1,

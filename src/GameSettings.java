@@ -90,6 +90,35 @@ public class GameSettings {
         }
     }
 
+    public enum GameMode {
+        BOMB_DEFUSAL("Операция C4 (Пленты A/B)"),
+        ELIMINATION("Классика: Зачистка"),
+        DEATHMATCH("Бой насмерть (DM)");
+
+        public final String label;
+        GameMode(String label) { this.label = label; }
+    }
+
+    public enum WeaponSkin {
+        STANDARD("Стандарт (Военный)", 0, 0, 0),
+        ASIIMOV("Asiimov (Азимов)", 0xEEF2F7, 0xFF6B1A, 0x1D222B),
+        GOLD_FADE("Золотой Градиент (Fade)", 0xF4C438, 0xE6397A, 0x622B96),
+        REDLINE("Redline (Карбон)", 0x1B1F26, 0xE82C3C, 0x343B46),
+        PRINTSTREAM("Printstream (Кибер-Неон)", 0xE8EEF6, 0x2CE8FF, 0x1C2536);
+
+        public final String label;
+        public final int primary;
+        public final int accent;
+        public final int trim;
+
+        WeaponSkin(String label, int primary, int accent, int trim) {
+            this.label = label;
+            this.primary = primary;
+            this.accent = accent;
+            this.trim = trim;
+        }
+    }
+
     private static final String SETTINGS_FILE = "settings.properties";
 
     // --- НАСТРОЙКИ ГРАФИКИ ---
@@ -114,7 +143,9 @@ public class GameSettings {
     public boolean leftHandedModel = false;
     public boolean showDamageNumbers = true;
 
-    // --- ПАРАМЕТРЫ МАТЧА ---
+    // --- ПАРАМЕТРЫ МАТЧА И АРСЕНАЛА ---
+    public GameMode gameMode = GameMode.BOMB_DEFUSAL;
+    public WeaponSkin weaponSkin = WeaponSkin.STANDARD;
     public BotDifficulty botDifficulty = BotDifficulty.NORMAL;
     public int botCount = 5;
     public int roundsToWin = 5;
@@ -190,6 +221,8 @@ public class GameSettings {
             leftHandedModel = Boolean.parseBoolean(p.getProperty("leftHandedModel", String.valueOf(leftHandedModel)));
             showDamageNumbers = Boolean.parseBoolean(p.getProperty("showDamageNumbers", String.valueOf(showDamageNumbers)));
 
+            gameMode = parseEnum(p.getProperty("gameMode"), GameMode.class, gameMode);
+            weaponSkin = parseEnum(p.getProperty("weaponSkin"), WeaponSkin.class, weaponSkin);
             botDifficulty = parseEnum(p.getProperty("botDifficulty"), BotDifficulty.class, botDifficulty);
             botCount = clampInt(p.getProperty("botCount"), 2, 8, botCount);
             roundsToWin = clampInt(p.getProperty("roundsToWin"), 2, 10, roundsToWin);
@@ -221,6 +254,8 @@ public class GameSettings {
         p.setProperty("leftHandedModel", String.valueOf(leftHandedModel));
         p.setProperty("showDamageNumbers", String.valueOf(showDamageNumbers));
 
+        p.setProperty("gameMode", gameMode.name());
+        p.setProperty("weaponSkin", weaponSkin.name());
         p.setProperty("botDifficulty", botDifficulty.name());
         p.setProperty("botCount", String.valueOf(botCount));
         p.setProperty("roundsToWin", String.valueOf(roundsToWin));

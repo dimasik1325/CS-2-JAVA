@@ -55,7 +55,17 @@ if not defined JAVAC_CMD (
     )
 )
 
-if not defined JAVAC_CMD goto :NO_JDK
+if not defined JAVAC_CMD (
+    where java >nul 2>nul
+    if not errorlevel 1 (
+        if exist "CS-2-JAVA.jar" (
+            echo [INFO] Найден JRE ^(java^) и готовый пакет CS-2-JAVA.jar — запуск игры без пересборки...
+            java -Xms256m -Xmx1024m -Dfile.encoding=UTF-8 -jar "CS-2-JAVA.jar"
+            goto :EOF
+        )
+    )
+    goto :NO_JDK
+)
 if not defined JAVA_CMD goto :NO_JDK
 
 echo [1/4] Проверка JDK...
