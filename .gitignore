@@ -1,0 +1,13 @@
+# Скомпилированные классы, архивы и скачанные внешние библиотеки
+bin/
+lib/*.jar
+*.class
+*.zip
+CS-2-JAVA.jar
+
+# Системные и IDE-файлы
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
