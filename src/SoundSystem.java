@@ -14,7 +14,7 @@ import javax.sound.sampled.SourceDataLine;
  */
 public class SoundSystem {
     private static final float SAMPLE_RATE = 22050.0f;
-    private static final int MAX_CONCURRENT_SOUNDS = 8;
+    private static final int MAX_CONCURRENT_SOUNDS = 12;
 
     private final AudioFormat format;
     private final ExecutorService audioPool;
@@ -157,17 +157,26 @@ public class SoundSystem {
     public void playLevelUp() { playAsync(sfxLevelUp, 0.92); }
     public void playFootstep() { playAsync(sfxFootstep, 0.36); }
     public void playShellClink() { playAsync(sfxShellClink, 0.28); }
-    public void playBuy() { playAsync(sfxBuyCash, 0.80); }
-    public void playUiClick() { playAsync(sfxUiClick, 0.65); }
-    public void playRoundWin() { playAsync(sfxRoundWin, 0.85); }
-    public void playRoundLose() { playAsync(sfxRoundLose, 0.85); }
+    public void playBuy() { playAsyncPriority(sfxBuyCash, 0.80); }
+    public void playUiClick() { playAsyncPriority(sfxUiClick, 0.65); }
+    public void playRoundWin() { playAsyncPriority(sfxRoundWin, 0.85); }
+    public void playRoundLose() { playAsyncPriority(sfxRoundLose, 0.85); }
 
     private void playAsync(final byte[] pcmData, final double baseGain) {
+        playInternal(pcmData, baseGain, false);
+    }
+
+    private void playAsyncPriority(final byte[] pcmData, final double baseGain) {
+        playInternal(pcmData, baseGain, true);
+    }
+
+    private void playInternal(final byte[] pcmData, final double baseGain, final boolean priority) {
         final double effectiveGain = baseGain * masterVolume;
         if (!audioAvailable || audioPool == null || pcmData == null || effectiveGain <= 0.01) {
             return;
         }
-        if (activeSounds.get() >= MAX_CONCURRENT_SOUNDS) {
+        int cap = priority ? (MAX_CONCURRENT_SOUNDS + 4) : MAX_CONCURRENT_SOUNDS;
+        if (activeSounds.get() >= cap) {
             return;
         }
         activeSounds.incrementAndGet();
@@ -182,7 +191,7 @@ public class SoundSystem {
                 line.write(scaled, 0, scaled.length);
                 line.drain();
             } catch (Throwable ignored) {
-                audioAvailable = false;
+                // Отдельная занятая аудиолиния на Windows не должна отключать весь звук игры
             } finally {
                 if (line != null) {
                     try { line.close(); } catch (Throwable ignored) {}

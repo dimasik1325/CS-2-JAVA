@@ -2,8 +2,13 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
+import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -14,9 +19,18 @@ import javax.swing.SwingUtilities;
 
 /**
  * Точка входа в игру CS-2 JAVA 4.0 (Maps, Arms Race, Allies & Zeus Edition).
- * Управляет окном JFrame, полноэкранным режимом F11 и запуском игрового движка Engine.
+ * Управляет окном JFrame, безрамочным полноэкранным режимом F11 / Alt+Enter (без чёрного экрана!)
+ * и запуском игрового движка Engine.
  */
 public class Main {
+
+    static {
+        // Отключаем нестабильный Direct3D/DDraw оверлей на Windows (причина чёрного экрана при F11)
+        // и фиксируем чёткие координаты 1:1 до инициализации подсистемы AWT/Swing
+        System.setProperty("sun.java2d.d3d", "false");
+        System.setProperty("sun.java2d.noddraw", "true");
+        System.setProperty("sun.java2d.uiScale", "1.0");
+    }
 
     public static void main(String[] args) {
         if (args.length > 0 && "--self-test".equals(args[0])) {
@@ -25,13 +39,11 @@ public class Main {
             return;
         }
 
-        System.setProperty("sun.java2d.uiScale", "1.0");
-
         SwingUtilities.invokeLater(() -> {
             final JFrame frame = new JFrame("CS-2 JAVA 4.0 | Dust II • Mirage • Nuke Edition");
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
-            frame.getContentPane().setBackground(Color.BLACK);
+            frame.getContentPane().setBackground(new Color(10, 14, 22));
 
             final Engine engine = new Engine(false);
             frame.add(engine, BorderLayout.CENTER);
@@ -39,48 +51,98 @@ public class Main {
             frame.setMinimumSize(new Dimension(960, 540));
             frame.setLocationRelativeTo(null);
 
-            engine.setFullscreenListener(fullscreen -> SwingUtilities.invokeLater(() -> {
-                GraphicsDevice gd = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
-                frame.dispose();
-                if (fullscreen) {
-                    frame.setUndecorated(true);
-                    frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
-                    if (gd.isFullScreenSupported()) {
-                        try {
-                            gd.setFullScreenWindow(frame);
-                        } catch (Throwable ignored) {
-                            frame.setVisible(true);
-                        }
-                    } else {
-                        frame.setVisible(true);
-                    }
-                } else {
-                    if (gd.getFullScreenWindow() == frame) {
-                        gd.setFullScreenWindow(null);
-                    }
-                    frame.setUndecorated(false);
-                    frame.setExtendedState(JFrame.NORMAL);
-                    frame.setSize(Engine.DEFAULT_WINDOW_WIDTH, Engine.DEFAULT_WINDOW_HEIGHT);
-                    frame.setLocationRelativeTo(null);
-                    frame.setVisible(true);
+            final Rectangle[] savedWindowBounds = new Rectangle[]{frame.getBounds()};
+
+            frame.addComponentListener(new ComponentAdapter() {
+                @Override
+                public void componentResized(ComponentEvent e) {
+                    engine.notifyWindowModeChanged();
                 }
-                engine.requestFocusInWindow();
-            }));
+            });
+
+            engine.setFullscreenListener(fullscreen -> SwingUtilities.invokeLater(
+                    () -> applyWindowMode(frame, engine, fullscreen, savedWindowBounds)));
 
             frame.addWindowListener(new WindowAdapter() {
                 @Override
                 public void windowClosing(WindowEvent e) {
-                    engine.getSettings().save();
+                    engine.getSettings().saveSync();
                     engine.stop();
                     frame.dispose();
                     System.exit(0);
                 }
             });
 
-            frame.setVisible(true);
+            if (engine.getSettings().fullscreen) {
+                applyWindowMode(frame, engine, true, savedWindowBounds);
+            } else {
+                frame.setVisible(true);
+            }
             engine.requestFocusInWindow();
             engine.start();
         });
+    }
+
+    /**
+     * Надёжное переключение между оконным и безрамочным полноэкранным режимом (Borderless Fullscreen).
+     * Не использует проблемный эксклюзивный DirectDraw/D3D режим setFullScreenWindow, который давал
+     * чёрный экран на Windows 10/11, и сохраняет мгновенный рендер JPanel без потери фокуса и кнопок.
+     */
+    private static void applyWindowMode(JFrame frame, Engine engine, boolean fullscreen, Rectangle[] savedBoundsHolder) {
+        GraphicsConfiguration gc = frame.getGraphicsConfiguration();
+        if (gc == null) {
+            gc = GraphicsEnvironment.getLocalGraphicsEnvironment()
+                    .getDefaultScreenDevice().getDefaultConfiguration();
+        }
+        Rectangle screenBounds = gc.getBounds();
+
+        if (fullscreen) {
+            if (frame.isVisible() && !frame.isUndecorated()) {
+                Rectangle cur = frame.getBounds();
+                if (cur.width >= 640 && cur.height >= 480) {
+                    savedBoundsHolder[0] = cur;
+                }
+            }
+            if (!frame.isUndecorated()) {
+                frame.dispose();
+                frame.setUndecorated(true);
+            }
+            frame.setResizable(false);
+            frame.setExtendedState(JFrame.NORMAL);
+            frame.setBounds(screenBounds);
+            frame.setVisible(true);
+            frame.setBounds(screenBounds);
+        } else {
+            GraphicsDevice gd = gc.getDevice();
+            if (gd != null && gd.getFullScreenWindow() == frame) {
+                try {
+                    gd.setFullScreenWindow(null);
+                } catch (Throwable ignored) {
+                }
+            }
+            if (frame.isUndecorated()) {
+                frame.dispose();
+                frame.setUndecorated(false);
+            }
+            frame.setResizable(true);
+            frame.setExtendedState(JFrame.NORMAL);
+            Rectangle restore = savedBoundsHolder[0];
+            if (restore != null && restore.width >= 640 && restore.height >= 480) {
+                frame.setBounds(restore);
+            } else {
+                engine.setPreferredSize(new Dimension(Engine.DEFAULT_WINDOW_WIDTH, Engine.DEFAULT_WINDOW_HEIGHT));
+                frame.pack();
+                frame.setLocationRelativeTo(null);
+            }
+            frame.setVisible(true);
+        }
+
+        frame.validate();
+        frame.toFront();
+        engine.revalidate();
+        engine.notifyWindowModeChanged();
+        engine.requestFocusInWindow();
+        engine.repaint();
     }
 
     /**
@@ -214,10 +276,62 @@ public class Main {
             }
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
             bg.dispose();
-            engine.stop();
+            // 6. Многопоточный стресс-тест: 1000 асинхронных кликов мыши по кнопкам меню
+            // параллельно с живым игровым потоком CS2-Engine-Loop + смена разрешений Fullscreen!
+            engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
+            engine.renderOffscreenForTest(1280, 720);
+            if (engine.getPublishedButtonCount() < 10) {
+                throw new IllegalStateException("Main Menu must publish all interactive buttons!");
+            }
 
-            System.out.printf("CS-2 JAVA 4.0 SELF-TEST PASSED! %d HD frames rendered in %d ms (%.1f FPS avg)%n",
-                    benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs));
+            // Проверка смены разрешений (имитация переходов Оконный <-> Fullscreen 1080p <-> 1440p) без чёрных кадров
+            int[][] testResolutions = {{1280, 720}, {1920, 1080}, {2560, 1440}, {1280, 720}};
+            for (int[] res : testResolutions) {
+                engine.renderOffscreenForTest(res[0], res[1]);
+                BufferedImage disp = engine.getDisplayedFrame();
+                if (disp == null || disp.getWidth() != res[0] || disp.getHeight() != res[1]) {
+                    throw new IllegalStateException("Fullscreen offscreen swap failed for " + res[0] + "x" + res[1]);
+                }
+                int nonBlack = 0;
+                for (int sy = 40; sy < disp.getHeight(); sy += 37) {
+                    for (int sx = 40; sx < disp.getWidth(); sx += 53) {
+                        if ((disp.getRGB(sx, sy) & 0x00FFFFFF) != 0) nonBlack++;
+                    }
+                }
+                if (nonBlack < 20) {
+                    throw new IllegalStateException("Rendered fullscreen frame appeared black at " + res[0] + "x" + res[1]);
+                }
+            }
+
+            // Живой параллельный тест: запускаем поток рендера и бьём 1000 кликами подряд с другого потока!
+            engine.getSettings().fpsLimit = 0;
+            engine.start();
+            int registeredClicks = 0;
+            for (int i = 0; i < 1000; i++) {
+                engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
+                int btnCount = engine.getPublishedButtonCount();
+                if (btnCount <= 0) {
+                    throw new IllegalStateException("publishedUiSnapshot became empty during live 3D render on click #" + i);
+                }
+                // Кликаем по переключателям карты / режима / ботов / вкладок без закрытия процесса
+                Point pt = engine.getPublishedButtonCenter(btnCount - 1 - (i % 4));
+                if (pt != null && engine.dispatchUiClick(pt.x, pt.y, 1280, 720)) {
+                    registeredClicks++;
+                }
+                if (i % 50 == 0) {
+                    Thread.sleep(1);
+                }
+            }
+            engine.stop();
+            engine.flushPendingInputTasks();
+            engine.getSettings().fpsLimit = 60;
+
+            if (registeredClicks != 1000) {
+                throw new IllegalStateException("Lost UI clicks under load! Registered " + registeredClicks + "/1000");
+            }
+
+            System.out.printf("CS-2 JAVA 4.0 SELF-TEST PASSED! %d HD frames rendered in %d ms (%.1f FPS avg), %d/1000 async clicks hit (100%%)%n",
+                    benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs), registeredClicks);
         } catch (Exception ex) {
             ex.printStackTrace();
             System.exit(1);

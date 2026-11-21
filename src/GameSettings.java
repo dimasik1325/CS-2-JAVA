@@ -248,7 +248,38 @@ public class GameSettings {
         }
     }
 
+    private final Object saveLock = new Object();
+    private volatile boolean savePending = false;
+
     public void save() {
+        final Properties snapshot = buildPropertiesSnapshot();
+        savePending = true;
+        Thread writer = new Thread(() -> {
+            synchronized (saveLock) {
+                if (!savePending) return;
+                savePending = false;
+                try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
+                    snapshot.store(fos, "CS-2 JAVA Configuration");
+                } catch (Throwable ignored) {
+                }
+            }
+        }, "CS2-Settings-Save");
+        writer.setDaemon(true);
+        writer.start();
+    }
+
+    public void saveSync() {
+        final Properties snapshot = buildPropertiesSnapshot();
+        synchronized (saveLock) {
+            savePending = false;
+            try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
+                snapshot.store(fos, "CS-2 JAVA Configuration");
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private Properties buildPropertiesSnapshot() {
         Properties p = new Properties();
         p.setProperty("qualityPreset", qualityPreset.name());
         p.setProperty("resolutionScale", resolutionScale.name());
@@ -279,11 +310,7 @@ public class GameSettings {
 
         p.setProperty("masterVolume", String.valueOf(masterVolume));
         p.setProperty("footstepSounds", String.valueOf(footstepSounds));
-
-        try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-            p.store(fos, "CS-2 JAVA Configuration");
-        } catch (Throwable ignored) {
-        }
+        return p;
     }
 
     private static <E extends Enum<E>> E parseEnum(String val, Class<E> cls, E fallback) {

@@ -60,7 +60,7 @@ if not defined JAVAC_CMD (
     if not errorlevel 1 (
         if exist "CS-2-JAVA.jar" (
             echo [INFO] Найден JRE ^(java^) и готовый пакет CS-2-JAVA.jar — запуск игры без пересборки...
-            java -Xms256m -Xmx1024m -Dfile.encoding=UTF-8 -jar "CS-2-JAVA.jar"
+            java -Xms256m -Xmx1024m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -jar "CS-2-JAVA.jar"
             goto :EOF
         )
     )
@@ -121,7 +121,7 @@ echo [4/4] Запуск CS-2 JAVA...
 echo Управление: WASD - движение, Space - прыжок, Ctrl - присед, ЛКМ - стрельба,
 echo             R - перезарядка, 1/2/3 - оружие, Tab - счет, F5 - рестарт, ESC - пауза.
 echo.
-"%JAVA_CMD%" -Xms256m -Xmx1024m -Dfile.encoding=UTF-8 -cp "bin;lib\*" Main
+"%JAVA_CMD%" -Xms256m -Xmx1024m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -cp "bin;lib\*" Main
 if errorlevel 1 goto :RUNTIME_ERROR
 goto :EOF
 

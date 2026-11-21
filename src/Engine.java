@@ -1,12 +1,12 @@
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
-import java.awt.Canvas;
 import java.awt.Color;
 import java.awt.Composite;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
+import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
 import java.awt.Point;
@@ -24,21 +24,25 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 import java.awt.event.MouseWheelEvent;
 import java.awt.geom.Point2D;
-import java.awt.image.BufferStrategy;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
+import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 
 /**
- * Центральный движок CS-2 JAVA 2.0 (Source 2 Panorama UI Edition):
- * - Главное меню с живой пролетающей 3D-камерой над ареной Dust II
- * - Многовкладочные Настройки и Настройки Графики с мгновенным применением и сохранением
- * - Магазин закупки оружия CS2 (клавиша B), 7 пушек, гранаты HE и интерактивный дым Smoke
- * - Реалистичные солнечные тени, 3D-гильзы, декали пробоин, серии убийств (ACE) и прицел AWP
+ * Центральный движок CS-2 JAVA 4.0 (Source 2 Panorama UI Edition):
+ * - Двойная буферизация кадра на базе легковесного JPanel (без сбоев BufferStrategy и чёрного экрана при F11!)
+ * - Атомарные снимки UI-кнопок и потокобезопасная очередь ввода с мгновенным пробуждением игрового потока
+ * - 3 арены (Dust II, Mirage, Nuke), Гонка вооружений, отряд ИИ-союзников CT, Zeus x27 и 3D-граффити
  */
-public class Engine extends Canvas implements Runnable {
+public class Engine extends JPanel implements Runnable {
     private static final long serialVersionUID = 1L;
 
     public static final int DEFAULT_WINDOW_WIDTH = 1280;
@@ -105,6 +109,24 @@ public class Engine extends Canvas implements Runnable {
         }
     }
 
+    /**
+     * Неизменяемый снимок всех активных кнопок текущего отрисованного кадра.
+     * Читается потоком событий мыши (EDT) без блокировок и никогда не бывает пустым во время 3D-рендера!
+     */
+    private static final class UiSnapshot {
+        static final UiSnapshot EMPTY = new UiSnapshot(
+                Collections.emptyList(), DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+        final List<UiClickable> items;
+        final int width;
+        final int height;
+
+        UiSnapshot(List<UiClickable> items, int width, int height) {
+            this.items = Collections.unmodifiableList(items);
+            this.width = Math.max(1, width);
+            this.height = Math.max(1, height);
+        }
+    }
+
     private static final String[] BOT_NAMES = {
         "BOT Phoenix", "BOT Viper", "BOT Sabre", "BOT Jackal",
         "BOT Corsair", "BOT Mirage", "BOT Anubis", "BOT Titan"
@@ -130,7 +152,21 @@ public class Engine extends Canvas implements Runnable {
     private final List<Vec3.Pickup> pickups = new ArrayList<>();
     private final List<DamagePopup> damagePopups = new ArrayList<>();
     private final List<KillFeedEntry> killFeed = new ArrayList<>();
-    private final List<UiClickable> uiClickables = new ArrayList<>();
+
+    // Двойная буферизация UI-кнопок и очередь событий ввода (100% отклик кликов без гонок потоков!)
+    private final List<UiClickable> buildingUiClickables = new ArrayList<>();
+    private volatile UiSnapshot publishedUiSnapshot = UiSnapshot.EMPTY;
+    private final ConcurrentLinkedQueue<Runnable> pendingInputTasks = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger pendingMouseDx = new AtomicInteger(0);
+    private final AtomicInteger pendingMouseDy = new AtomicInteger(0);
+
+    // Двойной внеэкранный буфер кадра для мгновенного переключения Fullscreen F11 без чёрного экрана
+    private BufferedImage frameBufferA = null;
+    private BufferedImage frameBufferB = null;
+    private boolean nextBufferIsA = true;
+    private volatile BufferedImage displayedFrame = null;
+    private volatile Rectangle clickFlashRect = null;
+    private double clickFlashTimer = 0.0;
 
     private Vec3.BombC4 plantedC4 = null;
     private double dmPlayerRespawnTimer = 0.0;
@@ -157,16 +193,16 @@ public class Engine extends Canvas implements Runnable {
     private FullscreenListener fullscreenListener;
 
     private volatile boolean running = false;
-    private Thread gameThread;
+    private volatile Thread gameThread;
 
     // Экраны меню и состояния матча
-    private AppScreen currentScreen = AppScreen.MAIN_MENU;
+    private volatile AppScreen currentScreen = AppScreen.MAIN_MENU;
     private boolean settingsOpenedFromGame = false;
     private int settingsTab = 0; // 0 = Графика, 1 = Геймплей и мышь, 2 = Аудио
-    private boolean paused = false;
-    private boolean buyMenuOpen = false;
+    private volatile boolean paused = false;
+    private volatile boolean buyMenuOpen = false;
 
-    private MatchState matchState = MatchState.PLAYING;
+    private volatile MatchState matchState = MatchState.PLAYING;
     private int currentRound = 1;
     private int playerRoundWins = 0;
     private int botRoundWins = 0;
@@ -182,18 +218,23 @@ public class Engine extends Canvas implements Runnable {
     private double streakBannerTimer = 0.0;
 
     // Управление и курсор
-    private boolean mouseCaptured = false;
+    private volatile boolean mouseCaptured = false;
     private Robot robot;
     private Cursor blankCursor;
+    private Cursor handCursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR);
+    private Cursor defaultCursor = Cursor.getDefaultCursor();
+    private boolean lastHoveringButton = false;
     private int lastMouseX = -1;
     private int lastMouseY = -1;
+    private boolean recenteringCursor = false;
+    private long lastCursorWarpMs = 0L;
 
     private final boolean[] keys = new boolean[512];
-    private boolean jumpQueued = false;
-    private boolean leftMouseDown = false;
-    private boolean scoreTabHeld = false;
-    private int mouseClientX = DEFAULT_WINDOW_WIDTH / 2;
-    private int mouseClientY = DEFAULT_WINDOW_HEIGHT / 2;
+    private volatile boolean jumpQueued = false;
+    private volatile boolean leftMouseDown = false;
+    private volatile boolean scoreTabHeld = false;
+    private volatile int mouseClientX = DEFAULT_WINDOW_WIDTH / 2;
+    private volatile int mouseClientY = DEFAULT_WINDOW_HEIGHT / 2;
 
     private double hitMarkerTimer = 0.0;
     private boolean hitMarkerHeadshot = false;
@@ -215,8 +256,10 @@ public class Engine extends Canvas implements Runnable {
         this.soundSystem = new SoundSystem(!headlessMode);
         this.soundSystem.setMasterVolume(settings.masterVolume);
 
+        setOpaque(true);
+        setDoubleBuffered(false);
         setPreferredSize(new Dimension(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT));
-        setBackground(Color.BLACK);
+        setBackground(new Color(10, 14, 22));
         setFocusable(true);
         setFocusTraversalKeysEnabled(false);
 
@@ -231,6 +274,63 @@ public class Engine extends Canvas implements Runnable {
             this.currentScreen = AppScreen.IN_GAME;
         } else {
             this.currentScreen = AppScreen.MAIN_MENU;
+            // Заранее рендерим стартовый кадр, чтобы окно открылось мгновенно без чёрного экрана
+            // и все кнопки меню реагировали с первой же миллисекунды!
+            renderOffscreenSwap(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+        }
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        BufferedImage img = this.displayedFrame;
+        int w = Math.max(1, getWidth());
+        int h = Math.max(1, getHeight());
+        if (img != null) {
+            if (img.getWidth() == w && img.getHeight() == h) {
+                g.drawImage(img, 0, 0, null);
+            } else {
+                // Плавное масштабирование при переходе в полный экран F11 до готовности нового кадра
+                g.drawImage(img, 0, 0, w, h, null);
+            }
+        } else {
+            g.setColor(new Color(10, 14, 22));
+            g.fillRect(0, 0, w, h);
+        }
+    }
+
+    public void notifyWindowModeChanged() {
+        lastMouseX = -1;
+        lastMouseY = -1;
+        recenteringCursor = false;
+        Thread t = this.gameThread;
+        if (t != null) {
+            LockSupport.unpark(t);
+        }
+        repaint();
+    }
+
+    private void enqueueInputTask(Runnable task) {
+        if (task == null) return;
+        pendingInputTasks.offer(task);
+        Thread t = this.gameThread;
+        if (t != null) {
+            LockSupport.unpark(t);
+        }
+    }
+
+    public void flushPendingInputTasks() {
+        Runnable task;
+        while ((task = pendingInputTasks.poll()) != null) {
+            try {
+                task.run();
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+        int mdx = pendingMouseDx.getAndSet(0);
+        int mdy = pendingMouseDy.getAndSet(0);
+        if ((mdx != 0 || mdy != 0) && mouseCaptured && !isCursorFreeScreen()) {
+            player.applyMouseLook(mdx, mdy, settings.mouseSensitivity, settings.invertMouseY);
         }
     }
 
@@ -257,9 +357,16 @@ public class Engine extends Canvas implements Runnable {
         addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
-                int code = e.getKeyCode();
+                final int code = e.getKeyCode();
+                final boolean altDown = e.isAltDown();
                 if (code >= 0 && code < keys.length) keys[code] = true;
-                handleKeyPress(code);
+
+                if (code == KeyEvent.VK_F11 || (code == KeyEvent.VK_ENTER && altDown)) {
+                    e.consume();
+                    enqueueInputTask(Engine.this::toggleFullscreenMode);
+                    return;
+                }
+                enqueueInputTask(() -> handleKeyPress(code));
             }
 
             @Override
@@ -273,36 +380,43 @@ public class Engine extends Canvas implements Runnable {
         addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                mouseClientX = e.getX();
-                mouseClientY = e.getY();
-                requestFocusInWindow();
+                updateUiMouseCoords(e.getX(), e.getY());
+                if (!isFocusOwner()) {
+                    requestFocusInWindow();
+                }
 
-                if (e.getButton() == MouseEvent.BUTTON1) {
+                if (SwingUtilities.isLeftMouseButton(e) || e.getButton() == MouseEvent.BUTTON1) {
                     if (isCursorFreeScreen()) {
-                        handleUiClick(e.getX(), e.getY());
+                        dispatchUiClick(e.getX(), e.getY(), getWidth(), getHeight());
                         return;
                     }
-                    if (!mouseCaptured) {
-                        setMouseCaptured(true);
-                    }
                     leftMouseDown = true;
-                    tryFireCurrentWeapon(false);
-                } else if (e.getButton() == MouseEvent.BUTTON3) {
-                    if (!isCursorFreeScreen() && matchState == MatchState.PLAYING && player.isAlive()) {
-                        Weapon w = player.getCurrentWeapon();
-                        if (w.isMelee()) {
-                            tryFireCurrentWeapon(true); // Мощный удар ножом ПКМ!
-                        } else {
-                            w.toggleSecondaryAction(); // Оптический прицел AWP / ADS!
-                            soundSystem.playUiClick();
+                    enqueueInputTask(() -> {
+                        if (!mouseCaptured && !isCursorFreeScreen()) {
+                            setMouseCaptured(true);
                         }
+                        tryFireCurrentWeapon(false);
+                    });
+                } else if (SwingUtilities.isRightMouseButton(e) || e.getButton() == MouseEvent.BUTTON3) {
+                    if (!isCursorFreeScreen()) {
+                        enqueueInputTask(() -> {
+                            if (!isCursorFreeScreen() && matchState == MatchState.PLAYING && player.isAlive()) {
+                                Weapon w = player.getCurrentWeapon();
+                                if (w.isMelee()) {
+                                    tryFireCurrentWeapon(true); // Мощный удар ножом ПКМ!
+                                } else {
+                                    w.toggleSecondaryAction(); // Оптический прицел AWP / ADS!
+                                    soundSystem.playUiClick();
+                                }
+                            }
+                        });
                     }
                 }
             }
 
             @Override
             public void mouseReleased(MouseEvent e) {
-                if (e.getButton() == MouseEvent.BUTTON1) {
+                if (SwingUtilities.isLeftMouseButton(e) || e.getButton() == MouseEvent.BUTTON1) {
                     leftMouseDown = false;
                 }
             }
@@ -317,10 +431,14 @@ public class Engine extends Canvas implements Runnable {
         });
 
         addMouseWheelListener((MouseWheelEvent e) -> {
-            if (!isCursorFreeScreen() && matchState == MatchState.PLAYING) {
-                int rot = e.getWheelRotation();
-                if (rot > 0) player.cycleWeapon(1);
-                else if (rot < 0) player.cycleWeapon(-1);
+            final int rot = e.getWheelRotation();
+            if (rot != 0 && !isCursorFreeScreen()) {
+                enqueueInputTask(() -> {
+                    if (!isCursorFreeScreen() && matchState == MatchState.PLAYING) {
+                        if (rot > 0) player.cycleWeapon(1);
+                        else player.cycleWeapon(-1);
+                    }
+                });
             }
         });
 
@@ -333,6 +451,19 @@ public class Engine extends Canvas implements Runnable {
         });
     }
 
+    private void updateUiMouseCoords(int rawX, int rawY) {
+        UiSnapshot snap = this.publishedUiSnapshot;
+        int compW = getWidth();
+        int compH = getHeight();
+        if (compW > 0 && compH > 0 && (compW != snap.width || compH != snap.height)) {
+            this.mouseClientX = (int) Math.round((rawX * (double) snap.width) / compW);
+            this.mouseClientY = (int) Math.round((rawY * (double) snap.height) / compH);
+        } else {
+            this.mouseClientX = rawX;
+            this.mouseClientY = rawY;
+        }
+    }
+
     private boolean isCursorFreeScreen() {
         return currentScreen != AppScreen.IN_GAME
                 || paused
@@ -341,16 +472,32 @@ public class Engine extends Canvas implements Runnable {
                 || matchState == MatchState.MATCH_DEFEAT;
     }
 
-    private void handleUiClick(int mx, int my) {
-        List<UiClickable> snapshot = new ArrayList<>(uiClickables);
-        for (int i = 0; i < snapshot.size(); i++) {
-            UiClickable item = snapshot.get(i);
-            if (item.rect.contains(mx, my)) {
+    /**
+     * Мгновенная потокобезопасная обработка клика по кнопке UI.
+     * Работает по неизменяемому снимку publishedUiSnapshot (никогда не пустует во время рендера 3D!).
+     */
+    public boolean dispatchUiClick(int rawX, int rawY, int compW, int compH) {
+        UiSnapshot snap = this.publishedUiSnapshot;
+        int uiX = (compW > 0 && compW != snap.width)
+                ? (int) Math.round((rawX * (double) snap.width) / compW) : rawX;
+        int uiY = (compH > 0 && compH != snap.height)
+                ? (int) Math.round((rawY * (double) snap.height) / compH) : rawY;
+
+        this.mouseClientX = uiX;
+        this.mouseClientY = uiY;
+
+        List<UiClickable> list = snap.items;
+        for (int i = list.size() - 1; i >= 0; i--) {
+            UiClickable item = list.get(i);
+            if (item.rect.contains(uiX, uiY)) {
+                this.clickFlashRect = item.rect;
+                this.clickFlashTimer = 0.12;
                 soundSystem.playUiClick();
-                item.action.run();
-                return;
+                enqueueInputTask(item.action);
+                return true;
             }
         }
+        return false;
     }
 
     private void handleKeyPress(int code) {
@@ -402,6 +549,12 @@ public class Engine extends Canvas implements Runnable {
         }
 
         if (code == KeyEvent.VK_B && !paused && matchState == MatchState.PLAYING && player.isAlive()) {
+            if (settings.gameMode == GameSettings.GameMode.ARMS_RACE) {
+                soundSystem.playEmptyClick();
+                streakBannerText = "В ГОНКЕ ВООРУЖЕНИЙ ОРУЖИЕ ВЫДАЕТСЯ ЗА ФРАГИ!";
+                streakBannerTimer = 1.8;
+                return;
+            }
             buyMenuOpen = !buyMenuOpen;
             leftMouseDown = false;
             setMouseCaptured(!buyMenuOpen);
@@ -451,6 +604,11 @@ public class Engine extends Canvas implements Runnable {
         if (code == KeyEvent.VK_SPACE) {
             if (matchState == MatchState.ROUND_OVER && roundOverTimer < 2.6) {
                 advanceToNextRound();
+            } else if (!player.isAlive() && matchState == MatchState.PLAYING
+                    && settings.gameMode != GameSettings.GameMode.DEATHMATCH
+                    && settings.gameMode != GameSettings.GameMode.ARMS_RACE) {
+                boolean ctWins = countAliveAllies() >= countAliveEnemies() && plantedC4 == null;
+                finishRound(ctWins, ctWins ? "Союзники спецназа CT зачистили сектор!" : "Террористы удержали сектор");
             } else {
                 jumpQueued = true;
             }
@@ -460,6 +618,8 @@ public class Engine extends Canvas implements Runnable {
             player.selectWeaponSlot(1);
         } else if (code == KeyEvent.VK_3) {
             player.selectWeaponSlot(2);
+        } else if (code == KeyEvent.VK_8 || code == KeyEvent.VK_T) {
+            player.selectWeaponSlot(3);
         } else if (code == KeyEvent.VK_4 || code == KeyEvent.VK_G) {
             throwGrenade(Vec3.Grenade.Kind.HE);
         } else if (code == KeyEvent.VK_5 || code == KeyEvent.VK_Q) {
@@ -468,6 +628,10 @@ public class Engine extends Canvas implements Runnable {
             throwGrenade(Vec3.Grenade.Kind.FLASH);
         } else if (code == KeyEvent.VK_7 || code == KeyEvent.VK_X) {
             throwGrenade(Vec3.Grenade.Kind.MOLOTOV);
+        } else if (code == KeyEvent.VK_Y) {
+            trySprayGraffiti();
+        } else if (code == KeyEvent.VK_Z) {
+            issueNextRadioCommand();
         } else if (code == KeyEvent.VK_L) {
             if (player.isAlive()) {
                 player.toggleFlashlight();
@@ -663,58 +827,112 @@ public class Engine extends Canvas implements Runnable {
     }
 
     private void handleMouseMotion(MouseEvent e) {
-        mouseClientX = e.getX();
-        mouseClientY = e.getY();
+        int mx = e.getX();
+        int my = e.getY();
+        updateUiMouseCoords(mx, my);
 
         if (!mouseCaptured || isCursorFreeScreen() || !isShowing()) {
-            lastMouseX = e.getX();
-            lastMouseY = e.getY();
+            lastMouseX = mx;
+            lastMouseY = my;
+            recenteringCursor = false;
+            updateHoverCursorShape();
             return;
         }
 
-        if (robot != null) {
-            try {
-                Point winScreen = getLocationOnScreen();
-                int centerX = winScreen.x + getWidth() / 2;
-                int centerY = winScreen.y + getHeight() / 2;
-                int dx = e.getXOnScreen() - centerX;
-                int dy = e.getYOnScreen() - centerY;
+        int w = Math.max(1, getWidth());
+        int h = Math.max(1, getHeight());
+        long nowMs = System.currentTimeMillis();
 
-                if (dx == 0 && dy == 0) return;
-                if (Math.abs(dx) < 600 && Math.abs(dy) < 600) {
-                    player.applyMouseLook(dx, dy, settings.mouseSensitivity, settings.invertMouseY);
+        if (recenteringCursor) {
+            int distFromCenter = Math.abs(mx - w / 2) + Math.abs(my - h / 2);
+            if (distFromCenter < 90 || (nowMs - lastCursorWarpMs) > 45L) {
+                recenteringCursor = false;
+                lastMouseX = mx;
+                lastMouseY = my;
+            }
+            return;
+        }
+
+        if (lastMouseX < 0 || lastMouseY < 0) {
+            lastMouseX = mx;
+            lastMouseY = my;
+            return;
+        }
+
+        int dx = mx - lastMouseX;
+        int dy = my - lastMouseY;
+        lastMouseX = mx;
+        lastMouseY = my;
+
+        if ((dx != 0 || dy != 0) && Math.abs(dx) < 420 && Math.abs(dy) < 420) {
+            pendingMouseDx.addAndGet(dx);
+            pendingMouseDy.addAndGet(dy);
+        }
+
+        // Возвращаем курсор в центр окна только при подходе к краям (без спама Robot на 1000Hz мышах!)
+        if (robot != null && (nowMs - lastCursorWarpMs) >= 24L) {
+            int marginX = Math.max(60, w / 4);
+            int marginY = Math.max(50, h / 4);
+            if (mx < marginX || mx > (w - marginX) || my < marginY || my > (h - marginY)) {
+                try {
+                    Point winScreen = getLocationOnScreen();
+                    lastCursorWarpMs = nowMs;
+                    recenteringCursor = true;
+                    robot.mouseMove(winScreen.x + w / 2, winScreen.y + h / 2);
+                } catch (Throwable ignored) {
+                    recenteringCursor = false;
                 }
-                robot.mouseMove(centerX, centerY);
-                return;
-            } catch (Throwable ignored) {
             }
         }
+    }
 
-        if (lastMouseX >= 0 && lastMouseY >= 0) {
-            int dx = e.getX() - lastMouseX;
-            int dy = e.getY() - lastMouseY;
-            player.applyMouseLook(dx, dy, settings.mouseSensitivity, settings.invertMouseY);
+    private void updateHoverCursorShape() {
+        if (GraphicsEnvironment.isHeadless()) return;
+        UiSnapshot snap = this.publishedUiSnapshot;
+        int ux = this.mouseClientX;
+        int uy = this.mouseClientY;
+        boolean hovering = false;
+        List<UiClickable> list = snap.items;
+        for (int i = list.size() - 1; i >= 0; i--) {
+            if (list.get(i).rect.contains(ux, uy)) {
+                hovering = true;
+                break;
+            }
         }
-        lastMouseX = e.getX();
-        lastMouseY = e.getY();
+        if (hovering != lastHoveringButton) {
+            lastHoveringButton = hovering;
+            setCursor(hovering ? handCursor : defaultCursor);
+        }
     }
 
     private void setMouseCaptured(boolean capture) {
         this.mouseCaptured = capture;
+        this.lastMouseX = -1;
+        this.lastMouseY = -1;
+        this.recenteringCursor = false;
+        this.pendingMouseDx.set(0);
+        this.pendingMouseDy.set(0);
         if (GraphicsEnvironment.isHeadless()) return;
 
-        if (capture && blankCursor != null) {
-            setCursor(blankCursor);
-            if (robot != null && isShowing()) {
-                try {
-                    Point p = getLocationOnScreen();
-                    robot.mouseMove(p.x + getWidth() / 2, p.y + getHeight() / 2);
-                } catch (Throwable ignored) {
+        SwingUtilities.invokeLater(() -> {
+            if (this.mouseCaptured && !isCursorFreeScreen() && blankCursor != null) {
+                lastHoveringButton = false;
+                setCursor(blankCursor);
+                if (robot != null && isShowing() && getWidth() > 0 && getHeight() > 0) {
+                    try {
+                        Point p = getLocationOnScreen();
+                        recenteringCursor = true;
+                        lastCursorWarpMs = System.currentTimeMillis();
+                        robot.mouseMove(p.x + getWidth() / 2, p.y + getHeight() / 2);
+                    } catch (Throwable ignored) {
+                        recenteringCursor = false;
+                    }
                 }
+            } else {
+                lastHoveringButton = false;
+                setCursor(defaultCursor);
             }
-        } else {
-            setCursor(Cursor.getDefaultCursor());
-        }
+        });
     }
 
     private void clearHeldInputs() {
@@ -832,18 +1050,21 @@ public class Engine extends Canvas implements Runnable {
 
     public synchronized void stop() {
         running = false;
+        Thread t = this.gameThread;
+        if (t != null) {
+            LockSupport.unpark(t);
+        }
         soundSystem.shutdown();
     }
 
     private void shutdownAndExit() {
-        settings.save();
+        settings.saveSync();
         stop();
         System.exit(0);
     }
 
     @Override
     public void run() {
-        createBufferStrategy(3);
         long lastNano = System.nanoTime();
         long fpsTimer = System.currentTimeMillis();
         int frames = 0;
@@ -855,19 +1076,35 @@ public class Engine extends Canvas implements Runnable {
             if (dt > 0.05) dt = 0.05;
             if (dt < 0.0001) dt = 0.0001;
 
-            globalAnimTime += dt;
+            try {
+                // 1. Выполняем все клики по кнопкам, клавиши и движения мыши строго в потоке движка!
+                flushPendingInputTasks();
 
-            if (currentScreen == AppScreen.IN_GAME) {
-                if (!paused) {
-                    updateGame(dt);
+                // Автозащита курсора: на любом экране меню/паузы/победы курсор всегда свободен и видим
+                if (isCursorFreeScreen() && mouseCaptured) {
+                    setMouseCaptured(false);
                 }
-            } else {
-                // В Главном меню боты патрулируют арену для живого фона!
-                updateMenuBackgroundScene(dt);
-            }
 
-            renderWindowFrame();
-            frames++;
+                globalAnimTime += dt;
+                if (clickFlashTimer > 0.0) {
+                    clickFlashTimer = Math.max(0.0, clickFlashTimer - dt);
+                }
+
+                if (currentScreen == AppScreen.IN_GAME) {
+                    if (!paused) {
+                        updateGame(dt);
+                    }
+                } else {
+                    // В Главном меню боты патрулируют арену для живого фона!
+                    updateMenuBackgroundScene(dt);
+                }
+
+                renderWindowFrame();
+                frames++;
+            } catch (Throwable frameErr) {
+                // Игровой цикл защищён от любых сбоев AWT при смене режима экрана и никогда не зависает
+                frameErr.printStackTrace();
+            }
 
             long frameDone = System.nanoTime();
             lastFrameMs = (frameDone - frameStart) / 1_000_000.0;
@@ -875,23 +1112,20 @@ public class Engine extends Canvas implements Runnable {
             if (System.currentTimeMillis() - fpsTimer >= 1000L) {
                 currentFps = frames;
                 frames = 0;
-                fpsTimer += 1000L;
+                fpsTimer = System.currentTimeMillis();
             }
 
             int cap = settings.fpsLimit;
-            if (cap > 0) {
+            if (cap > 0 && pendingInputTasks.isEmpty()) {
                 long targetNanos = 1_000_000_000L / cap;
                 long sleepNanos = targetNanos - (System.nanoTime() - frameStart);
-                if (sleepNanos > 1_000_000L) {
-                    try {
-                        Thread.sleep(sleepNanos / 1_000_000L);
-                    } catch (InterruptedException ignored) {
-                        Thread.currentThread().interrupt();
-                    }
+                if (sleepNanos > 500_000L) {
+                    // Мгновенно просыпается по LockSupport.unpark при любом клике мыши или нажатии клавиши!
+                    LockSupport.parkNanos(sleepNanos);
                 } else {
                     Thread.yield();
                 }
-            } else {
+            } else if (pendingInputTasks.isEmpty()) {
                 Thread.yield();
             }
         }
@@ -1715,31 +1949,46 @@ public class Engine extends Canvas implements Runnable {
     }
 
     private void renderWindowFrame() {
-        BufferStrategy bs = getBufferStrategy();
-        if (bs == null) {
-            createBufferStrategy(3);
-            return;
+        int outW = getWidth();
+        int outH = getHeight();
+        if (outW < 64 || outH < 64) {
+            outW = DEFAULT_WINDOW_WIDTH;
+            outH = DEFAULT_WINDOW_HEIGHT;
         }
-        int outW = Math.max(1, getWidth());
-        int outH = Math.max(1, getHeight());
+        renderOffscreenSwap(outW, outH);
+        repaint();
+        Toolkit.getDefaultToolkit().sync();
+    }
 
-        Graphics2D g = (Graphics2D) bs.getDrawGraphics();
+    private void renderOffscreenSwap(int outW, int outH) {
+        BufferedImage target;
+        if (nextBufferIsA) {
+            if (frameBufferA == null || frameBufferA.getWidth() != outW || frameBufferA.getHeight() != outH) {
+                frameBufferA = new BufferedImage(outW, outH, BufferedImage.TYPE_INT_RGB);
+            }
+            target = frameBufferA;
+        } else {
+            if (frameBufferB == null || frameBufferB.getWidth() != outW || frameBufferB.getHeight() != outH) {
+                frameBufferB = new BufferedImage(outW, outH, BufferedImage.TYPE_INT_RGB);
+            }
+            target = frameBufferB;
+        }
+
+        Graphics2D g = target.createGraphics();
         try {
             renderCompleteFrame(g, outW, outH);
         } finally {
             g.dispose();
         }
-        if (!bs.contentsLost()) {
-            bs.show();
-        }
-        Toolkit.getDefaultToolkit().sync();
+        this.displayedFrame = target;
+        this.nextBufferIsA = !this.nextBufferIsA;
     }
 
     /**
      * Полный рендер кадра (3D-сцена с настройками графики + HUD / Главное меню / Настройки).
      */
     public void renderCompleteFrame(Graphics2D g, int outW, int outH) {
-        uiClickables.clear();
+        buildingUiClickables.clear();
 
         double zoomFactor = (currentScreen == AppScreen.IN_GAME && player.isAlive())
                 ? player.getCurrentWeapon().getEffectiveFovFactor()
@@ -1901,6 +2150,19 @@ public class Engine extends Canvas implements Runnable {
         } else {
             drawInGameUi(g, outW, outH);
         }
+
+        // Визуальный отклик мгновенного нажатия кнопки
+        Rectangle flash = this.clickFlashRect;
+        if (clickFlashTimer > 0.0 && flash != null && isCursorFreeScreen()) {
+            int alpha = Math.min(130, (int) (clickFlashTimer * 950.0));
+            g.setColor(new Color(255, 236, 150, alpha));
+            g.fillRoundRect(flash.x, flash.y, flash.width, flash.height, 10, 10);
+            g.setColor(new Color(255, 255, 255, Math.min(220, alpha + 70)));
+            g.drawRoundRect(flash.x, flash.y, flash.width, flash.height, 10, 10);
+        }
+
+        // Атомарно публикуем готовый список кнопок ТОЛЬКО ПОСЛЕ полной сборки UI!
+        this.publishedUiSnapshot = new UiSnapshot(new ArrayList<>(buildingUiClickables), outW, outH);
     }
 
     private void drawCinematicVignette(Graphics2D g, int outW, int outH) {
@@ -2561,7 +2823,7 @@ public class Engine extends Canvas implements Runnable {
         g.setColor(canAfford ? new Color(102, 238, 136) : new Color(238, 86, 82));
         g.drawString(priceTag, x + w - g.getFontMetrics().stringWidth(priceTag) - 16, y + 24);
 
-        uiClickables.add(new UiClickable(rect, onBuy));
+        uiRegisterClickable(rect, onBuy);
     }
 
     private void drawBotFloatingBarsAndDamagePopups(Graphics2D g, int outW, int outH) {
@@ -3296,7 +3558,7 @@ public class Engine extends Canvas implements Runnable {
                 ? new Color(16, 18, 22) : Color.WHITE;
         drawCenteredText(g, label, rect.x + rect.width / 2, rect.y + rect.height / 2 + 5,
                 new Font("SansSerif", Font.BOLD, 14), txtCol);
-        uiClickables.add(new UiClickable(rect, onClick));
+        uiRegisterClickable(rect, onClick);
     }
 
     private void drawOptionStepperRow(Graphics2D g, int x, int y, int w, String title, String valueLabel, Runnable onToggle) {
@@ -3321,7 +3583,11 @@ public class Engine extends Canvas implements Runnable {
         g.setColor(new Color(248, 206, 88));
         g.drawString(pill, px + 9, y + 21);
 
-        uiClickables.add(new UiClickable(fullRect, onToggle));
+        uiRegisterClickable(fullRect, onToggle);
+    }
+
+    private void uiRegisterClickable(Rectangle rect, Runnable action) {
+        buildingUiClickables.add(new UiClickable(rect, action));
     }
 
     private void drawOptionPlusMinusRow(Graphics2D g, int x, int y, int w, String title, String valueLabel,
@@ -3389,4 +3655,13 @@ public class Engine extends Canvas implements Runnable {
     public MatchState getMatchState() { return matchState; }
     public int getPlayerRoundWins() { return playerRoundWins; }
     public int getBotRoundWins() { return botRoundWins; }
+    public BufferedImage getDisplayedFrame() { return displayedFrame; }
+    public void renderOffscreenForTest(int w, int h) { renderOffscreenSwap(w, h); }
+    public int getPublishedButtonCount() { return publishedUiSnapshot.items.size(); }
+    public Point getPublishedButtonCenter(int index) {
+        List<UiClickable> items = publishedUiSnapshot.items;
+        if (index < 0 || index >= items.size()) return null;
+        Rectangle r = items.get(index).rect;
+        return new Point(r.x + r.width / 2, r.y + r.height / 2);
+    }
 }
