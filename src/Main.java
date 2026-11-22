@@ -1,18 +1,26 @@
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.GradientPaint;
 import java.awt.Graphics2D;
 import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
+import java.awt.Image;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import javax.imageio.ImageIO;
 import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
@@ -38,9 +46,22 @@ public class Main {
             runHeadlessSelfTest(outDir);
             return;
         }
+        if (args.length > 1 && "--export-icon".equals(args[0])) {
+            try {
+                File outDir = new File(args[1]);
+                outDir.mkdirs();
+                for (int sz : new int[]{16, 32, 48, 64, 128, 256}) {
+                    ImageIO.write(renderAppIcon(sz), "png", new File(outDir, "icon_" + sz + ".png"));
+                }
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+            return;
+        }
 
         SwingUtilities.invokeLater(() -> {
             final JFrame frame = new JFrame("CS-2 JAVA 7.0 | Hyper-Turbo Engine • Pro Graphics Studio • 1:1 HD");
+            frame.setIconImages(createAppIcons());
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
             frame.getContentPane().setBackground(new Color(10, 14, 22));
@@ -351,5 +372,78 @@ public class Main {
         engine.renderCompleteFrame(g, out.getWidth(), out.getHeight());
         g.dispose();
         ImageIO.write(out, "png", file);
+    }
+
+    private static List<Image> createAppIcons() {
+        List<Image> icons = new ArrayList<>();
+        for (int sz : new int[]{16, 32, 48, 64, 128, 256}) {
+            icons.add(renderAppIcon(sz));
+        }
+        return icons;
+    }
+
+    public static BufferedImage renderAppIcon(int size) {
+        BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+        int pad = Math.max(1, size / 18);
+        int box = size - pad * 2;
+        int arc = Math.max(4, size / 4);
+
+        // Золотисто-оранжевый тактический щит CS2
+        g.setPaint(new GradientPaint(pad, pad, new Color(255, 208, 74), pad + box, pad + box, new Color(220, 114, 22)));
+        g.fillRoundRect(pad, pad, box, box, arc, arc);
+
+        int inset = Math.max(2, size / 11);
+        int innerBox = box - inset * 2;
+        int innerArc = Math.max(3, arc - inset);
+        g.setPaint(new GradientPaint(pad + inset, pad + inset, new Color(14, 22, 36),
+                pad + inset, pad + inset + innerBox, new Color(22, 34, 54)));
+        g.fillRoundRect(pad + inset, pad + inset, innerBox, innerBox, innerArc, innerArc);
+
+        // Неоновое прицельное перекрестие на фоне
+        int cx = size / 2;
+        int cy = size / 2;
+        int cr = Math.max(3, (int) (size * 0.30));
+        g.setColor(new Color(84, 240, 152, 95));
+        g.setStroke(new BasicStroke(Math.max(1.0f, size / 28.0f)));
+        g.drawOval(cx - cr, cy - cr, cr * 2, cr * 2);
+        int tick = Math.max(2, size / 9);
+        g.drawLine(cx - cr - tick / 2, cy, cx - cr + tick / 2, cy);
+        g.drawLine(cx + cr - tick / 2, cy, cx + cr + tick / 2, cy);
+        g.drawLine(cx, cy - cr - tick / 2, cx, cy - cr + tick / 2);
+        g.drawLine(cx, cy + cr - tick / 2, cx, cy + cr + tick / 2);
+
+        // Чёткая надпись CS2
+        if (size >= 24) {
+            Font font = new Font("SansSerif", Font.BOLD, Math.max(9, (int) (size * 0.36)));
+            g.setFont(font);
+            FontMetrics fm = g.getFontMetrics();
+            String label = "CS2";
+            int tx = cx - fm.stringWidth(label) / 2;
+            int ty = cy + (fm.getAscent() - fm.getDescent()) / 2 - Math.max(0, size / 22);
+            g.setColor(new Color(0, 0, 0, 170));
+            g.drawString(label, tx + Math.max(1, size / 48), ty + Math.max(1, size / 48));
+            g.setColor(new Color(255, 212, 82));
+            g.drawString(label, tx, ty);
+
+            if (size >= 64) {
+                Font sub = new Font("SansSerif", Font.BOLD, Math.max(8, (int) (size * 0.125)));
+                g.setFont(sub);
+                FontMetrics sfm = g.getFontMetrics();
+                String subTxt = "7.0 HD";
+                g.setColor(new Color(98, 240, 162));
+                g.drawString(subTxt, cx - sfm.stringWidth(subTxt) / 2, pad + inset + innerBox - Math.max(4, size / 14));
+            }
+        } else {
+            g.setColor(new Color(255, 212, 82));
+            int dot = Math.max(3, size / 4);
+            g.fillOval(cx - dot / 2, cy - dot / 2, dot, dot);
+        }
+
+        g.dispose();
+        return img;
     }
 }

@@ -4,11 +4,13 @@
 
 ---
 
-## Прямые ссылки на скачивание
+## Прямые ссылки на скачивание (Windows 10 / Windows 11 / Linux / macOS)
 
-- **Полный архив игры (`.zip` с готовым `CS-2-JAVA.jar` + `run.bat` + `run.sh` + исходниками):**  
+- **Автономный исполняемый файл для Windows 10/11 (`CS-2-JAVA.exe` — 1 файл со встроенной игрой и авто-поиском/докачкой Java 21):**  
+  `https://github.com/dimasik1325/CS-2-JAVA/raw/arena/a87e305c-cs-2-java/CS-2-JAVA.exe`
+- **Полный архив игры (`.zip` с `CS-2-JAVA.exe` + `CS-2-JAVA.jar` + `run.bat` + `run.sh` + исходниками):**  
   `https://github.com/dimasik1325/CS-2-JAVA/archive/refs/heads/arena/a87e305c-cs-2-java.zip`
-- **Готовый исполняемый файл (`CS-2-JAVA.jar` — запуск двойным кликом или `java -jar`):**  
+- **Кроссплатформенный `CS-2-JAVA.jar`:**  
   `https://github.com/dimasik1325/CS-2-JAVA/raw/arena/a87e305c-cs-2-java/CS-2-JAVA.jar`
 
 ---
@@ -55,9 +57,13 @@
 
 ---
 
-## Быстрый запуск (Windows / Linux / macOS)
+## Быстрый запуск (Windows 10/11 • Linux • macOS)
 
-1. Запустите **`run.bat`** (Windows) или `./run.sh` (Linux / macOS), либо напрямую без компиляции:
+1. **На Windows 10 / Windows 11 (x64):** просто скачайте и дважды кликните **`CS-2-JAVA.exe`**!  
+   - Весь игровой архив уже встроен внутрь `CS-2-JAVA.exe` (работает как один файл в любой папке, включая русские пути).  
+   - Лаунчер запускается без чёрного консольного окна (`WINDOWS_GUI`), с чётким масштабированием `PerMonitorV2 DPI` и фирменной иконкой `CS2 7.0 HD`.  
+   - Автоматически находит установленную `Java 11 / 17 / 21 / 25+`, а если на чистой Windows её ещё нет — в 1 клик (без прав администратора) скачивает портативную `OpenJDK 21` (~45 МБ) в `%LOCALAPPDATA%\CS-2-JAVA\jre` и сразу запускает игру.
+2. **Альтернативно (Windows / Linux / macOS):** запустите **`run.bat`** или `./run.sh`, либо напрямую:
    ```bash
    java -Xmx1536m -jar CS-2-JAVA.jar
    ```
