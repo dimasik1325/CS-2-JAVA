@@ -60,7 +60,7 @@ if not defined JAVAC_CMD (
     if not errorlevel 1 (
         if exist "CS-2-JAVA.jar" (
             echo [INFO] Найден JRE ^(java^) и готовый пакет CS-2-JAVA.jar — запуск игры без пересборки...
-            java -Xms256m -Xmx1024m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -jar "CS-2-JAVA.jar"
+            java -Xms256m -Xmx1536m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -jar "CS-2-JAVA.jar"
             goto :EOF
         )
     )
