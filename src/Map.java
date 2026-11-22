@@ -55,6 +55,7 @@ public class Map {
 
     private GameSettings.MapTheme currentTheme = GameSettings.MapTheme.INFERNO;
     private final List<Vec3.Box> boxes = new ArrayList<>();
+    private final List<Vec3.Box> overheadRoofs = new ArrayList<>();
     private final List<SmoothCylinderProp> smoothCylinders = new ArrayList<>();
     private final List<SmoothEllipsoidProp> smoothEllipsoids = new ArrayList<>();
     private final List<Vec3> botSpawns = new ArrayList<>();
@@ -104,6 +105,13 @@ public class Map {
                 break;
         }
         setupCommonAllySpawns();
+        overheadRoofs.clear();
+        for (int i = 0; i < boxes.size(); i++) {
+            Vec3.Box b = boxes.get(i);
+            if (b.minY >= 2.8) {
+                overheadRoofs.add(b);
+            }
+        }
     }
 
     private void setupCommonAllySpawns() {
@@ -683,11 +691,9 @@ public class Map {
      * Проверяет, находится ли точка под крышей/навесом арены (чтобы дождь и снег не шли сквозь потолок АЭС Nuke!).
      */
     public boolean hasOverheadRoof(double x, double y, double z) {
-        for (int i = 0; i < boxes.size(); i++) {
-            Vec3.Box b = boxes.get(i);
-            if (b.minY >= 2.8 && y < b.maxY
-                    && x >= b.minX && x <= b.maxX
-                    && z >= b.minZ && z <= b.maxZ) {
+        for (int i = 0; i < overheadRoofs.size(); i++) {
+            Vec3.Box b = overheadRoofs.get(i);
+            if (y < b.maxY && x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ) {
                 return true;
             }
         }

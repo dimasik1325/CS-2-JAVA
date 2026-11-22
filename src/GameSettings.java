@@ -5,33 +5,36 @@ import java.io.FileOutputStream;
 import java.util.Properties;
 
 /**
- * Центральное хранилище настроек и карьерного прогресса CS-2 JAVA 6.0
- * (Multi-Core Ultra-Smooth Engine & Panorama UI Edition):
- * - Нативное 1:1 разрешение под размер окна/монитора (0% пикселизации!), 512x512 Mipmap + Span FXAA
- * - Многопоточный рендер на всех ядрах процессора + Frustum Culling + Early-Z
- * - Система званий CS2 (Silver -> Global Elite), XP-прогресс, статистика карьеры
+ * Центральное хранилище настроек графики, оптимизации и карьеры CS-2 JAVA 7.0
+ * (Hyper-Turbo Multi-Core Engine & Pro Graphics Studio Edition):
+ * - 20+ профессиональных настроек графики CS2 (Пресеты, 1:1 / 540p..1080p, Авто-FPS Dynamic Res,
+ *   FXAA Turbo / Span FXAA 3.11, Резкость CAS, Насыщенность Digital Vibrance, Яркость, LOD геометрии,
+ *   Дальность прорисовки, Качество Mipmap, Тени, AO Гуро, Туман, Виньетка, Плотность частиц, График FPS)
+ * - Система званий CS2 (Silver -> Global Elite) и сохранение конфигурации
  */
 public class GameSettings {
 
-    public static final int CONFIG_VERSION = 6;
+    public static final int CONFIG_VERSION = 7;
 
     public enum QualityPreset {
-        LOW("Низкое (Турбо FPS)"),
-        MEDIUM("Среднее (Плавный HD)"),
-        HIGH("Высокое (Native 1:1 + FXAA)"),
-        ULTRA("Ультра (1:1 FullHD + Все эффекты)");
+        ESPORTS("Киберспорт (Макс. FPS)"),
+        LOW("Низкое (Турбо)"),
+        MEDIUM("Среднее (Баланс HD)"),
+        HIGH("Высокое (1:1 Native + FXAA)"),
+        ULTRA("Ультра (1:1 + CAS + Макс.)");
 
         public final String title;
         QualityPreset(String title) { this.title = title; }
     }
 
     public enum ResolutionScale {
-        LOW_854("960×540 (Турбо FPS)", 960, 540),
+        TURBO_768("768×432 (Кибер-Турбо)", 768, 432),
+        LOW_854("960×540 (Турбо 540p)", 960, 540),
         MED_1024("1152×648 (Быстрый HD)", 1152, 648),
         HIGH_1280("1280×720 (HD 720p)", 1280, 720),
         ULTRA_1600("1600×900 (HD+ 900p)", 1600, 900),
         EXTREME_1920("1920×1080 (Full HD 1080p)", 1920, 1080),
-        NATIVE_WINDOW("Нативное 1:1 (Без пикселей!)", 0, 0);
+        NATIVE_WINDOW("Нативное 1:1 (Без мыла!)", 0, 0);
 
         public final String label;
         public final int width;
@@ -45,22 +48,130 @@ public class GameSettings {
 
         public int resolveWidth(int windowW) {
             if (this == NATIVE_WINDOW) {
-                return Math.max(960, Math.min(1920, windowW));
+                return Math.max(800, Math.min(1920, windowW));
             }
             return width;
         }
 
         public int resolveHeight(int windowH) {
             if (this == NATIVE_WINDOW) {
-                return Math.max(540, Math.min(1080, windowH));
+                return Math.max(450, Math.min(1080, windowH));
             }
             return height;
         }
     }
 
+    public enum DynamicResolutionMode {
+        OFF("Выкл (Фикс. 100%)", 0),
+        TARGET_60("Авто-удержание 60 FPS", 60),
+        TARGET_120("Авто-удержание 120 FPS", 120);
+
+        public final String label;
+        public final int targetFps;
+        DynamicResolutionMode(String label, int targetFps) {
+            this.label = label;
+            this.targetFps = targetFps;
+        }
+    }
+
+    public enum AntiAliasingMode {
+        OFF("Выключено (Макс. FPS)"),
+        FXAA_TURBO("FXAA Turbo (Быстрое)"),
+        SPAN_FXAA_ULTRA("Span FXAA 3.11 (Ультра)");
+
+        public final String label;
+        AntiAliasingMode(String label) { this.label = label; }
+    }
+
+    public enum TextureQualityMode {
+        FAST_MIP("Быстрая (Чёткий Mipmap)"),
+        BILINEAR_MIP("Гладкая Bilinear + Mipmap"),
+        ULTRA_ANISO_MIP("Ультра 512 (Дальний Mip)");
+
+        public final String label;
+        TextureQualityMode(String label) { this.label = label; }
+    }
+
+    public enum GeometryLodMode {
+        PERFORMANCE("Киберспорт (Быстрый LOD)", 0.55),
+        BALANCED("Адаптивный Авто-LOD", 0.82),
+        ULTRA("Ультра (Макс. сегментов)", 1.00);
+
+        public final String label;
+        public final double detailScale;
+        GeometryLodMode(String label, double detailScale) {
+            this.label = label;
+            this.detailScale = detailScale;
+        }
+    }
+
+    public enum RenderDistanceMode {
+        SHORT_48("48 м (Макс. FPS)", 48.0),
+        MEDIUM_68("68 м (Стандарт)", 68.0),
+        FAR_88("88 м (Далеко)", 88.0),
+        EXTREME_115("115 м (Вся арена)", 115.0);
+
+        public final String label;
+        public final double meters;
+        RenderDistanceMode(String label, double meters) {
+            this.label = label;
+            this.meters = meters;
+        }
+    }
+
+    public enum CasSharpeningMode {
+        OFF("Выключена (0%)", 0),
+        SOFT("Мягкая (35%)", 35),
+        CRISP("Чёткая CS2 (65%)", 65),
+        MAX("Максимум (100%)", 100);
+
+        public final String label;
+        public final int strengthPct;
+        CasSharpeningMode(String label, int strengthPct) {
+            this.label = label;
+            this.strengthPct = strengthPct;
+        }
+    }
+
+    public enum ColorVibranceMode {
+        CINEMATIC("Кино-мягкая (90%)", 90),
+        NATURAL("Стандарт (100%)", 100),
+        VIBRANT("Сочная CS2 (128%)", 128),
+        ESPORTS_VIVID("Киберспорт (155%)", 155);
+
+        public final String label;
+        public final int vibrancePct;
+        ColorVibranceMode(String label, int vibrancePct) {
+            this.label = label;
+            this.vibrancePct = vibrancePct;
+        }
+    }
+
+    public enum ParticleDensityMode {
+        LOW("Низкая (40% — FPS+)", 0.40),
+        MEDIUM("Стандарт (100%)", 1.00),
+        ULTRA("Ультра (150% искр)", 1.50);
+
+        public final String label;
+        public final double multiplier;
+        ParticleDensityMode(String label, double multiplier) {
+            this.label = label;
+            this.multiplier = multiplier;
+        }
+    }
+
+    public enum HudTelemetryMode {
+        OFF("Скрыта"),
+        COMPACT("Компактная (FPS + мс)"),
+        FULL_GRAPH("Полная + График мс");
+
+        public final String label;
+        HudTelemetryMode(String label) { this.label = label; }
+    }
+
     public enum ShadowMode {
-        OFF("Выкл"),
-        BLOBS("Мягкие контактные"),
+        OFF("Выкл (FPS+)"),
+        BLOBS("Контактные (Быстро)"),
         SUN_PROJECTED("Солнечные 3D-тени");
 
         public final String label;
@@ -204,9 +315,24 @@ public class GameSettings {
 
     private static final String SETTINGS_FILE = "settings.properties";
 
-    // --- НАСТРОЙКИ ГЛАДКОЙ НЕПИКСЕЛЬНОЙ HD-ГРАФИКИ И МНОГОЯДЕРНОЙ ОПТИМИЗАЦИИ ---
+    // --- РАСШИРЕННЫЕ НАСТРОЙКИ ГРАФИКИ И ОПТИМИЗАЦИИ CS-2 JAVA 7.0 ---
     public QualityPreset qualityPreset = QualityPreset.HIGH;
     public ResolutionScale resolutionScale = ResolutionScale.NATIVE_WINDOW;
+    public DynamicResolutionMode dynamicResolution = DynamicResolutionMode.OFF;
+    public AntiAliasingMode antiAliasingMode = AntiAliasingMode.FXAA_TURBO;
+    public TextureQualityMode textureQuality = TextureQualityMode.BILINEAR_MIP;
+    public GeometryLodMode geometryLod = GeometryLodMode.BALANCED;
+    public RenderDistanceMode renderDistance = RenderDistanceMode.FAR_88;
+    public CasSharpeningMode casSharpening = CasSharpeningMode.SOFT;
+    public ColorVibranceMode colorVibrance = ColorVibranceMode.VIBRANT;
+    public ParticleDensityMode particleDensity = ParticleDensityMode.MEDIUM;
+    public HudTelemetryMode telemetryMode = HudTelemetryMode.FULL_GRAPH;
+    public int brightnessPct = 100;             // Яркость / гамма (80..135%)
+    public boolean ambientOcclusion = true;     // Мягкое затенение углов Гуро (AO)
+    public boolean fogEnabled = true;           // Атмосферная дымка глубины
+    public boolean vignetteEnabled = true;      // Кинематографическое затемнение краёв
+
+    // Совместимые флаги рендера
     public ShadowMode shadowMode = ShadowMode.SUN_PROJECTED;
     public boolean bilinearFiltering = true;
     public boolean smoothTextures = true;
@@ -215,8 +341,8 @@ public class GameSettings {
     public boolean skyCloudsAndSunFlare = true;
     public boolean decalsAndShells = true;
     public boolean fogAndVignette = true;
-    public int fovDegrees = 70;         // Вертикальный FOV (56..86)
-    public int fpsLimit = 120;          // 60, 120, 240 или 0 (без лимита)
+    public int fovDegrees = 72;                 // Вертикальный FOV (56..90)
+    public int fpsLimit = 144;                  // 60, 120, 144, 240 или 0 (без лимита)
     public boolean showFpsTelemetry = true;
     public boolean fullscreen = false;
     public TimeOfDay timeOfDay = TimeOfDay.DAY;
@@ -273,9 +399,6 @@ public class GameSettings {
         return (careerXp % 400) / 400.0;
     }
 
-    /**
-     * Начисляет карьерный опыт и возвращает true, если игрок повысил своё звание CS2!
-     */
     public boolean addCareerXp(int xpDelta, boolean kill, boolean headshot, boolean matchWin) {
         int oldRank = getRankIndex();
         careerXp = Math.max(0, careerXp + xpDelta);
@@ -286,59 +409,122 @@ public class GameSettings {
         return getRankIndex() > oldRank;
     }
 
+    public void syncDerivedFlags() {
+        this.smoothTextures = (textureQuality != TextureQualityMode.FAST_MIP);
+        this.fxaaAntiAliasing = (antiAliasingMode != AntiAliasingMode.OFF);
+        this.fogAndVignette = fogEnabled || vignetteEnabled;
+        this.showFpsTelemetry = (telemetryMode != HudTelemetryMode.OFF);
+    }
+
     public void applyGraphicsPreset(QualityPreset preset) {
         this.qualityPreset = preset;
         switch (preset) {
-            case LOW:
+            case ESPORTS:
                 resolutionScale = ResolutionScale.LOW_854;
+                dynamicResolution = DynamicResolutionMode.OFF;
+                antiAliasingMode = AntiAliasingMode.OFF;
+                textureQuality = TextureQualityMode.FAST_MIP;
+                geometryLod = GeometryLodMode.PERFORMANCE;
+                renderDistance = RenderDistanceMode.MEDIUM_68;
+                casSharpening = CasSharpeningMode.CRISP;
+                colorVibrance = ColorVibranceMode.ESPORTS_VIVID;
+                particleDensity = ParticleDensityMode.LOW;
                 shadowMode = ShadowMode.OFF;
-                bilinearFiltering = true;
-                smoothTextures = true;
-                fxaaAntiAliasing = false;
-                multiCoreRendering = true;
+                ambientOcclusion = false;
+                fogEnabled = false;
+                vignetteEnabled = false;
                 skyCloudsAndSunFlare = false;
                 decalsAndShells = false;
-                fogAndVignette = false;
+                bilinearFiltering = false;
+                multiCoreRendering = true;
+                fpsLimit = 0;
+                break;
+            case LOW:
+                resolutionScale = ResolutionScale.HIGH_1280;
+                dynamicResolution = DynamicResolutionMode.TARGET_60;
+                antiAliasingMode = AntiAliasingMode.FXAA_TURBO;
+                textureQuality = TextureQualityMode.BILINEAR_MIP;
+                geometryLod = GeometryLodMode.PERFORMANCE;
+                renderDistance = RenderDistanceMode.MEDIUM_68;
+                casSharpening = CasSharpeningMode.OFF;
+                colorVibrance = ColorVibranceMode.NATURAL;
+                particleDensity = ParticleDensityMode.LOW;
+                shadowMode = ShadowMode.BLOBS;
+                ambientOcclusion = true;
+                fogEnabled = true;
+                vignetteEnabled = false;
+                skyCloudsAndSunFlare = false;
+                decalsAndShells = false;
+                bilinearFiltering = true;
+                multiCoreRendering = true;
                 break;
             case MEDIUM:
                 resolutionScale = ResolutionScale.HIGH_1280;
+                dynamicResolution = DynamicResolutionMode.OFF;
+                antiAliasingMode = AntiAliasingMode.FXAA_TURBO;
+                textureQuality = TextureQualityMode.BILINEAR_MIP;
+                geometryLod = GeometryLodMode.BALANCED;
+                renderDistance = RenderDistanceMode.FAR_88;
+                casSharpening = CasSharpeningMode.SOFT;
+                colorVibrance = ColorVibranceMode.VIBRANT;
+                particleDensity = ParticleDensityMode.MEDIUM;
                 shadowMode = ShadowMode.BLOBS;
-                bilinearFiltering = true;
-                smoothTextures = true;
-                fxaaAntiAliasing = true;
-                multiCoreRendering = true;
+                ambientOcclusion = true;
+                fogEnabled = true;
+                vignetteEnabled = true;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
-                fogAndVignette = true;
+                bilinearFiltering = true;
+                multiCoreRendering = true;
                 break;
             case HIGH:
                 resolutionScale = ResolutionScale.NATIVE_WINDOW;
+                dynamicResolution = DynamicResolutionMode.OFF;
+                antiAliasingMode = AntiAliasingMode.FXAA_TURBO;
+                textureQuality = TextureQualityMode.BILINEAR_MIP;
+                geometryLod = GeometryLodMode.BALANCED;
+                renderDistance = RenderDistanceMode.FAR_88;
+                casSharpening = CasSharpeningMode.SOFT;
+                colorVibrance = ColorVibranceMode.VIBRANT;
+                particleDensity = ParticleDensityMode.MEDIUM;
                 shadowMode = ShadowMode.SUN_PROJECTED;
-                bilinearFiltering = true;
-                smoothTextures = true;
-                fxaaAntiAliasing = true;
-                multiCoreRendering = true;
+                ambientOcclusion = true;
+                fogEnabled = true;
+                vignetteEnabled = true;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
-                fogAndVignette = true;
+                bilinearFiltering = true;
+                multiCoreRendering = true;
                 break;
             case ULTRA:
                 resolutionScale = ResolutionScale.EXTREME_1920;
+                dynamicResolution = DynamicResolutionMode.OFF;
+                antiAliasingMode = AntiAliasingMode.SPAN_FXAA_ULTRA;
+                textureQuality = TextureQualityMode.ULTRA_ANISO_MIP;
+                geometryLod = GeometryLodMode.ULTRA;
+                renderDistance = RenderDistanceMode.EXTREME_115;
+                casSharpening = CasSharpeningMode.CRISP;
+                colorVibrance = ColorVibranceMode.VIBRANT;
+                particleDensity = ParticleDensityMode.ULTRA;
                 shadowMode = ShadowMode.SUN_PROJECTED;
-                bilinearFiltering = true;
-                smoothTextures = true;
-                fxaaAntiAliasing = true;
-                multiCoreRendering = true;
+                ambientOcclusion = true;
+                fogEnabled = true;
+                vignetteEnabled = true;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
-                fogAndVignette = true;
+                bilinearFiltering = true;
+                multiCoreRendering = true;
                 break;
         }
+        syncDerivedFlags();
     }
 
     public void load() {
         File file = new File(SETTINGS_FILE);
-        if (!file.exists()) return;
+        if (!file.exists()) {
+            syncDerivedFlags();
+            return;
+        }
         Properties p = new Properties();
         try (FileInputStream fis = new FileInputStream(file)) {
             p.load(fis);
@@ -346,29 +532,35 @@ public class GameSettings {
 
             qualityPreset = parseEnum(p.getProperty("qualityPreset"), QualityPreset.class, qualityPreset);
             resolutionScale = parseEnum(p.getProperty("resolutionScale"), ResolutionScale.class, resolutionScale);
+            dynamicResolution = parseEnum(p.getProperty("dynamicResolution"), DynamicResolutionMode.class, dynamicResolution);
+            antiAliasingMode = parseEnum(p.getProperty("antiAliasingMode"), AntiAliasingMode.class, antiAliasingMode);
+            textureQuality = parseEnum(p.getProperty("textureQuality"), TextureQualityMode.class, textureQuality);
+            geometryLod = parseEnum(p.getProperty("geometryLod"), GeometryLodMode.class, geometryLod);
+            renderDistance = parseEnum(p.getProperty("renderDistance"), RenderDistanceMode.class, renderDistance);
+            casSharpening = parseEnum(p.getProperty("casSharpening"), CasSharpeningMode.class, casSharpening);
+            colorVibrance = parseEnum(p.getProperty("colorVibrance"), ColorVibranceMode.class, colorVibrance);
+            particleDensity = parseEnum(p.getProperty("particleDensity"), ParticleDensityMode.class, particleDensity);
+            telemetryMode = parseEnum(p.getProperty("telemetryMode"), HudTelemetryMode.class, telemetryMode);
+            brightnessPct = clampInt(p.getProperty("brightnessPct"), 80, 135, brightnessPct);
+            ambientOcclusion = Boolean.parseBoolean(p.getProperty("ambientOcclusion", String.valueOf(ambientOcclusion)));
+            fogEnabled = Boolean.parseBoolean(p.getProperty("fogEnabled", String.valueOf(fogEnabled)));
+            vignetteEnabled = Boolean.parseBoolean(p.getProperty("vignetteEnabled", String.valueOf(vignetteEnabled)));
+
             shadowMode = parseEnum(p.getProperty("shadowMode"), ShadowMode.class, shadowMode);
             bilinearFiltering = Boolean.parseBoolean(p.getProperty("bilinearFiltering", String.valueOf(bilinearFiltering)));
-            smoothTextures = Boolean.parseBoolean(p.getProperty("smoothTextures", String.valueOf(smoothTextures)));
-            fxaaAntiAliasing = Boolean.parseBoolean(p.getProperty("fxaaAntiAliasing", String.valueOf(fxaaAntiAliasing)));
             multiCoreRendering = Boolean.parseBoolean(p.getProperty("multiCoreRendering", String.valueOf(multiCoreRendering)));
             skyCloudsAndSunFlare = Boolean.parseBoolean(p.getProperty("skyCloudsAndSunFlare", String.valueOf(skyCloudsAndSunFlare)));
             decalsAndShells = Boolean.parseBoolean(p.getProperty("decalsAndShells", String.valueOf(decalsAndShells)));
-            fogAndVignette = Boolean.parseBoolean(p.getProperty("fogAndVignette", String.valueOf(fogAndVignette)));
-            fovDegrees = clampInt(p.getProperty("fovDegrees"), 55, 86, fovDegrees);
-            fpsLimit = clampInt(p.getProperty("fpsLimit"), 0, 240, fpsLimit);
-            showFpsTelemetry = Boolean.parseBoolean(p.getProperty("showFpsTelemetry", String.valueOf(showFpsTelemetry)));
+            fovDegrees = clampInt(p.getProperty("fovDegrees"), 56, 90, fovDegrees);
+            fpsLimit = clampInt(p.getProperty("fpsLimit"), 0, 360, fpsLimit);
             timeOfDay = parseEnum(p.getProperty("timeOfDay"), TimeOfDay.class, timeOfDay);
             weatherMode = parseEnum(p.getProperty("weatherMode"), WeatherMode.class, weatherMode);
 
-            // Автоматическая миграция старых конфигураций v1..v5 на 100% гладкий непиксельный рендер v6.0!
             if (ver < CONFIG_VERSION) {
-                resolutionScale = ResolutionScale.NATIVE_WINDOW;
-                bilinearFiltering = true;
-                smoothTextures = true;
-                fxaaAntiAliasing = true;
                 multiCoreRendering = true;
-                if (fpsLimit == 60) fpsLimit = 120;
+                if (fpsLimit == 60) fpsLimit = 144;
             }
+            syncDerivedFlags();
 
             mouseSensitivity = clampDouble(p.getProperty("mouseSensitivity"), 0.0005, 0.0080, mouseSensitivity);
             invertMouseY = Boolean.parseBoolean(p.getProperty("invertMouseY", String.valueOf(invertMouseY)));
@@ -397,6 +589,7 @@ public class GameSettings {
     }
 
     public void save() {
+        syncDerivedFlags();
         final Properties snapshot = buildPropertiesSnapshot();
         savePending = true;
         Thread writer = new Thread(() -> {
@@ -404,7 +597,7 @@ public class GameSettings {
                 if (!savePending) return;
                 savePending = false;
                 try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                    snapshot.store(fos, "CS-2 JAVA 6.0 Ultra-Smooth Panorama Configuration");
+                    snapshot.store(fos, "CS-2 JAVA 7.0 Hyper-Turbo & Pro Graphics Studio Configuration");
                 } catch (Throwable ignored) {
                 }
             }
@@ -414,11 +607,12 @@ public class GameSettings {
     }
 
     public void saveSync() {
+        syncDerivedFlags();
         final Properties snapshot = buildPropertiesSnapshot();
         synchronized (saveLock) {
             savePending = false;
             try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                snapshot.store(fos, "CS-2 JAVA 6.0 Ultra-Smooth Panorama Configuration");
+                snapshot.store(fos, "CS-2 JAVA 7.0 Hyper-Turbo & Pro Graphics Studio Configuration");
             } catch (Throwable ignored) {
             }
         }
@@ -429,6 +623,20 @@ public class GameSettings {
         p.setProperty("configVersion", String.valueOf(CONFIG_VERSION));
         p.setProperty("qualityPreset", qualityPreset.name());
         p.setProperty("resolutionScale", resolutionScale.name());
+        p.setProperty("dynamicResolution", dynamicResolution.name());
+        p.setProperty("antiAliasingMode", antiAliasingMode.name());
+        p.setProperty("textureQuality", textureQuality.name());
+        p.setProperty("geometryLod", geometryLod.name());
+        p.setProperty("renderDistance", renderDistance.name());
+        p.setProperty("casSharpening", casSharpening.name());
+        p.setProperty("colorVibrance", colorVibrance.name());
+        p.setProperty("particleDensity", particleDensity.name());
+        p.setProperty("telemetryMode", telemetryMode.name());
+        p.setProperty("brightnessPct", String.valueOf(brightnessPct));
+        p.setProperty("ambientOcclusion", String.valueOf(ambientOcclusion));
+        p.setProperty("fogEnabled", String.valueOf(fogEnabled));
+        p.setProperty("vignetteEnabled", String.valueOf(vignetteEnabled));
+
         p.setProperty("shadowMode", shadowMode.name());
         p.setProperty("bilinearFiltering", String.valueOf(bilinearFiltering));
         p.setProperty("smoothTextures", String.valueOf(smoothTextures));

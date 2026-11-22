@@ -18,9 +18,9 @@ import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
 /**
- * Точка входа в игру CS-2 JAVA 6.0 (Panorama UI • Ultra Smooth 1:1 HD • Multi-Core Edition).
+ * Точка входа в игру CS-2 JAVA 7.0 (Hyper-Turbo Multi-Core Engine • Pro Graphics Studio Edition).
  * Управляет окном JFrame, безрамочным полноэкранным режимом F11 / Alt+Enter (без чёрного экрана!)
- * и запуском многопоточного ультра-гладкого 3D-движка Engine.
+ * и запуском сверхбыстрого многоядерного 3D-движка Engine.
  */
 public class Main {
 
@@ -40,7 +40,7 @@ public class Main {
         }
 
         SwingUtilities.invokeLater(() -> {
-            final JFrame frame = new JFrame("CS-2 JAVA 6.0 | Panorama UI • Ultra Smooth 1:1 HD • Multi-Core");
+            final JFrame frame = new JFrame("CS-2 JAVA 7.0 | Hyper-Turbo Engine • Pro Graphics Studio • 1:1 HD");
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
             frame.getContentPane().setBackground(new Color(10, 14, 22));
@@ -144,9 +144,9 @@ public class Main {
     }
 
     /**
-     * Автономная проверка CS-2 JAVA 5.0: нативный гладкий рендер 1280x720 без пикселизации,
-     * текстуры 256x256 с Mipmap и FXAA, карта Inferno с фонтаном, режим Осада с Босс-Вертолётом,
-     * гранатомёт RPG-7, пулемёт M249, 3D Авто-Турель [J], а также стресс-тест 1000 кликов!
+     * Автономная проверка CS-2 JAVA 7.0: Hyper-Turbo аналитический растеризатор, Deferred Skybox,
+     * Студия Графики (24 настройки + 5 пресетов), живой осциллограф FPS/мс, динамическое Авто-FPS разрешение,
+     * а также проверка Wallbang и стресс-тест 1000 кликов!
      */
     private static void runHeadlessSelfTest(String outDir) {
         try {
@@ -156,30 +156,46 @@ public class Main {
             Engine engine = new Engine(true);
             Player player = engine.getPlayer();
 
-            // Гарантируем максимальную гладкость 1:1 без пикселизации и многопоточный рендер 6.0
-            engine.getSettings().resolutionScale = GameSettings.ResolutionScale.NATIVE_WINDOW;
-            engine.getSettings().multiCoreRendering = true;
-            engine.getSettings().smoothTextures = true;
-            engine.getSettings().fxaaAntiAliasing = true;
-            engine.getSettings().bilinearFiltering = true;
-            engine.getSettings().weatherMode = GameSettings.WeatherMode.CLEAR;
+            // Проверяем все 5 пресетов графики (ESPORTS .. ULTRA)
+            for (GameSettings.QualityPreset pr : GameSettings.QualityPreset.values()) {
+                engine.getSettings().applyGraphicsPreset(pr);
+                engine.renderOffscreenForTest(1280, 720);
+            }
 
-            // 1. Главное меню Panorama Glass 6.0 (3D-Оперативник SAS CT + Звание CS2 + 4 карточки карт!)
+            // Включаем профиль HIGH (1:1 Native + FXAA Turbo + CAS + Vibrance + График FPS)
+            engine.getSettings().applyGraphicsPreset(GameSettings.QualityPreset.HIGH);
+            engine.getSettings().antiAliasingMode = GameSettings.AntiAliasingMode.SPAN_FXAA_ULTRA;
+            engine.getSettings().casSharpening = GameSettings.CasSharpeningMode.CRISP;
+            engine.getSettings().colorVibrance = GameSettings.ColorVibranceMode.VIBRANT;
+            engine.getSettings().telemetryMode = GameSettings.HudTelemetryMode.FULL_GRAPH;
+            engine.getSettings().weatherMode = GameSettings.WeatherMode.CLEAR;
+            engine.getSettings().syncDerivedFlags();
+
+            // 1. Главное меню Panorama Glass 7.0
             engine.getSettings().mapTheme = GameSettings.MapTheme.INFERNO;
             engine.getSettings().gameMode = GameSettings.GameMode.SIEGE_WAVES;
             engine.getSettings().weaponSkin = GameSettings.WeaponSkin.PRINTSTREAM;
             engine.startNewMatch();
             engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
-            for (int i = 0; i < 30; i++) {
+            for (int i = 0; i < 24; i++) {
                 engine.updateGame(1.0 / 60.0);
+                engine.renderOffscreenForTest(1280, 720);
             }
-            saveTestScreenshot(engine, new File(dir, "01_main_menu_panorama_v6.png"));
+            saveTestScreenshot(engine, new File(dir, "01_main_menu_v7.png"));
 
-            // 2. Боевой HUD Panorama 6.0 + Изогнутый Керамбит (Gold Fade) + Маяк Авиаудара [U] + Авто-Турель [J] + Босс!
+            // 2. Студия Графики 7.0 — Страница 1 (Экран, FPS, Сглаживание, CAS, LOD, Дальность)
+            engine.openSettingsForTest(0, 0);
+            saveTestScreenshot(engine, new File(dir, "02_graphics_studio_page1_v7.png"));
+
+            // 3. Студия Графики 7.0 — Страница 2 (Тени, Gouraud AO, Vibrance, Яркость, Туман, Виньетка, Частицы)
+            engine.openSettingsForTest(0, 1);
+            saveTestScreenshot(engine, new File(dir, "03_graphics_studio_page2_v7.png"));
+
+            // 4. Боевой HUD Panorama 7.0 + Живой график мс под радаром + Керамбит + Авиаудар + Авто-Турель + Босс!
             engine.launchMatchFromMenu();
             player.addMoney(9000);
             player.addAirstrikeCharge(2);
-            player.selectWeaponSlot(2); // Керамбит!
+            player.selectWeaponSlot(2);
             engine.getSettings().weaponSkin = GameSettings.WeaponSkin.GOLD_FADE;
             player.getCurrentWeapon().triggerInspect();
             for (int i = 0; i < 16; i++) engine.updateGame(1.0 / 60.0);
@@ -189,7 +205,10 @@ public class Main {
             engine.tryCallPrecisionAirstrike();
             engine.trySummonHelicopterChallenge();
             player.tryTriggerDash(true, false, false, false);
-            for (int i = 0; i < 10; i++) engine.updateGame(1.0 / 60.0);
+            for (int i = 0; i < 10; i++) {
+                engine.updateGame(1.0 / 60.0);
+                engine.renderOffscreenForTest(1280, 720);
+            }
             for (Bot b : engine.getBots()) {
                 if (!b.isAlly()) {
                     b.setArchetype(Bot.Archetype.JUGGERNAUT);
@@ -198,29 +217,15 @@ public class Main {
                 }
             }
             player.setAngles(0.24, 0.16);
-            saveTestScreenshot(engine, new File(dir, "02_inferno_hud_karambit_airstrike_v6.png"));
+            saveTestScreenshot(engine, new File(dir, "04_combat_hud_graph_v7.png"));
 
-            // 3. Новый 3-колоночный Магазин CS2 Panorama [B]
-            engine.setBuyMenuOpen(true);
-            saveTestScreenshot(engine, new File(dir, "03_buy_menu_3col_panorama_v6.png"));
-            engine.setBuyMenuOpen(false);
-
-            // 4. Проверка 0% пикселизации ВПЛОТНУЮ (45 см от стены, каменного фонтана и глушителя M4A1-S Printstream!)
+            // 5. Проверка чёткости CAS + 512x512 Mip0 вплотную + M4A1-S Printstream
             player.equipPurchasedWeapon(Weapon.Type.M4A1S);
             engine.getSettings().weaponSkin = GameSettings.WeaponSkin.PRINTSTREAM;
-            for (int i = 0; i < 18; i++) engine.updateGame(1.0 / 60.0);
+            for (int i = 0; i < 16; i++) engine.updateGame(1.0 / 60.0);
             player.getPosition().set(-2.5, 0.0, -7.5);
             player.setAngles(0.55, -0.10);
-            saveTestScreenshot(engine, new File(dir, "04_closeup_zero_pixels_v6.png"));
-
-            // 5. 3D Оружейная скинов 6.0 со шкалами ТТХ
-            engine.getSettings().weatherMode = GameSettings.WeatherMode.CLEAR;
-            engine.getSettings().mapTheme = GameSettings.MapTheme.MIRAGE;
-            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.ASIIMOV;
-            engine.startNewMatch();
-            engine.setCurrentScreen(Engine.AppScreen.SKIN_ARMORY);
-            for (int i = 0; i < 16; i++) engine.updateGame(1.0 / 60.0);
-            saveTestScreenshot(engine, new File(dir, "05_armory_showcase_v6.png"));
+            saveTestScreenshot(engine, new File(dir, "05_closeup_cas_crisp_v7.png"));
 
             // Проверка механики Wallbang на Dust II
             engine.getSettings().mapTheme = GameSettings.MapTheme.DUST_II;
@@ -249,13 +254,13 @@ public class Main {
                 }
             }
 
-            // Бенчмарк НАТИВНОГО HD 1280x720 с Bilinear 256x256 Mipmap + FXAA + Gouraud Cylinders!
+            // Бенчмарк НАТИВНОГО HD 1280x720 с Hyper-Turbo 7.0!
             BufferedImage benchImg = new BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
             Graphics2D bg = benchImg.createGraphics();
             engine.getSettings().mapTheme = GameSettings.MapTheme.INFERNO;
+            engine.getSettings().applyGraphicsPreset(GameSettings.QualityPreset.HIGH);
             engine.startNewMatch();
-            // Прогрев JIT
-            for (int i = 0; i < 15; i++) {
+            for (int i = 0; i < 20; i++) {
                 engine.updateGame(1.0 / 60.0);
                 engine.renderCompleteFrame(bg, 1280, 720);
             }
@@ -266,11 +271,25 @@ public class Main {
                 engine.renderCompleteFrame(bg, 1280, 720);
             }
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+
+            // Доп. бенчмарк профиля КИБЕРСПОРТ (Esports Preset)
+            engine.getSettings().applyGraphicsPreset(GameSettings.QualityPreset.ESPORTS);
+            for (int i = 0; i < 15; i++) {
+                engine.updateGame(1.0 / 60.0);
+                engine.renderCompleteFrame(bg, 1280, 720);
+            }
+            long tEsports0 = System.nanoTime();
+            for (int i = 0; i < benchFrames; i++) {
+                engine.updateGame(1.0 / 60.0);
+                engine.renderCompleteFrame(bg, 1280, 720);
+            }
+            long esportsMs = (System.nanoTime() - tEsports0) / 1_000_000L;
             bg.dispose();
 
-            // Стресс-тест 1000 асинхронных кликов + мульти-разрешения Fullscreen (1280x720, 1920x1080, 2560x1440)
+            // Стресс-тест динамического авто-разрешения и мульти-разрешений Fullscreen
+            engine.getSettings().applyGraphicsPreset(GameSettings.QualityPreset.HIGH);
+            engine.getSettings().dynamicResolution = GameSettings.DynamicResolutionMode.TARGET_120;
             engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
-            engine.renderOffscreenForTest(1280, 720);
             int[][] testResolutions = {{1280, 720}, {1920, 1080}, {2560, 1440}, {1280, 720}};
             for (int[] res : testResolutions) {
                 engine.renderOffscreenForTest(res[0], res[1]);
@@ -297,25 +316,26 @@ public class Main {
             }
             engine.stop();
             engine.flushPendingInputTasks();
-            engine.getSettings().fpsLimit = 120;
 
             if (registeredClicks != 1000) {
                 throw new IllegalStateException("Lost UI clicks under load! Registered " + registeredClicks + "/1000");
             }
 
-            // Возвращаем дефолтную чистую конфигурацию 6.0 для игрока
-            engine.getSettings().resolutionScale = GameSettings.ResolutionScale.NATIVE_WINDOW;
-            engine.getSettings().multiCoreRendering = true;
+            // Возвращаем дефолтную чистую конфигурацию 7.0 для игрока
+            engine.getSettings().applyGraphicsPreset(GameSettings.QualityPreset.HIGH);
             engine.getSettings().mapTheme = GameSettings.MapTheme.INFERNO;
             engine.getSettings().gameMode = GameSettings.GameMode.SIEGE_WAVES;
             engine.getSettings().botDifficulty = GameSettings.BotDifficulty.NORMAL;
             engine.getSettings().timeOfDay = GameSettings.TimeOfDay.DAY;
-            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.STANDARD;
+            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.ASIIMOV;
             engine.getSettings().weatherMode = GameSettings.WeatherMode.CLEAR;
             engine.getSettings().saveSync();
 
-            System.out.printf("CS-2 JAVA 6.0 ULTRA-SMOOTH MULTI-CORE SELF-TEST PASSED! %d Native-720p FXAA-3.11 frames in %d ms (%.1f FPS avg), %d/1000 async clicks hit (100%%)%n",
-                    benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs), registeredClicks);
+            System.out.printf(
+                    "CS-2 JAVA 7.0 HYPER-TURBO SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
+                    benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs),
+                    esportsMs, (benchFrames * 1000.0) / Math.max(1L, esportsMs),
+                    registeredClicks);
         } catch (Exception ex) {
             ex.printStackTrace();
             System.exit(1);

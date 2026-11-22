@@ -250,17 +250,50 @@ public class Engine extends JPanel implements Runnable {
 
     private double hitMarkerTimer = 0.0;
     private boolean hitMarkerHeadshot = false;
+    // Нулевая аллокация шрифтов Java2D: статический кэш на все размеры HUD и меню!
+    private static final Font[] SANS_PLAIN_CACHE = new Font[64];
+    private static final Font[] SANS_BOLD_CACHE = new Font[64];
+    private static final Font[] MONO_BOLD_CACHE = new Font[64];
+    static {
+        for (int sz = 8; sz < 64; sz++) {
+            SANS_PLAIN_CACHE[sz] = new Font("SansSerif", Font.PLAIN, sz);
+            SANS_BOLD_CACHE[sz]  = new Font("SansSerif", Font.BOLD, sz);
+            MONO_BOLD_CACHE[sz]  = new Font("Monospaced", Font.BOLD, sz);
+        }
+    }
+    private static Font uiFont(String family, int style, int size) {
+        int s = Math.max(8, Math.min(63, size));
+        if ("Monospaced".equals(family)) return MONO_BOLD_CACHE[s];
+        return (style == Font.BOLD) ? SANS_BOLD_CACHE[s] : SANS_PLAIN_CACHE[s];
+    }
+
     private int currentFps = 60;
+    private int onePercentLowFps = 55;
     private double lastFrameMs = 8.0;
+    private double emaFrameMs = 10.0;
+    private final float[] frameMsHistory = new float[120];
+    private int frameMsCursor = 0;
+    private double dynamicResScaleFactor = 1.0;
+    private int dynResAdjustCounter = 0;
+    private int graphicsSubPage = 0;
+
     private BufferedImage cachedVignette = null;
+    private BufferedImage cachedRadarBase = null;
+    private GameSettings.MapTheme cachedRadarTheme = null;
+    private int cachedRadarInnerSize = -1;
+    private final int[] radarPolyX = new int[3];
+    private final int[] radarPolyZ = new int[3];
 
     public Engine(boolean headlessMode) {
         this.settings = new GameSettings();
+        this.settings.syncDerivedFlags();
+        java.util.Arrays.fill(this.frameMsHistory, 11.0f);
         this.renderer = new Renderer3D(
                 settings.resolutionScale.resolveWidth(DEFAULT_WINDOW_WIDTH),
                 settings.resolutionScale.resolveHeight(DEFAULT_WINDOW_HEIGHT),
                 settings.fovDegrees
         );
+        this.renderer.configureAdvancedGraphics(settings);
         this.renderer.applyTimeOfDay(settings.timeOfDay);
 
         this.map = new Map();
@@ -2241,7 +2274,11 @@ public class Engine extends JPanel implements Runnable {
     }
 
     private void spawnHitParticles(Vec3 pos, Vec3 normal, int color, int count) {
-        for (int i = 0; i < count; i++) {
+        double mult = (settings.particleDensity != null) ? settings.particleDensity.multiplier : 1.0;
+        int scaledCount = Math.max(1, (int) Math.round(count * mult));
+        int maxCap = (int) (240 * mult);
+        if (particles.size() > maxCap) return;
+        for (int i = 0; i < scaledCount; i++) {
             double vx = normal.x * (1.8 + rng.nextDouble() * 2.5) + (rng.nextDouble() - 0.5) * 3.4;
             double vy = normal.y * (1.8 + rng.nextDouble() * 2.5) + rng.nextDouble() * 2.8;
             double vz = normal.z * (1.8 + rng.nextDouble() * 2.5) + (rng.nextDouble() - 0.5) * 3.4;
@@ -2635,21 +2672,55 @@ public class Engine extends JPanel implements Runnable {
             target = frameBufferB;
         }
 
+        long t0 = System.nanoTime();
         Graphics2D g = target.createGraphics();
         try {
             renderCompleteFrame(g, outW, outH);
         } finally {
             g.dispose();
         }
+        long elapsedNs = System.nanoTime() - t0;
+        double ms = elapsedNs / 1_000_000.0;
+        recordFrameTelemetryAndDynamicRes(ms);
         this.displayedFrame = target;
         this.nextBufferIsA = !this.nextBufferIsA;
     }
 
+    private void recordFrameTelemetryAndDynamicRes(double renderMs) {
+        if (renderMs <= 0.01 || renderMs > 2000.0) return;
+        this.lastFrameMs = renderMs;
+        this.emaFrameMs = this.emaFrameMs * 0.88 + renderMs * 0.12;
+        this.frameMsHistory[this.frameMsCursor] = (float) renderMs;
+        this.frameMsCursor = (this.frameMsCursor + 1) % this.frameMsHistory.length;
+
+        if (++dynResAdjustCounter >= 12) {
+            dynResAdjustCounter = 0;
+            // Обновляем 1% Low FPS по худшему кадру в скользящем окне
+            float worstMs = 1.0f;
+            for (int i = 0; i < frameMsHistory.length; i++) {
+                if (frameMsHistory[i] > worstMs) worstMs = frameMsHistory[i];
+            }
+            this.onePercentLowFps = Math.max(1, (int) Math.round(1000.0 / worstMs));
+
+            if (settings.dynamicResolution == GameSettings.DynamicResolutionMode.OFF) {
+                dynamicResScaleFactor = 1.0;
+            } else {
+                double targetMs = 1000.0 / Math.max(30, settings.dynamicResolution.targetFps);
+                if (emaFrameMs > targetMs * 1.07 && dynamicResScaleFactor > 0.58) {
+                    dynamicResScaleFactor = Math.max(0.58, dynamicResScaleFactor - 0.06);
+                } else if (emaFrameMs < targetMs * 0.78 && dynamicResScaleFactor < 1.0) {
+                    dynamicResScaleFactor = Math.min(1.0, dynamicResScaleFactor + 0.04);
+                }
+            }
+        }
+    }
+
     /**
-     * Полный рендер кадра CS-2 JAVA 6.0 (Early-Z + Multi-Core + 1:1 Native + Panorama Glass UI).
+     * Полный рендер кадра CS-2 JAVA 7.0 (Hyper-Turbo Analytic Rasterizer + Deferred Skybox + Parallel Post-FX).
      */
     public void renderCompleteFrame(Graphics2D g, int outW, int outH) {
         buildingUiClickables.clear();
+        settings.syncDerivedFlags();
 
         double zoomFactor = (currentScreen == AppScreen.IN_GAME && player.isAlive())
                 ? player.getCurrentWeapon().getEffectiveFovFactor()
@@ -2657,20 +2728,20 @@ public class Engine extends JPanel implements Runnable {
         double dashBoost = (currentScreen == AppScreen.IN_GAME && player.isAlive())
                 ? player.getDashFovBoostDegrees()
                 : 0.0;
-        double effectiveFov = Math.min(92.0, (settings.fovDegrees + dashBoost) * zoomFactor);
+        double effectiveFov = Math.min(94.0, (settings.fovDegrees + dashBoost) * zoomFactor);
 
-        int target3dW = settings.resolutionScale.resolveWidth(outW);
-        int target3dH = settings.resolutionScale.resolveHeight(outH);
+        int base3dW = settings.resolutionScale.resolveWidth(outW);
+        int base3dH = settings.resolutionScale.resolveHeight(outH);
+        double dynScale = (settings.dynamicResolution == GameSettings.DynamicResolutionMode.OFF)
+                ? 1.0 : dynamicResScaleFactor;
+        int target3dW = (dynScale >= 0.995) ? base3dW : Math.max(480, ((int) Math.round(base3dW * dynScale) + 7) & ~15);
+        int target3dH = (dynScale >= 0.995) ? base3dH : Math.max(270, ((int) Math.round(base3dH * dynScale) + 4) & ~7);
+
         renderer.ensureViewport(target3dW, target3dH, effectiveFov);
-        renderer.setSmoothQualityFlags(
-                settings.smoothTextures,
-                settings.fxaaAntiAliasing,
-                settings.multiCoreRendering,
-                settings.weatherMode
-        );
+        renderer.configureAdvancedGraphics(settings);
         renderer.applyTimeOfDay(settings.timeOfDay);
         renderer.setGraphicsFlags(
-                settings.fogAndVignette,
+                settings.fogEnabled,
                 settings.skyCloudsAndSunFlare,
                 settings.leftHandedModel,
                 globalAnimTime
@@ -2689,16 +2760,16 @@ public class Engine extends JPanel implements Runnable {
             renderer.setCamera(camX, camY, camZ, lookYaw, -0.15);
         }
 
+        // Очистка ТОЛЬКО Z-буфера (~0.1 мс) перед непрозрачной геометрией!
         renderer.beginFrame();
 
-        // 1. EARLY-Z ОПТИМИЗАЦИЯ: сначала рисуем стены, башни и ящики в Z-буфер!
+        // 1. EARLY-Z ОПТИМИЗАЦИЯ: сначала стены, здания, колонны и ящики!
         map.renderStructures(renderer);
 
-        // 2. Затем рисуем пол (пропуская до 70% перекрытых стенами пикселей по Early-Z!) и мягкие тени
+        // 2. Затем пол (пропуская перекрытые стенами спаны за O(1) по Early-Z!)
         map.renderFloorOnly(renderer);
-        map.renderShadowsOnly(renderer, settings.shadowMode, bots);
 
-        // 3. Следы от пуль (декали), цветные 3D-граффити [Y] и огненные зоны Молотова
+        // 3. Непрозрачные 3D-объекты арены, боты, турели, ракеты и Босс-Вертолёт
         if (settings.decalsAndShells) {
             for (int i = 0; i < decals.size(); i++) {
                 renderer.drawDecal(decals.get(i));
@@ -2710,14 +2781,11 @@ public class Engine extends JPanel implements Runnable {
         for (int i = 0; i < fireZones.size(); i++) {
             renderer.drawFireZone(fireZones.get(i));
         }
-
-        // 4. Установленная взрывчатка C4 на пленте + подбираемые аптечки и боеприпасы
         if (plantedC4 != null) {
             Vec3 cp = plantedC4.pos;
             renderer.drawOrientedWorldBox(cp.x, cp.y + 0.06, cp.z, 0.36, 0.14, 0.26, 0.35, 0.0, Renderer3D.TEX_SOLID, 0xC2A35E);
             renderer.drawOrientedWorldBox(cp.x, cp.y + 0.14, cp.z, 0.16, 0.04, 0.14, 0.35, 0.0, Renderer3D.TEX_SOLID, 0x262C34);
-            boolean ledOn = Math.sin(plantedC4.blinkPhase) > 0.0;
-            if (ledOn) {
+            if (Math.sin(plantedC4.blinkPhase) > 0.0) {
                 renderer.drawOrientedWorldBox(cp.x, cp.y + 0.20, cp.z, 0.12, 0.12, 0.12, 0.0, 0.0, Renderer3D.TEX_SOLID, 0xFF2B22);
             }
         }
@@ -2727,8 +2795,6 @@ public class Engine extends JPanel implements Runnable {
             int col = (pk.type == Vec3.Pickup.Type.MEDKIT) ? 0x38C96B : 0xE6B444;
             renderer.drawOrientedWorldBox(pk.pos.x, py, pk.pos.z, 0.36, 0.24, 0.36, pk.bobPhase * 0.7, 0.0, Renderer3D.TEX_SOLID, col);
         }
-
-        // 5. Летящие гранаты (HE, Smoke, Flash, Molotov) и 3D-гильзы
         for (int i = 0; i < grenades.size(); i++) {
             Vec3.Grenade gr = grenades.get(i);
             int gCol;
@@ -2746,8 +2812,6 @@ public class Engine extends JPanel implements Runnable {
                 renderer.drawOrientedWorldBox(sc.x, sc.y, sc.z, 0.025, 0.025, 0.065, sc.yaw, sc.pitch, Renderer3D.TEX_SOLID, sc.color);
             }
         }
-
-        // 6. 3D-боты (с отсечением Frustum Culling), авто-турели [J], авиасбросы, маяки авиаудара [U], ракеты и Вертолёт!
         for (int i = 0; i < bots.size(); i++) {
             bots.get(i).render(renderer);
         }
@@ -2774,10 +2838,17 @@ public class Engine extends JPanel implements Runnable {
             renderer.drawAttackHelicopter(menuHeli);
         }
 
-        // Многопоточная растеризация всей геометрии 3D-мира на всех ядрах CPU!
+        // 4. Растеризуем всю непрозрачную геометрию + Deferred Skybox (небо считается ТОЛЬКО на открытых пикселях!)
         renderer.flushRasterQueue();
+        renderer.fillVisibleSkyParallel();
 
-        // 7. Субпиксельные трассеры Ву, частицы, 3D-погода и объемные облака дыма CS2
+        // 5. Мягкие солнечные и контактные тени поверх готового пола
+        if (settings.shadowMode != GameSettings.ShadowMode.OFF) {
+            map.renderShadowsOnly(renderer, settings.shadowMode, bots);
+            renderer.flushRasterQueue();
+        }
+
+        // 6. Субпиксельные трассеры Ву, частицы, 3D-погода и объемные облака дыма CS2
         for (int i = 0; i < tracers.size(); i++) {
             Vec3.Tracer tr = tracers.get(i);
             renderer.draw3DLine(tr.start, tr.end, tr.color, 2);
@@ -2790,12 +2861,12 @@ public class Engine extends JPanel implements Runnable {
             renderer.drawSmokeCloud(smokeClouds.get(i));
         }
 
-        // 7.5. Направленный луч тактического 3D-фонарика (клавиша L)
+        // 6.5. Направленный луч тактического 3D-фонарика (клавиша L)
         if (currentScreen == AppScreen.IN_GAME && player.isAlive() && player.isFlashlightOn()) {
             renderer.applyFlashlightBeam();
         }
 
-        // 8. Оружие от 1-го лица / 3D-Оперативник Спецназа SAS в Главном меню / 3D-Витрина скинов
+        // 7. Оружие от 1-го лица / 3D-Оперативник Спецназа SAS в Главном меню / 3D-Витрина скинов
         if (currentScreen == AppScreen.IN_GAME && player.isAlive()) {
             renderer.clearDepthBuffer();
             GameSettings.WeaponSkin activeSkin = settings.weaponSkin;
@@ -2815,41 +2886,30 @@ public class Engine extends JPanel implements Runnable {
             renderer.flushRasterQueue();
         } else if (currentScreen == AppScreen.MAIN_MENU) {
             renderer.clearDepthBuffer();
-            renderer.setGraphicsFlags(settings.fogAndVignette, settings.skyCloudsAndSunFlare, false, globalAnimTime);
+            renderer.setGraphicsFlags(settings.fogEnabled, settings.skyCloudsAndSunFlare, false, globalAnimTime);
             renderer.drawMenuOperatorShowcase(globalAnimTime, settings.weaponSkin,
                     armoryShowcaseWeapons[armoryWeaponIdx].getType());
             renderer.flushRasterQueue();
         } else if (currentScreen == AppScreen.SKIN_ARMORY) {
             renderer.clearDepthBuffer();
-            renderer.setGraphicsFlags(settings.fogAndVignette, settings.skyCloudsAndSunFlare, false, globalAnimTime);
+            renderer.setGraphicsFlags(settings.fogEnabled, settings.skyCloudsAndSunFlare, false, globalAnimTime);
             armoryShowcaseWeapons[armoryWeaponIdx].renderShowcaseModel(
                     renderer, globalAnimTime * 1.15, settings.weaponSkin);
             renderer.flushRasterQueue();
         }
 
-        // Многопоточное 8-шаговое субпиксельное сглаживание Span FXAA 3.11 (0% «лесенок» и пикселей!)
-        renderer.applyFxaaPass();
+        // 8. Многопоточный Post-FX конвейер 7.0: FXAA Turbo / Span 3.11 + CAS резкость + Насыщенность + Яркость + Виньетка!
+        renderer.applyPostProcessingPass();
 
-        // Прямой 1:1 вывод кадра без мыла апскейлинга (или билинейный при ручном пресете)
-        if (renderer.getWidth() == outW && renderer.getHeight() == outH) {
-            g.drawImage(renderer.getFrameImage(), 0, 0, null);
-        } else {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                    settings.bilinearFiltering
-                            ? RenderingHints.VALUE_INTERPOLATION_BILINEAR
-                            : RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g.drawImage(renderer.getFrameImage(), 0, 0, outW, outH, null);
-        }
+        // Многопоточный SWAR-апскейлер/даунскейлер + прямой 1:1 блит (в 15x быстрее Java2D drawImage!)
+        g.drawImage(renderer.getPresentedImage(outW, outH, settings.bilinearFiltering), 0, 0, null);
 
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        boolean fastCombatHud = (currentScreen == AppScreen.IN_GAME && !buyMenuOpen && matchState == MatchState.PLAYING);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                fastCombatHud ? RenderingHints.VALUE_ANTIALIAS_OFF : RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
 
-        if (settings.fogAndVignette) {
-            drawCinematicVignette(g, outW, outH);
-        }
-
-        // Отрисовка текущего экрана Panorama Glass UI 6.0
+        // Отрисовка текущего экрана Panorama Glass UI 7.0
         if (currentScreen == AppScreen.MAIN_MENU) {
             drawMainMenuScreen(g, outW, outH);
         } else if (currentScreen == AppScreen.SKIN_ARMORY) {
@@ -2862,7 +2922,6 @@ public class Engine extends JPanel implements Runnable {
             drawInGameUi(g, outW, outH);
         }
 
-        // Визуальный отклик мгновенного нажатия кнопки
         Rectangle flash = this.clickFlashRect;
         if (clickFlashTimer > 0.0 && flash != null && isCursorFreeScreen()) {
             int alpha = Math.min(130, (int) (clickFlashTimer * 950.0));
@@ -2872,7 +2931,6 @@ public class Engine extends JPanel implements Runnable {
             g.drawRoundRect(flash.x, flash.y, flash.width, flash.height, 10, 10);
         }
 
-        // Атомарно публикуем готовый список кнопок ТОЛЬКО ПОСЛЕ полной сборки UI!
         this.publishedUiSnapshot = new UiSnapshot(new ArrayList<>(buildingUiClickables), outW, outH);
     }
 
@@ -2910,15 +2968,15 @@ public class Engine extends JPanel implements Runnable {
         g.setPaint(new GradientPaint(18, 10, new Color(255, 206, 78), 64, 54, new Color(224, 134, 24)));
         g.fillPolygon(crest);
         g.setColor(new Color(14, 18, 26));
-        g.setFont(new Font("SansSerif", Font.BOLD, 21));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 21));
         g.drawString("CS2", 22, 39);
 
         g.setColor(Color.WHITE);
-        g.setFont(new Font("SansSerif", Font.BOLD, 21));
-        g.drawString("CS-2 JAVA 6.0", 80, 33);
+        g.setFont(uiFont("SansSerif", Font.BOLD, 21));
+        g.drawString("CS-2 JAVA 7.0", 80, 33);
         g.setColor(new Color(108, 216, 255));
-        g.setFont(new Font("SansSerif", Font.BOLD, 10));
-        g.drawString("PANORAMA UI • 1:1 HD", 81, 49);
+        g.setFont(uiFont("SansSerif", Font.BOLD, 10));
+        g.drawString("HYPER-TURBO • PRO STUDIO", 81, 49);
 
         // Центральные вкладки навигации Panorama UI
         int tabsStartX = 256;
@@ -2952,7 +3010,7 @@ public class Engine extends JPanel implements Runnable {
                 g.fillRect(tr.x + 6, tr.y + tr.height - 3, tr.width - 12, 3);
             }
             drawCenteredText(g, navLabels[i], tr.x + tr.width / 2, tr.y + 25,
-                    new Font("SansSerif", Font.BOLD, 11),
+                    uiFont("SansSerif", Font.BOLD, 11),
                     primary ? new Color(16, 18, 24) : Color.WHITE);
             uiRegisterClickable(tr, navActions[i]);
         }
@@ -2975,10 +3033,10 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(Color.WHITE);
         g.drawPolygon(shield);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(Color.WHITE);
         g.drawString(settings.getRankTitle(), profX + 42, profY + 20);
-        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 10));
         g.setColor(new Color(176, 194, 216));
         g.drawString("XP: " + settings.careerXp + " • Фрагов: " + settings.careerKills, profX + 42, profY + 34);
 
@@ -3001,10 +3059,10 @@ public class Engine extends JPanel implements Runnable {
         g.drawRoundRect(opCardX, opCardY, opCardW, opCardH, 14, 14);
 
         Weapon showcaseW = armoryShowcaseWeapons[armoryWeaponIdx];
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(102, 208, 255));
         g.drawString("◆ ОПЕРАТИВНИК СПЕЦНАЗА SAS CT (3D PREVIEW)", opCardX + 16, opCardY + 22);
-        g.setFont(new Font("SansSerif", Font.BOLD, 16));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 16));
         g.setColor(Color.WHITE);
         g.drawString(showcaseW.getDisplayName() + "  |  " + settings.weaponSkin.label, opCardX + 16, opCardY + 45);
 
@@ -3027,7 +3085,7 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(255, 255, 255, 52));
         g.drawRoundRect(deckX, deckY, deckW, deckH, 18, 18);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 15));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 15));
         g.setColor(new Color(252, 204, 84));
         g.drawString("ВЫБЕРИТЕ КАРТУ ОПЕРАЦИИ (ЖИВОЙ 3D-ПРЕДПРОСМОТР)", deckX + 20, deckY + 26);
 
@@ -3063,10 +3121,10 @@ public class Engine extends JPanel implements Runnable {
             g.drawRoundRect(mrRect.x, mrRect.y, mrRect.width, mrRect.height, 10, 10);
             g.setStroke(new BasicStroke(1.0f));
 
-            g.setFont(new Font("SansSerif", Font.BOLD, 14));
+            g.setFont(uiFont("SansSerif", Font.BOLD, 14));
             g.setColor(active ? Color.WHITE : new Color(224, 232, 244));
             g.drawString((active ? "★ " : "") + mapNames[i], mrRect.x + 16, mrRect.y + 23);
-            g.setFont(new Font("SansSerif", Font.PLAIN, 11));
+            g.setFont(uiFont("SansSerif", Font.PLAIN, 11));
             g.setColor(active ? new Color(255, 232, 176) : new Color(162, 178, 198));
             g.drawString(mapSubs[i], mrRect.x + 16, mrRect.y + 42);
 
@@ -3079,7 +3137,7 @@ public class Engine extends JPanel implements Runnable {
 
         // Интерактивные таблетки выбора режима игры
         int modeY = mStartY + 2 * (mCardH + 8) + 8;
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         g.setColor(new Color(176, 194, 216));
         g.drawString("РЕЖИМ СПЕЦОПЕРАЦИИ:", deckX + 20, modeY + 12);
 
@@ -3098,7 +3156,7 @@ public class Engine extends JPanel implements Runnable {
             g.setColor(sel ? new Color(148, 224, 255) : new Color(255, 255, 255, 36));
             g.drawRoundRect(pr.x, pr.y, pr.width, pr.height, 8, 8);
             drawCenteredText(g, shortModes[i], pr.x + pr.width / 2, pr.y + 20,
-                    new Font("SansSerif", Font.BOLD, 10), Color.WHITE);
+                    uiFont("SansSerif", Font.BOLD, 10), Color.WHITE);
             uiRegisterClickable(pr, () -> {
                 settings.gameMode = gm;
                 settings.save();
@@ -3159,17 +3217,17 @@ public class Engine extends JPanel implements Runnable {
         g.drawRoundRect(playRect.x, playRect.y, playRect.width, playRect.height, 12, 12);
         drawCenteredText(g, "▶   НАЧАТЬ СПЕЦОПЕРАЦИЮ  •  " + settings.mapTheme.name().replace("_", " "),
                 playRect.x + playRect.width / 2, playRect.y + playRect.height / 2 + 6,
-                new Font("SansSerif", Font.BOLD, 17), new Color(16, 18, 24));
+                uiFont("SansSerif", Font.BOLD, 17), new Color(16, 18, 24));
         uiRegisterClickable(playRect, this::launchMatchFromMenu);
 
         // 4. НИЖНЯЯ СТРОКА ТЕЛЕМЕТРИИ ДВИЖКА 6.0
         g.setColor(new Color(10, 14, 22, 216));
         g.fillRect(0, outH - 28, outW, 28);
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(122, 228, 164));
-        String perfInfo = String.format("● %d FPS (%.1f мс)  •  3D Буфер: %dx%d (1:1 Без мыла)  •  Ядер CPU: %d  •  Отсечено объектов: %d",
-                currentFps, lastFrameMs, renderer.getWidth(), renderer.getHeight(),
-                renderer.getWorkerThreads(), renderer.getLastFrameCulledObjects());
+        String perfInfo = String.format("● %d FPS (%.1f мс | 1%%: %d)  •  3D: %dx%d  •  %s  •  Потоков: %d  •  Culling: %d",
+                currentFps, lastFrameMs, onePercentLowFps, renderer.getWidth(), renderer.getHeight(),
+                settings.qualityPreset.name(), renderer.getWorkerThreads(), renderer.getLastFrameCulledObjects());
         g.drawString(perfInfo, 22, outH - 10);
 
         String hotkeysHint = "[Alt] Тактический рывок  •  [U] Авиаудар  •  [J] Авто-Турель  •  [K] Босс-Вертолёт";
@@ -3187,14 +3245,14 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(196, 108, 255, 185));
         g.fillRect(panelW - 2, 0, 2, outH);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 24));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 24));
         g.setColor(Color.WHITE);
         g.drawString("3D АРСЕНАЛ И СКИНЫ", 28, 42);
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(214, 152, 255));
         g.drawString("ВЫСОКОТОЧНЫЕ МОДЕЛИ ГУРО • КЕРАМБИТ • ОПТИКА", 28, 60);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         g.setColor(new Color(185, 198, 216));
         g.drawString("ОРУЖИЕ НА 3D-ПОДИУМЕ (11 МОДЕЛЕЙ):", 28, 86);
 
@@ -3219,7 +3277,7 @@ public class Engine extends JPanel implements Runnable {
         }
 
         int sy = 224;
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         g.setColor(new Color(185, 198, 216));
         g.drawString("КОЛЛЕКЦИОННАЯ РАСКРАСКА CS2:", 28, sy);
         sy += 10;
@@ -3256,14 +3314,14 @@ public class Engine extends JPanel implements Runnable {
 
         String fullTitle = cw.getDisplayName().toUpperCase() + "  •  " + settings.weaponSkin.label.toUpperCase();
         drawCenteredText(g, fullTitle, infoX + infoW / 2, infoY + 30,
-                new Font("SansSerif", Font.BOLD, 20), new Color(252, 212, 92));
+                uiFont("SansSerif", Font.BOLD, 20), new Color(252, 212, 92));
 
         String statsLine = cw.isMelee()
                 ? "Изогнутый клинок Керамбит  •  ЛКМ: 55  •  Удар ПКМ: 92 / 155 HS  •  Вращение на кольце [F]!"
                 : String.format("Урон (тело / голова): %d / %d   •   Стоимость: $%d   •   Награда за фраг: $%d",
                         cw.getBodyDamage(), cw.getHeadDamage(), cw.getPrice(), cw.getKillReward());
         drawCenteredText(g, statsLine, infoX + infoW / 2, infoY + 56,
-                new Font("SansSerif", Font.PLAIN, 13), new Color(226, 234, 246));
+                uiFont("SansSerif", Font.PLAIN, 13), new Color(226, 234, 246));
 
         // 3 визуальные шкалы характеристик оружия
         double dmgFrac = Math.min(1.0, cw.getHeadDamage() / 220.0);
@@ -3276,7 +3334,7 @@ public class Engine extends JPanel implements Runnable {
         for (int b = 0; b < 3; b++) {
             int bx = infoX + 24 + b * (barW + 24);
             int by = infoY + 86;
-            g.setFont(new Font("SansSerif", Font.BOLD, 10));
+            g.setFont(uiFont("SansSerif", Font.BOLD, 10));
             g.setColor(new Color(178, 194, 214));
             g.drawString(bNames[b], bx, by - 6);
             g.setColor(new Color(32, 44, 62));
@@ -3286,126 +3344,264 @@ public class Engine extends JPanel implements Runnable {
         }
         drawCenteredText(g, "В бою: [H] мгновенная смена скина • [F] 3D-осмотр оружия и вращение Керамбита!",
                 infoX + infoW / 2, infoY + 120,
-                new Font("SansSerif", Font.PLAIN, 12), new Color(168, 186, 208));
+                uiFont("SansSerif", Font.PLAIN, 12), new Color(168, 186, 208));
     }
 
     // =========================================================================
     //  2. МЕНЮ НАСТРОЕК ГРАФИКИ, МНОГОПОТОЧНОСТИ И УПРАВЛЕНИЯ (PANORAMA 6.0)
     // =========================================================================
     private void drawSettingsScreen(Graphics2D g, int outW, int outH) {
-        g.setColor(new Color(8, 12, 18, 194));
+        g.setColor(new Color(7, 11, 18, 204));
         g.fillRect(0, 0, outW, outH);
 
-        int pw = Math.min(910, outW - 56);
-        int ph = Math.min(648, outH - 44);
+        int pw = Math.min(1024, outW - 44);
+        int ph = Math.min(666, outH - 36);
         int px = outW / 2 - pw / 2;
         int py = outH / 2 - ph / 2;
 
-        g.setPaint(new GradientPaint(px, py, new Color(13, 19, 30, 246), px, py + ph, new Color(16, 24, 38, 246)));
+        g.setPaint(new GradientPaint(px, py, new Color(12, 18, 29, 248), px, py + ph, new Color(16, 24, 38, 248)));
         g.fillRoundRect(px, py, pw, ph, 18, 18);
-        g.setColor(new Color(245, 194, 72, 175));
+        g.setColor(new Color(245, 194, 72, 185));
         g.drawRoundRect(px, py, pw, ph, 18, 18);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 23));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("НАСТРОЙКИ ДВИЖКА CS-2 JAVA 6.0", px + 30, py + 40);
+        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 7.0", px + 28, py + 36);
 
-        String[] tabs = {"1. ГРАФИКА И ОПТИМИЗАЦИЯ", "2. ГЕЙМПЛЕЙ И МЫШЬ", "3. АУДИО И ТЕЛЕМЕТРИЯ"};
-        int tabW = (pw - 80) / 3;
+        String engineBadge = String.format("HYPER-TURBO • %d ПОТОКОВ CPU • %d FPS (%.1f мс)",
+                renderer.getWorkerThreads(), currentFps, lastFrameMs);
+        g.setFont(uiFont("Monospaced", Font.BOLD, 12));
+        g.setColor(new Color(116, 236, 172));
+        g.drawString(engineBadge, px + pw - g.getFontMetrics().stringWidth(engineBadge) - 28, py + 34);
+
+        String[] tabs = {
+            "1. ПРО-ГРАФИКА И ОПТИМИЗАЦИЯ (24)",
+            "2. ГЕЙМПЛЕЙ, МЫШЬ И ПРИЦЕЛ",
+            "3. АУДИО И HUD-ТЕЛЕМЕТРИЯ"
+        };
+        int tabGap = 10;
+        int tabW = (pw - 56 - tabGap * 2) / 3;
         for (int i = 0; i < tabs.length; i++) {
             final int tabIdx = i;
-            Rectangle tr = new Rectangle(px + 30 + i * (tabW + 10), py + 54, tabW, 38);
+            Rectangle tr = new Rectangle(px + 28 + i * (tabW + tabGap), py + 48, tabW, 34);
             boolean active = (settingsTab == i);
-            addMenuButton(g, tr, tabs[i], active ? new Color(228, 152, 38) : new Color(32, 44, 62), active, () -> settingsTab = tabIdx);
+            addMenuButton(g, tr, tabs[i], active ? new Color(228, 152, 38) : new Color(30, 42, 60), active, () -> settingsTab = tabIdx);
         }
 
-        int listX = px + 34;
-        int listW = pw - 68;
-        int rowY = py + 106;
+        int listX = px + 28;
+        int listW = pw - 56;
+        int rowY = py + 92;
 
         if (settingsTab == 0) {
-            int gStep = 38;
-            drawOptionStepperRow(g, listX, rowY, listW, "Общий пресет качества и скорости", settings.qualityPreset.title, () -> {
-                int next = (settings.qualityPreset.ordinal() + 1) % GameSettings.QualityPreset.values().length;
-                settings.applyGraphicsPreset(GameSettings.QualityPreset.values()[next]);
-                settings.save();
-            });
-            rowY += gStep;
+            // Быстрая полоса выбора из 5 профилей производительности CS2
+            g.setFont(uiFont("SansSerif", Font.BOLD, 12));
+            g.setColor(new Color(186, 204, 226));
+            g.drawString("ПРОФИЛЬ:", listX + 4, rowY + 21);
 
-            drawOptionStepperRow(g, listX, rowY, listW, "3D-Разрешение (Нативное 1:1 = 0% пикселей и мыла!)", settings.resolutionScale.label, () -> {
-                int next = (settings.resolutionScale.ordinal() + 1) % GameSettings.ResolutionScale.values().length;
-                settings.resolutionScale = GameSettings.ResolutionScale.values()[next];
-                settings.save();
-            });
-            rowY += gStep;
+            GameSettings.QualityPreset[] presets = GameSettings.QualityPreset.values();
+            String[] shortPresetNames = {"⚡ КИБЕРСПОРТ", "▸ НИЗКОЕ", "⚖ БАЛАНС HD", "★ ВЫСОКОЕ", "♦ УЛЬТРА 7.0"};
+            int pStartX = listX + 86;
+            int pGap = 7;
+            int pBtnW = (listW - 86 - pGap * (presets.length - 1)) / presets.length;
+            for (int i = 0; i < presets.length; i++) {
+                final GameSettings.QualityPreset pr = presets[i];
+                boolean sel = (settings.qualityPreset == pr);
+                Rectangle prRect = new Rectangle(pStartX + i * (pBtnW + pGap), rowY, pBtnW, 30);
+                addMenuButton(g, prRect, shortPresetNames[i],
+                        sel ? new Color(64, 178, 118) : new Color(34, 48, 68), false, () -> {
+                    settings.applyGraphicsPreset(pr);
+                    dynamicResScaleFactor = 1.0;
+                    renderer.configureAdvancedGraphics(settings);
+                    renderer.applyTimeOfDay(settings.timeOfDay);
+                    settings.save();
+                });
+            }
+            rowY += 38;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Многопоточный рендер CPU (" + renderer.getWorkerThreads() + " потоков)",
-                    settings.multiCoreRendering ? "Включено (Макс. FPS на всех ядрах)" : "1 поток", () -> {
-                settings.multiCoreRendering = !settings.multiCoreRendering;
-                settings.save();
-            });
-            rowY += gStep;
+            // Переключатель 2 подстраниц студии графики (по 12 карточек в 2 колонки!)
+            int subW = (listW - 12) / 2;
+            addMenuButton(g, new Rectangle(listX, rowY, subW, 30),
+                    "СТР. 1: ЭКРАН, FPS, СГЛАЖИВАНИЕ И LOD (12)",
+                    graphicsSubPage == 0 ? new Color(56, 132, 208) : new Color(26, 36, 52),
+                    false, () -> graphicsSubPage = 0);
+            addMenuButton(g, new Rectangle(listX + subW + 12, rowY, subW, 30),
+                    "СТР. 2: ТЕНИ, ЦВЕТ, РЕЗКОСТЬ, ТУМАН И ПОГОДА (12)",
+                    graphicsSubPage == 1 ? new Color(56, 132, 208) : new Color(26, 36, 52),
+                    false, () -> graphicsSubPage = 1);
+            rowY += 38;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Ультра-гладкие материалы 512×512 (SWAR Bilinear + Mipmap)",
-                    settings.smoothTextures ? "Включено (Идеально гладко, 0 пикселей)" : "Стандарт", () -> {
-                settings.smoothTextures = !settings.smoothTextures;
-                settings.save();
-            });
-            rowY += gStep;
+            int colGap = 14;
+            int colW = (listW - colGap) / 2;
+            int leftX = listX;
+            int rightX = listX + colW + colGap;
+            int cardStepY = 41;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Субпиксельное сглаживание краёв Span FXAA 3.11",
-                    settings.fxaaAntiAliasing ? "Включено (Гладкие диагонали)" : "Выключено", () -> {
-                settings.fxaaAntiAliasing = !settings.fxaaAntiAliasing;
-                settings.save();
-            });
-            rowY += gStep;
+            if (graphicsSubPage == 0) {
+                // Строка 1: 3D Разрешение | Динамическое Авто-Разрешение
+                drawCompactSettingCard(g, leftX, rowY, colW, "3D-Разрешение рендера", settings.resolutionScale.label, () -> {
+                    int n = (settings.resolutionScale.ordinal() + 1) % GameSettings.ResolutionScale.values().length;
+                    settings.resolutionScale = GameSettings.ResolutionScale.values()[n];
+                    settings.save();
+                });
+                String dynLbl = settings.dynamicResolution.label
+                        + (settings.dynamicResolution != GameSettings.DynamicResolutionMode.OFF
+                           ? (" [" + (int) Math.round(dynamicResScaleFactor * 100) + "%]") : "");
+                drawCompactSettingCard(g, rightX, rowY, colW, "Авто-FPS (Динамическое разр.)", dynLbl, () -> {
+                    int n = (settings.dynamicResolution.ordinal() + 1) % GameSettings.DynamicResolutionMode.values().length;
+                    settings.dynamicResolution = GameSettings.DynamicResolutionMode.values()[n];
+                    dynamicResScaleFactor = 1.0;
+                    settings.save();
+                });
+                rowY += cardStepY;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Качество солнечных 3D-теней", settings.shadowMode.label, () -> {
-                int next = (settings.shadowMode.ordinal() + 1) % GameSettings.ShadowMode.values().length;
-                settings.shadowMode = GameSettings.ShadowMode.values()[next];
-                settings.save();
-            });
-            rowY += gStep;
+                // Строка 2: Сглаживание FXAA | Адаптивная резкость CAS
+                drawCompactSettingCard(g, leftX, rowY, colW, "Сглаживание краёв (Anti-Aliasing)", settings.antiAliasingMode.label, () -> {
+                    int n = (settings.antiAliasingMode.ordinal() + 1) % GameSettings.AntiAliasingMode.values().length;
+                    settings.antiAliasingMode = GameSettings.AntiAliasingMode.values()[n];
+                    settings.syncDerivedFlags();
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Резкость текстур AMD CAS", settings.casSharpening.label, () -> {
+                    int n = (settings.casSharpening.ordinal() + 1) % GameSettings.CasSharpeningMode.values().length;
+                    settings.casSharpening = GameSettings.CasSharpeningMode.values()[n];
+                    settings.save();
+                });
+                rowY += cardStepY;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "3D-Погода на арене", settings.weatherMode.label, () -> {
-                int next = (settings.weatherMode.ordinal() + 1) % GameSettings.WeatherMode.values().length;
-                settings.weatherMode = GameSettings.WeatherMode.values()[next];
-                settings.save();
-            });
-            rowY += gStep;
+                // Строка 3: Качество текстур Mipmap | Детализация 3D-геометрии LOD
+                drawCompactSettingCard(g, leftX, rowY, colW, "Фильтрация текстур 512×512", settings.textureQuality.label, () -> {
+                    int n = (settings.textureQuality.ordinal() + 1) % GameSettings.TextureQualityMode.values().length;
+                    settings.textureQuality = GameSettings.TextureQualityMode.values()[n];
+                    settings.syncDerivedFlags();
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Детализация 3D-моделей (LOD)", settings.geometryLod.label, () -> {
+                    int n = (settings.geometryLod.ordinal() + 1) % GameSettings.GeometryLodMode.values().length;
+                    settings.geometryLod = GameSettings.GeometryLodMode.values()[n];
+                    settings.save();
+                });
+                rowY += cardStepY;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Декали пробоин и вылетающие 3D-гильзы",
-                    settings.decalsAndShells ? "Включено (Реализм)" : "Выключено", () -> {
-                settings.decalsAndShells = !settings.decalsAndShells;
-                if (!settings.decalsAndShells) { decals.clear(); shells.clear(); }
-                settings.save();
-            });
-            rowY += gStep;
+                // Строка 4: Дальность прорисовки | Многопоточный рендер CPU
+                drawCompactSettingCard(g, leftX, rowY, colW, "Дальность прорисовки арены", settings.renderDistance.label, () -> {
+                    int n = (settings.renderDistance.ordinal() + 1) % GameSettings.RenderDistanceMode.values().length;
+                    settings.renderDistance = GameSettings.RenderDistanceMode.values()[n];
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Многопоточность Work-Stealing",
+                        settings.multiCoreRendering ? ("Все ядра (" + renderer.getWorkerThreads() + " пот.)") : "1 поток", () -> {
+                    settings.multiCoreRendering = !settings.multiCoreRendering;
+                    settings.save();
+                });
+                rowY += cardStepY;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Угол обзора камеры (FOV)", settings.fovDegrees + "°", () -> {
-                settings.fovDegrees += 4;
-                if (settings.fovDegrees > 84) settings.fovDegrees = 56;
-                settings.save();
-            });
-            rowY += gStep;
+                // Строка 5: Лимит FPS | Фильтр масштабирования окна
+                String capLabel = (settings.fpsLimit == 0) ? "Без лимита (Макс.)" : (settings.fpsLimit + " FPS");
+                drawCompactSettingCard(g, leftX, rowY, colW, "Лимит частоты кадров (FPS Cap)", capLabel, () -> {
+                    if (settings.fpsLimit == 60) settings.fpsLimit = 120;
+                    else if (settings.fpsLimit == 120) settings.fpsLimit = 144;
+                    else if (settings.fpsLimit == 144) settings.fpsLimit = 240;
+                    else if (settings.fpsLimit == 240) settings.fpsLimit = 0;
+                    else settings.fpsLimit = 60;
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Сглаживание апскейла окна",
+                        settings.bilinearFiltering ? "Билинейное (Мягко)" : "Чёткий пиксель", () -> {
+                    settings.bilinearFiltering = !settings.bilinearFiltering;
+                    settings.save();
+                });
+                rowY += cardStepY;
 
-            String capLabel = (settings.fpsLimit == 0) ? "Без лимита (Макс.)" : (settings.fpsLimit + " FPS");
-            drawOptionStepperRow(g, listX, rowY, listW, "Лимит частоты кадров", capLabel, () -> {
-                if (settings.fpsLimit == 60) settings.fpsLimit = 120;
-                else if (settings.fpsLimit == 120) settings.fpsLimit = 0;
-                else settings.fpsLimit = 60;
-                settings.save();
-            });
-            rowY += gStep;
+                // Строка 6: Угол обзора FOV (-/+) | Полноэкранный режим F11
+                drawCompactPlusMinusCard(g, leftX, rowY, colW, "Угол обзора камеры (FOV)", settings.fovDegrees + "°",
+                        () -> { settings.fovDegrees = Math.max(56, settings.fovDegrees - 2); settings.save(); },
+                        () -> { settings.fovDegrees = Math.min(90, settings.fovDegrees + 2); settings.save(); });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Режим отображения окна (F11)",
+                        settings.fullscreen ? "Полный экран" : "Оконный 16:9", this::toggleFullscreenMode);
+                rowY += cardStepY;
+            } else {
+                // СТР. 2: Освещение, Цветокоррекция, Атмосфера и Частицы
+                drawCompactSettingCard(g, leftX, rowY, colW, "Качество солнечных 3D-теней", settings.shadowMode.label, () -> {
+                    int n = (settings.shadowMode.ordinal() + 1) % GameSettings.ShadowMode.values().length;
+                    settings.shadowMode = GameSettings.ShadowMode.values()[n];
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Мягкое затенение углов (Gouraud AO)",
+                        settings.ambientOcclusion ? "Включено (Глубина)" : "Выкл (Киберспорт FPS+)", () -> {
+                    settings.ambientOcclusion = !settings.ambientOcclusion;
+                    settings.save();
+                });
+                rowY += cardStepY;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Время суток / Освещение неба", settings.timeOfDay.label, () -> {
-                int next = (settings.timeOfDay.ordinal() + 1) % GameSettings.TimeOfDay.values().length;
-                settings.timeOfDay = GameSettings.TimeOfDay.values()[next];
-                renderer.applyTimeOfDay(settings.timeOfDay);
-                settings.save();
-            });
+                drawCompactSettingCard(g, leftX, rowY, colW, "Цифровая насыщенность (Vibrance)", settings.colorVibrance.label, () -> {
+                    int n = (settings.colorVibrance.ordinal() + 1) % GameSettings.ColorVibranceMode.values().length;
+                    settings.colorVibrance = GameSettings.ColorVibranceMode.values()[n];
+                    settings.save();
+                });
+                drawCompactPlusMinusCard(g, rightX, rowY, colW, "Яркость / Гамма экспозиции", settings.brightnessPct + "%",
+                        () -> { settings.brightnessPct = Math.max(80, settings.brightnessPct - 5); settings.save(); },
+                        () -> { settings.brightnessPct = Math.min(135, settings.brightnessPct + 5); settings.save(); });
+                rowY += cardStepY;
+
+                drawCompactSettingCard(g, leftX, rowY, colW, "Атмосферная дымка горизонта (Fog)",
+                        settings.fogEnabled ? "Включена" : "Выкл (Чистый обзор)", () -> {
+                    settings.fogEnabled = !settings.fogEnabled;
+                    settings.syncDerivedFlags();
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Кинематографическая виньетка",
+                        settings.vignetteEnabled ? "Включена (Post-FX)" : "Выключена", () -> {
+                    settings.vignetteEnabled = !settings.vignetteEnabled;
+                    settings.syncDerivedFlags();
+                    settings.save();
+                });
+                rowY += cardStepY;
+
+                drawCompactSettingCard(g, leftX, rowY, colW, "3D-Облака и солнечная корона",
+                        settings.skyCloudsAndSunFlare ? "Включены (Deferred Sky)" : "Выкл (Чистый градиент)", () -> {
+                    settings.skyCloudsAndSunFlare = !settings.skyCloudsAndSunFlare;
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Плотность искр, дыма и частиц", settings.particleDensity.label, () -> {
+                    int n = (settings.particleDensity.ordinal() + 1) % GameSettings.ParticleDensityMode.values().length;
+                    settings.particleDensity = GameSettings.ParticleDensityMode.values()[n];
+                    settings.save();
+                });
+                rowY += cardStepY;
+
+                drawCompactSettingCard(g, leftX, rowY, colW, "Пробоины от пуль и 3D-гильзы",
+                        settings.decalsAndShells ? "Включены" : "Выключены (FPS+)", () -> {
+                    settings.decalsAndShells = !settings.decalsAndShells;
+                    if (!settings.decalsAndShells) { decals.clear(); shells.clear(); }
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Время суток и свет солнца", settings.timeOfDay.label, () -> {
+                    int n = (settings.timeOfDay.ordinal() + 1) % GameSettings.TimeOfDay.values().length;
+                    settings.timeOfDay = GameSettings.TimeOfDay.values()[n];
+                    renderer.applyTimeOfDay(settings.timeOfDay);
+                    settings.save();
+                });
+                rowY += cardStepY;
+
+                drawCompactSettingCard(g, leftX, rowY, colW, "Динамическая 3D-погода арены", settings.weatherMode.label, () -> {
+                    int n = (settings.weatherMode.ordinal() + 1) % GameSettings.WeatherMode.values().length;
+                    settings.weatherMode = GameSettings.WeatherMode.values()[n];
+                    settings.save();
+                });
+                drawCompactSettingCard(g, rightX, rowY, colW, "Оверлей телеметрии и графика мс", settings.telemetryMode.label, () -> {
+                    int n = (settings.telemetryMode.ordinal() + 1) % GameSettings.HudTelemetryMode.values().length;
+                    settings.telemetryMode = GameSettings.HudTelemetryMode.values()[n];
+                    settings.syncDerivedFlags();
+                    settings.save();
+                });
+                rowY += cardStepY;
+            }
+
+            // ЖИВОЙ ОСЦИЛЛОГРАФ ПРОИЗВОДИТЕЛЬНОСТИ И СТАТИСТИКА HYPER-TURBO 7.0 ВНИЗУ СТУДИИ!
+            drawStudioTelemetryMonitor(g, listX, rowY + 4, listW, 88);
 
         } else if (settingsTab == 1) {
+            rowY += 6;
             drawOptionPlusMinusRow(g, listX, rowY, listW, "Чувствительность мыши",
                     String.format("%.4f", settings.mouseSensitivity),
                     () -> { settings.mouseSensitivity = Math.max(0.0005, settings.mouseSensitivity - 0.0003); settings.save(); },
@@ -3417,47 +3613,48 @@ public class Engine extends JPanel implements Runnable {
                 settings.invertMouseY = !settings.invertMouseY;
                 settings.save();
             });
-            rowY += 46;
+            rowY += 44;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Цвет прицела CS2", settings.crosshairColor.label, () -> {
                 int next = (settings.crosshairColor.ordinal() + 1) % GameSettings.CrosshairColor.values().length;
                 settings.crosshairColor = GameSettings.CrosshairColor.values()[next];
                 settings.save();
             });
-            rowY += 46;
+            rowY += 44;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Поведение прицела при стрельбе",
                     settings.dynamicCrosshair ? "Динамический (расширяется)" : "Статический (Киберспорт)", () -> {
                 settings.dynamicCrosshair = !settings.dynamicCrosshair;
                 settings.save();
             });
-            rowY += 46;
+            rowY += 44;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Ведущая рука с оружием (cl_righthand)",
                     settings.leftHandedModel ? "Левая рука" : "Правая рука", () -> {
                 settings.leftHandedModel = !settings.leftHandedModel;
                 settings.save();
             });
-            rowY += 46;
+            rowY += 44;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Всплывающие цифры урона при попадании",
                     settings.showDamageNumbers ? "Показывать" : "Скрыть", () -> {
                 settings.showDamageNumbers = !settings.showDamageNumbers;
                 settings.save();
             });
-            rowY += 46;
+            rowY += 44;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Сложность ИИ ботов", settings.botDifficulty.label, () -> {
                 int next = (settings.botDifficulty.ordinal() + 1) % GameSettings.BotDifficulty.values().length;
                 settings.botDifficulty = GameSettings.BotDifficulty.values()[next];
                 settings.save();
             });
-            rowY += 46;
+            rowY += 44;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Полноэкранный режим окна (F11)",
                     settings.fullscreen ? "Полный экран" : "Оконный режим", this::toggleFullscreenMode);
 
         } else {
+            rowY += 10;
             int pct = (int) Math.round(settings.masterVolume * 100.0);
             drawOptionPlusMinusRow(g, listX, rowY, listW, "Общая громкость звуковых эффектов", pct + "%",
                     () -> {
@@ -3470,40 +3667,167 @@ public class Engine extends JPanel implements Runnable {
                         soundSystem.setMasterVolume(settings.masterVolume);
                         settings.save();
                     });
-            rowY += 54;
+            rowY += 52;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Звук шагов и звон гильз",
                     settings.footstepSounds ? "Включено" : "Выключено", () -> {
                 settings.footstepSounds = !settings.footstepSounds;
                 settings.save();
             });
-            rowY += 54;
+            rowY += 50;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Телеметрия FPS, времени кадра и ядер CPU на радаре",
-                    settings.showFpsTelemetry ? "Показывать" : "Скрыть", () -> {
-                settings.showFpsTelemetry = !settings.showFpsTelemetry;
+            drawOptionStepperRow(g, listX, rowY, listW, "Режим HUD-телеметрии FPS и графика времени кадра",
+                    settings.telemetryMode.label, () -> {
+                int next = (settings.telemetryMode.ordinal() + 1) % GameSettings.HudTelemetryMode.values().length;
+                settings.telemetryMode = GameSettings.HudTelemetryMode.values()[next];
+                settings.syncDerivedFlags();
                 settings.save();
             });
-            rowY += 64;
+            rowY += 56;
 
-            addMenuButton(g, new Rectangle(listX, rowY, 330, 42), "♪  ПРОВЕРИТЬ ЗВУК ВЫСТРЕЛА AK-47",
+            drawStudioTelemetryMonitor(g, listX, rowY, listW, 96);
+            rowY += 112;
+
+            addMenuButton(g, new Rectangle(listX, rowY, 340, 42), "♪  ПРОВЕРИТЬ ЗВУК ВЫСТРЕЛА AK-47",
                     new Color(48, 118, 178), false, () -> soundSystem.playWeaponShot(Weapon.Type.AK47));
         }
 
         String backLabel = settingsOpenedFromGame ? "← СОХРАНИТЬ И ВЕРНУТЬСЯ В БОЙ (ESC)" : "← СОХРАНИТЬ И В ГЛАВНОЕ МЕНЮ (ESC)";
-        addMenuButton(g, new Rectangle(px + pw / 2 - 195, py + ph - 56, 390, 42),
+        addMenuButton(g, new Rectangle(px + pw / 2 - 205, py + ph - 50, 410, 38),
                 backLabel, new Color(48, 154, 96), false, this::closeSettingsScreen);
     }
 
+    private void drawCompactSettingCard(Graphics2D g, int x, int y, int w, String title, String valueLabel, Runnable onToggle) {
+        Rectangle rect = new Rectangle(x, y, w, 35);
+        boolean hovered = rect.contains(mouseClientX, mouseClientY);
+        g.setColor(hovered ? new Color(34, 48, 68, 228) : new Color(21, 29, 43, 212));
+        g.fillRoundRect(x, y, w, 35, 8, 8);
+        g.setColor(hovered ? new Color(248, 198, 76, 185) : new Color(255, 255, 255, 34));
+        g.drawRoundRect(x, y, w, 35, 8, 8);
+
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
+        g.setColor(new Color(224, 232, 244));
+        g.drawString(title, x + 11, y + 22);
+
+        String pill = "◄ " + valueLabel + " ►";
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
+        int pw = g.getFontMetrics().stringWidth(pill) + 14;
+        int px = x + w - pw - 7;
+        g.setColor(new Color(44, 66, 96));
+        g.fillRoundRect(px, y + 6, pw, 23, 6, 6);
+        g.setColor(new Color(252, 210, 92));
+        g.drawString(pill, px + 7, y + 21);
+
+        uiRegisterClickable(rect, onToggle);
+    }
+
+    private void drawCompactPlusMinusCard(Graphics2D g, int x, int y, int w, String title, String valueLabel,
+                                          Runnable onMinus, Runnable onPlus) {
+        g.setColor(new Color(21, 29, 43, 212));
+        g.fillRoundRect(x, y, w, 35, 8, 8);
+        g.setColor(new Color(255, 255, 255, 34));
+        g.drawRoundRect(x, y, w, 35, 8, 8);
+
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
+        g.setColor(new Color(224, 232, 244));
+        g.drawString(title, x + 11, y + 22);
+
+        Rectangle minusR = new Rectangle(x + w - 142, y + 5, 32, 25);
+        Rectangle plusR  = new Rectangle(x + w - 39,  y + 5, 32, 25);
+        addMenuButton(g, minusR, "−", new Color(50, 68, 92), false, onMinus);
+        drawCenteredText(g, valueLabel, x + w - 74, y + 22, uiFont("Monospaced", Font.BOLD, 13), new Color(252, 210, 92));
+        addMenuButton(g, plusR, "+", new Color(50, 68, 92), false, onPlus);
+    }
+
+    /**
+     * Панель живой телеметрии и осциллограф времени кадра (мс) внутри Студии Графики 7.0!
+     */
+    private void drawStudioTelemetryMonitor(Graphics2D g, int x, int y, int w, int h) {
+        g.setColor(new Color(10, 16, 26, 232));
+        g.fillRoundRect(x, y, w, h, 10, 10);
+        g.setColor(new Color(88, 192, 255, 110));
+        g.drawRoundRect(x, y, w, h, 10, 10);
+
+        int totalPixels = Math.max(1, renderer.getWidth() * renderer.getHeight());
+        int skySavedPct = Math.max(0, Math.min(99, 100 - (renderer.getLastFrameSkyPixelsShaded() * 100 / totalPixels)));
+
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
+        g.setColor(new Color(118, 238, 174));
+        g.drawString(String.format("● РЕАЛЬНОЕ ВРЕМЯ: %d FPS  (%.2f мс/кадр  •  1%% Low: %d FPS)",
+                currentFps, lastFrameMs, onePercentLowFps), x + 14, y + 22);
+
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
+        g.setColor(new Color(208, 222, 240));
+        g.drawString(String.format("3D Буфер: %d×%d (%d%%)  •  Треугольников: %d  •  Frustum Culling: %d",
+                renderer.getWidth(), renderer.getHeight(),
+                (int) Math.round(dynamicResScaleFactor * 100),
+                renderer.getLastFrameRenderedTris(),
+                renderer.getLastFrameCulledObjects()), x + 14, y + 44);
+
+        g.setColor(new Color(168, 198, 232));
+        g.drawString(String.format("Deferred Sky экономия: %d%% экрана  •  AA: %s  •  CAS: %s  •  Потоков: %d",
+                skySavedPct, settings.antiAliasingMode.name(), settings.casSharpening.name(),
+                settings.multiCoreRendering ? renderer.getWorkerThreads() : 1), x + 14, y + 66);
+
+        int gx = x + w - 316;
+        int gy = y + 10;
+        int gw = 302;
+        int gh = h - 20;
+        drawFrameTimeGraphBox(g, gx, gy, gw, gh, true);
+    }
+
+    private static final Color COL_GRAPH_BG = new Color(6, 10, 18, 215);
+    private static final Color COL_GRAPH_BORDER = new Color(72, 134, 188, 95);
+    private static final Color COL_GRAPH_60LINE = new Color(92, 224, 148, 82);
+    private static final Color COL_FPS_GOOD = new Color(84, 240, 152);
+    private static final Color COL_FPS_WARN = new Color(252, 204, 78);
+    private static final Color COL_FPS_BAD = new Color(255, 96, 78);
+
+    private void drawFrameTimeGraphBox(Graphics2D g, int gx, int gy, int gw, int gh, boolean detailedLabels) {
+        g.setColor(COL_GRAPH_BG);
+        g.fillRect(gx, gy, gw, gh);
+        g.setColor(COL_GRAPH_BORDER);
+        g.drawRect(gx, gy, gw, gh);
+
+        // Опорная линия 16.7 мс (60 FPS)
+        int y60 = gy + gh - Math.min(gh - 4, (int) ((16.67 / 40.0) * (gh - 8))) - 3;
+        g.setColor(COL_GRAPH_60LINE);
+        g.fillRect(gx + 3, y60, gw - 6, 1);
+
+        int n = frameMsHistory.length;
+        int cur = frameMsCursor;
+        int innerW = Math.max(1, gw - 8);
+        int barW = Math.max(1, innerW / n);
+        Color lastCol = null;
+        for (int i = 0; i < n; i++) {
+            float ms = frameMsHistory[(cur + i) % n];
+            int sx = gx + 4 + (i * innerW) / n;
+            int barH = Math.max(2, Math.min(gh - 7, (int) ((ms / 40.0f) * (gh - 7))));
+            int sy = gy + gh - 2 - barH;
+            Color c = (ms <= 17.5f) ? COL_FPS_GOOD : ((ms <= 28.0f) ? COL_FPS_WARN : COL_FPS_BAD);
+            if (c != lastCol) {
+                g.setColor(c);
+                lastCol = c;
+            }
+            g.fillRect(sx, sy, barW, Math.max(2, Math.min(3, barH)));
+        }
+
+        if (detailedLabels) {
+            g.setFont(uiFont("Monospaced", Font.BOLD, 10));
+            g.setColor(new Color(148, 228, 180));
+            g.drawString("60FPS (16.7мс)", gx + 7, gy + 13);
+        }
+    }
+
     // =========================================================================
-    //  3. СПРАВОЧНИК АРСЕНАЛА И ТАКТИКИ (CS-2 JAVA 6.0)
+    //  3. СПРАВОЧНИК АРСЕНАЛА И ТАКТИКИ (CS-2 JAVA 7.0)
     // =========================================================================
     private void drawArsenalGuideScreen(Graphics2D g, int outW, int outH) {
         g.setColor(new Color(8, 12, 18, 204));
         g.fillRect(0, 0, outW, outH);
 
-        int pw = Math.min(900, outW - 56);
-        int ph = Math.min(590, outH - 56);
+        int pw = Math.min(920, outW - 56);
+        int ph = Math.min(600, outH - 52);
         int px = outW / 2 - pw / 2;
         int py = outH / 2 - ph / 2;
 
@@ -3512,8 +3836,8 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(245, 194, 72, 175));
         g.drawRoundRect(px, py, pw, ph, 18, 18);
 
-        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 6.0", outW / 2, py + 42,
-                new Font("SansSerif", Font.BOLD, 22), new Color(252, 208, 88));
+        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 7.0", outW / 2, py + 42,
+                uiFont("SansSerif", Font.BOLD, 22), new Color(252, 208, 88));
 
         String[] leftLines = {
             "БОЕВОЕ УПРАВЛЕНИЕ И СПЕЦСРЕДСТВА CT:",
@@ -3529,13 +3853,13 @@ public class Engine extends JPanel implements Runnable {
         };
 
         String[] rightLines = {
-            "НОВИНКИ ДВИЖКА 6.0 (ULTRA SMOOTH & PANORAMA):",
-            "• 0% Пикселей: 1:1 Нативное разрешение окна без апскейл-мыла!",
-            "• 512×512 Smoothstep-материалы + 8-шаговый Span FXAA 3.11",
-            "• Многопоточный рендер на всех ядрах CPU + Early-Z + Culling",
-            "• Новый интерфейс Panorama Glass UI + 3D-Оперативник в меню",
-            "• Изогнутый нож Керамбит с кольцом + система 10 Званий CS2",
-            "• Тактический Рывок [Alt] и Артиллерийский Авиаудар [U]",
+            "НОВИНКИ HYPER-TURBO 7.0 (ОПТИМИЗАЦИЯ И ГРАФИКА):",
+            "• O(1) Аналитический растеризатор + Early-Z отсечение спанов!",
+            "• Deferred Skybox: небо рисуется только там, где нет стен/пола",
+            "• Авто-LOD 3D-сфер/цилиндров + отсечение тыльных граней",
+            "• Студия Графики: 24 параметра + 5 пресетов (Киберспорт..Ультра)",
+            "• Авто-FPS (Динамическое 3D-разрешение 60/120 FPS) + AMD CAS",
+            "• Насыщенность Digital Vibrance + Гамма LUT + Живой график мс!",
             "",
             "СИСТЕМНЫЕ КЛАВИШИ:",
             "• Tab — Счет команд • F5 — Рестарт • F11 — Полный экран"
@@ -3543,7 +3867,7 @@ public class Engine extends JPanel implements Runnable {
 
         int ly = py + 86;
         for (int i = 0; i < leftLines.length; i++) {
-            g.setFont(new Font("SansSerif", i == 0 ? Font.BOLD : Font.PLAIN, i == 0 ? 15 : 13));
+            g.setFont(uiFont("SansSerif", i == 0 ? Font.BOLD : Font.PLAIN, i == 0 ? 15 : 13));
             g.setColor(i == 0 ? new Color(102, 208, 255) : new Color(224, 232, 244));
             g.drawString(leftLines[i], px + 34, ly);
             ly += 33;
@@ -3552,7 +3876,7 @@ public class Engine extends JPanel implements Runnable {
         int ry = py + 86;
         for (int i = 0; i < rightLines.length; i++) {
             boolean header = i == 0 || i == 8;
-            g.setFont(new Font("SansSerif", header ? Font.BOLD : Font.PLAIN, header ? 15 : 13));
+            g.setFont(uiFont("SansSerif", header ? Font.BOLD : Font.PLAIN, header ? 15 : 13));
             g.setColor(header ? new Color(252, 206, 84) : new Color(224, 232, 244));
             g.drawString(rightLines[i], px + pw / 2 + 16, ry);
             ry += 33;
@@ -3579,7 +3903,7 @@ public class Engine extends JPanel implements Runnable {
         drawKillFeedAndKd(g, outW);
 
         if (streakBannerTimer > 0.0 && !streakBannerText.isEmpty()) {
-            g.setFont(new Font("SansSerif", Font.BOLD, 16));
+            g.setFont(uiFont("SansSerif", Font.BOLD, 16));
             int sbW = g.getFontMetrics().stringWidth(streakBannerText) + 36;
             int sbX = outW / 2 - sbW / 2;
             int sbY = outH - 190;
@@ -3588,7 +3912,7 @@ public class Engine extends JPanel implements Runnable {
             g.setColor(new Color(252, 204, 78, 190));
             g.drawRoundRect(sbX, sbY, sbW, 34, 10, 10);
             drawCenteredText(g, streakBannerText, outW / 2, sbY + 23,
-                    new Font("SansSerif", Font.BOLD, 16), new Color(255, 220, 92));
+                    uiFont("SansSerif", Font.BOLD, 16), new Color(255, 220, 92));
         }
 
         if (scoreTabHeld) {
@@ -3643,7 +3967,7 @@ public class Engine extends JPanel implements Runnable {
         g.fillOval(cx - 2, cy - 2, 5, 5);
         g.setStroke(new BasicStroke(1.0f));
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        g.setFont(uiFont("Monospaced", Font.BOLD, 13));
         g.setColor(new Color(120, 230, 170));
         g.drawString("AWP OPTICS • ZOOM " + (zoomLevel == 1 ? "2.8X" : "6.0X") + " (ПКМ)", cx + 22, cy + radius - 26);
     }
@@ -3662,13 +3986,13 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(92, 232, 148, 180));
         g.drawRoundRect(bx, by, bw, bh, 18, 18);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 22));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
         g.drawString("МАГАЗИН ВООРУЖЕНИЯ СПЕЦНАЗА CS2", bx + 26, by + 38);
 
         boolean freeDm = (settings.gameMode == GameSettings.GameMode.DEATHMATCH);
         String cashStr = freeDm ? "РЕЖИМ DM: $ БЕСПЛАТНО" : ("БАЛАНС: $ " + player.getMoney());
-        g.setFont(new Font("Monospaced", Font.BOLD, 20));
+        g.setFont(uiFont("Monospaced", Font.BOLD, 20));
         int cw = g.getFontMetrics().stringWidth(cashStr) + 28;
         g.setColor(new Color(22, 46, 34, 225));
         g.fillRoundRect(bx + bw - cw - 24, by + 13, cw, 34, 10, 10);
@@ -3721,10 +4045,10 @@ public class Engine extends JPanel implements Runnable {
         // Сводка текущего снаряжения внизу 3-й колонки
         g.setColor(new Color(20, 30, 46, 210));
         g.fillRoundRect(c3X, y3, colW, 76, 10, 10);
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         g.setColor(new Color(148, 224, 255));
         g.drawString("ВАШ ЗАПАС СПЕЦСРЕДСТВ:", c3X + 14, y3 + 24);
-        g.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
         g.setColor(new Color(224, 232, 244));
         g.drawString("Авто-Турелей [J]: " + player.getSentryCharges() + "   •   Авиаударов [U]: " + player.getAirstrikeCharges(), c3X + 14, y3 + 46);
         g.drawString("Сапёрный набор C4: " + (player.hasDefuseKit() ? "ЕСТЬ (5с)" : "НЕТ") + "  •  Рывок [Alt]: ГОТОВ", c3X + 14, y3 + 65);
@@ -3741,7 +4065,7 @@ public class Engine extends JPanel implements Runnable {
         g.fillRoundRect(x, y, w, 28, 8, 8);
         g.setColor(accent);
         g.fillRoundRect(x, y, 5, 28, 4, 4);
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         g.drawString(title, x + 14, y + 19);
     }
 
@@ -3761,18 +4085,18 @@ public class Engine extends JPanel implements Runnable {
         // Клавиша быстрого вызова
         g.setColor(new Color(38, 52, 72));
         g.fillRoundRect(x + 12, y + 12, 24, 24, 6, 6);
-        drawCenteredText(g, keyBadge, x + 24, y + 29, new Font("Monospaced", Font.BOLD, 13), new Color(252, 210, 92));
+        drawCenteredText(g, keyBadge, x + 24, y + 29, uiFont("Monospaced", Font.BOLD, 13), new Color(252, 210, 92));
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 15));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 15));
         g.setColor(canAfford ? Color.WHITE : new Color(148, 156, 170));
         g.drawString(name, x + 44, y + 29);
 
         String priceTag = (cost == 0) ? "FREE" : ("$" + cost);
-        g.setFont(new Font("Monospaced", Font.BOLD, 15));
+        g.setFont(uiFont("Monospaced", Font.BOLD, 15));
         g.setColor(canAfford ? new Color(96, 242, 140) : new Color(242, 88, 82));
         g.drawString(priceTag, x + w - g.getFontMetrics().stringWidth(priceTag) - 14, y + 29);
 
-        g.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 11));
         g.setColor(new Color(176, 192, 214));
         g.drawString(desc, x + 14, y + 58);
 
@@ -3786,7 +4110,7 @@ public class Engine extends JPanel implements Runnable {
         double scaleX = (double) outW / renderer.getWidth();
         double scaleY = (double) outH / renderer.getHeight();
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         for (int i = 0; i < bots.size(); i++) {
             Bot b = bots.get(i);
             if (!b.isAlive()) continue;
@@ -3826,7 +4150,7 @@ public class Engine extends JPanel implements Runnable {
                     g.drawString(allyTag, sx - fm.stringWidth(allyTag) / 2, by - 5);
                 } else if (b.isBlinded()) {
                     drawCenteredText(g, "★ ОСЛЕПЛЁН ★", sx, by - 6,
-                            new Font("SansSerif", Font.BOLD, 11), new Color(255, 245, 150));
+                            uiFont("SansSerif", Font.BOLD, 11), new Color(255, 245, 150));
                 } else if (aimedAt || b.isCarryingC4() || b.getArchetype() == Bot.Archetype.JUGGERNAUT) {
                     String tag = (b.getArchetype() == Bot.Archetype.JUGGERNAUT ? "☠ " : "")
                             + b.getName() + " (" + b.getHealth() + " HP)" + (b.isCarryingC4() ? " [C4]" : "");
@@ -3842,12 +4166,12 @@ public class Engine extends JPanel implements Runnable {
             int sx = (int) (proj[0] * scaleX);
             int sy = (int) (proj[1] * scaleY);
             drawCenteredText(g, "▼ C4 ПЛЕНТ " + plantedC4.siteName + " (" + String.format("%.1fс", Math.max(0.0, plantedC4.countdown)) + ")",
-                    sx, sy, new Font("SansSerif", Font.BOLD, 13), new Color(255, 92, 82));
+                    sx, sy, uiFont("SansSerif", Font.BOLD, 13), new Color(255, 92, 82));
         }
 
         // Всплывающие цифры урона
         if (settings.showDamageNumbers) {
-            g.setFont(new Font("SansSerif", Font.BOLD, 15));
+            g.setFont(uiFont("SansSerif", Font.BOLD, 15));
             for (int i = 0; i < damagePopups.size(); i++) {
                 DamagePopup dp = damagePopups.get(i);
                 if (renderer.projectToScreen(dp.worldPos.x, dp.worldPos.y, dp.worldPos.z, proj)) {
@@ -3957,74 +4281,95 @@ public class Engine extends JPanel implements Runnable {
             g.setColor(new Color(245, 196, 68));
             g.fillRoundRect(bx, by, (int) (barW * w.getReloadProgress()), barH, 4, 4);
             drawCenteredText(g, "ПЕРЕЗАРЯДКА...", cx, by - 6,
-                    new Font("SansSerif", Font.BOLD, 12), new Color(255, 235, 175));
+                    uiFont("SansSerif", Font.BOLD, 12), new Color(255, 235, 175));
+        }
+    }
+
+    private final int[] hudPolyX4 = new int[4];
+    private final int[] hudPolyY4 = new int[4];
+    private static final Color COL_HUD_BG_DARK = new Color(13, 19, 30);
+    private static final Color COL_HUD_BG_LOWER = new Color(17, 25, 39);
+    private static final Color COL_HUD_BORDER = new Color(64, 92, 128);
+    private static final Color COL_HUD_CT_WING = new Color(42, 118, 214);
+    private static final Color COL_HUD_T_WING = new Color(214, 128, 34);
+    private static final Color COL_HUD_CT_PIP = new Color(78, 188, 255);
+    private static final Color COL_HUD_T_PIP = new Color(248, 168, 56);
+    private static final Color COL_HUD_TRACK = new Color(34, 44, 58);
+
+    private static void drawFastHudPanel(Graphics2D g, int x, int y, int w, int h, Color accentTop) {
+        int half = h >> 1;
+        g.setColor(COL_HUD_BG_DARK);
+        g.fillRect(x, y, w, half);
+        g.setColor(COL_HUD_BG_LOWER);
+        g.fillRect(x, y + half, w, h - half);
+        g.setColor(COL_HUD_BORDER);
+        g.drawRect(x, y, w - 1, h - 1);
+        if (accentTop != null) {
+            g.setColor(accentTop);
+            g.fillRect(x + 1, y + 1, w - 2, 2);
         }
     }
 
     private void drawTacticalHud(Graphics2D g, int outW, int outH) {
-        // 1. ВЕРХНИЙ КИБЕРСПОРТИВНЫЙ ТАБЛО-ХЕДЕР PANORAMA 6.0 (Скошенные крылья CT/T + Ромбы живых бойцов!)
+        // 1. ВЕРХНИЙ КИБЕРСПОРТИВНЫЙ ТАБЛО-ХЕДЕР PANORAMA 7.0 (0 аллокаций GradientPaint/Polygon!)
         int topW = 468, topH = 60;
         int topX = outW / 2 - topW / 2, topY = 12;
 
-        g.setPaint(new GradientPaint(topX, topY, new Color(12, 17, 28, 228),
-                topX, topY + topH, new Color(18, 25, 40, 218)));
-        g.fillRoundRect(topX, topY, topW, topH, 14, 14);
-        g.setColor(new Color(255, 255, 255, 48));
-        g.drawRoundRect(topX, topY, topW, topH, 14, 14);
+        drawFastHudPanel(g, topX, topY, topW, topH, COL_HUD_CT_PIP);
 
         // Левое скошенное крыло CT
-        Polygon ctWing = new Polygon(
-                new int[]{topX + 8, topX + 104, topX + 92, topX + 8},
-                new int[]{topY + 8, topY + 8, topY + 52, topY + 52}, 4);
-        g.setPaint(new GradientPaint(topX + 8, topY + 8, new Color(54, 148, 246),
-                topX + 96, topY + 52, new Color(32, 92, 178)));
-        g.fillPolygon(ctWing);
+        hudPolyX4[0] = topX + 8;  hudPolyX4[1] = topX + 104; hudPolyX4[2] = topX + 92; hudPolyX4[3] = topX + 8;
+        hudPolyY4[0] = topY + 8;  hudPolyY4[1] = topY + 8;   hudPolyY4[2] = topY + 52; hudPolyY4[3] = topY + 52;
+        g.setColor(COL_HUD_CT_WING);
+        g.fillPolygon(hudPolyX4, hudPolyY4, 4);
         g.setColor(Color.WHITE);
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.drawString("CT", topX + 18, topY + 25);
-        g.setFont(new Font("SansSerif", Font.BOLD, 25));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 25));
         g.drawString(String.valueOf(playerRoundWins), topX + 56, topY + 41);
 
         // Правое скошенное крыло T
-        Polygon tWing = new Polygon(
-                new int[]{topX + topW - 104, topX + topW - 8, topX + topW - 8, topX + topW - 92},
-                new int[]{topY + 8, topY + 8, topY + 52, topY + 52}, 4);
-        g.setPaint(new GradientPaint(topX + topW - 104, topY + 8, new Color(238, 156, 46),
-                topX + topW - 8, topY + 52, new Color(188, 96, 24)));
-        g.fillPolygon(tWing);
+        hudPolyX4[0] = topX + topW - 104; hudPolyX4[1] = topX + topW - 8;
+        hudPolyX4[2] = topX + topW - 8;   hudPolyX4[3] = topX + topW - 92;
+        g.setColor(COL_HUD_T_WING);
+        g.fillPolygon(hudPolyX4, hudPolyY4, 4);
         g.setColor(Color.WHITE);
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.drawString("TERR", topX + topW - 48, topY + 25);
-        g.setFont(new Font("SansSerif", Font.BOLD, 25));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 25));
         g.drawString(String.valueOf(botRoundWins), topX + topW - 82, topY + 41);
 
         // Ромбики живых бойцов слева (CT) и справа (T) от табло!
         int ctAlive = (player.isAlive() ? 1 : 0) + countAliveAllies();
         int tAlive = countAliveEnemies();
+        g.setColor(COL_HUD_CT_PIP);
         for (int i = 0; i < Math.min(5, ctAlive); i++) {
             int px = topX - 14 - i * 15, py = topY + 30;
-            g.setColor(new Color(78, 188, 255, 230));
-            g.fillPolygon(new int[]{px, px + 6, px, px - 6}, new int[]{py - 6, py, py + 6, py}, 4);
+            hudPolyX4[0] = px; hudPolyX4[1] = px + 6; hudPolyX4[2] = px; hudPolyX4[3] = px - 6;
+            hudPolyY4[0] = py - 6; hudPolyY4[1] = py; hudPolyY4[2] = py + 6; hudPolyY4[3] = py;
+            g.fillPolygon(hudPolyX4, hudPolyY4, 4);
         }
+        g.setColor(COL_HUD_T_PIP);
         for (int i = 0; i < Math.min(8, tAlive); i++) {
             int px = topX + topW + 14 + i * 15, py = topY + 30;
-            g.setColor(new Color(248, 168, 56, 230));
-            g.fillPolygon(new int[]{px, px + 6, px, px - 6}, new int[]{py - 6, py, py + 6, py}, 4);
+            hudPolyX4[0] = px; hudPolyX4[1] = px + 6; hudPolyX4[2] = px; hudPolyX4[3] = px - 6;
+            hudPolyY4[0] = py - 6; hudPolyY4[1] = py; hudPolyY4[2] = py + 6; hudPolyY4[3] = py;
+            g.fillPolygon(hudPolyX4, hudPolyY4, 4);
         }
 
         if (plantedC4 != null) {
             boolean blink = Math.sin(plantedC4.blinkPhase) > 0.0;
             String c4Str = String.format("C4: %04.1f", Math.max(0.0, plantedC4.countdown));
             drawCenteredText(g, c4Str, outW / 2, topY + 31,
-                    new Font("Monospaced", Font.BOLD, 22), blink ? new Color(255, 76, 68) : new Color(255, 206, 92));
+                    uiFont("Monospaced", Font.BOLD, 22), blink ? new Color(255, 76, 68) : new Color(255, 206, 92));
             String subStr = "⚠ ПЛЕНТ " + plantedC4.siteName + " ЗАМИНИРОВАН • ЗАЖМИТЕ [E]";
             drawCenteredText(g, subStr, outW / 2, topY + 50,
-                    new Font("SansSerif", Font.BOLD, 10), new Color(255, 185, 175));
+                    uiFont("SansSerif", Font.BOLD, 10), new Color(255, 185, 175));
         } else {
             int totalSec = Math.max(0, (int) Math.ceil(roundTimeLeft));
             String timeStr = String.format("%02d:%02d", totalSec / 60, totalSec % 60);
             drawCenteredText(g, timeStr, outW / 2, topY + 31,
-                    new Font("Monospaced", Font.BOLD, 23), totalSec <= 15 ? new Color(255, 95, 85) : Color.WHITE);
+                    uiFont("Monospaced", Font.BOLD, 23), totalSec <= 15 ? new Color(255, 95, 85) : Color.WHITE);
 
             String subStr;
             if (settings.gameMode == GameSettings.GameMode.ARMS_RACE) {
@@ -4042,34 +4387,31 @@ public class Engine extends JPanel implements Runnable {
                 subStr = "РАУНД " + currentRound + " • CT " + ctAlive + " VS " + tAlive + " T";
             }
             drawCenteredText(g, subStr, outW / 2, topY + 50,
-                    new Font("SansSerif", Font.BOLD, 11), new Color(198, 214, 234));
+                    uiFont("SansSerif", Font.BOLD, 11), new Color(198, 214, 234));
         }
 
         // Верхняя шкала здоровья БОЕВОГО ВЕРТОЛЁТА-БОССА
         if (bossHelicopter != null && bossHelicopter.isAlive()) {
             int hbW = 450, hbH = 30;
             int hbX = outW / 2 - hbW / 2, hbY = topY + topH + 8;
-            g.setColor(new Color(22, 12, 16, 228));
-            g.fillRoundRect(hbX, hbY, hbW, hbH, 9, 9);
-            g.setColor(new Color(255, 86, 62, 210));
-            g.drawRoundRect(hbX, hbY, hbW, hbH, 9, 9);
+            g.setColor(new Color(22, 12, 16));
+            g.fillRect(hbX, hbY, hbW, hbH);
+            g.setColor(new Color(255, 86, 62));
+            g.drawRect(hbX, hbY, hbW - 1, hbH - 1);
 
             double frac = Math.max(0.0, Math.min(1.0, (double) bossHelicopter.health / bossHelicopter.maxHealth));
-            g.setPaint(new GradientPaint(hbX + 6, hbY, new Color(255, 92, 54), hbX + hbW - 6, hbY, new Color(214, 34, 38)));
-            g.fillRoundRect(hbX + 6, hbY + 16, (int) ((hbW - 12) * frac), 9, 4, 4);
+            g.setColor(new Color(236, 62, 44));
+            g.fillRect(hbX + 6, hbY + 16, (int) ((hbW - 12) * frac), 9);
             drawCenteredText(g, "▲ БОСС: УДАРНЫЙ БОЕВОЙ ВЕРТОЛЁТ  [" + bossHelicopter.health + " / " + bossHelicopter.maxHealth + " HP] ▲",
-                    outW / 2, hbY + 12, new Font("SansSerif", Font.BOLD, 11), new Color(255, 218, 132));
+                    outW / 2, hbY + 12, uiFont("SansSerif", Font.BOLD, 11), new Color(255, 218, 132));
         }
 
         // Баннер активной радиокоманды спецназу CT [Z]
         if (radioBannerTimer > 0.0 && !radioBannerText.isEmpty()) {
             int rw = 510, rh = 30;
             int rx = 20, ry = 206;
-            g.setColor(new Color(12, 24, 38, 218));
-            g.fillRoundRect(rx, ry, rw, rh, 8, 8);
-            g.setColor(new Color(78, 198, 255, 190));
-            g.drawRoundRect(rx, ry, rw, rh, 8, 8);
-            g.setFont(new Font("SansSerif", Font.BOLD, 12));
+            drawFastHudPanel(g, rx, ry, rw, rh, COL_HUD_CT_PIP);
+            g.setFont(uiFont("SansSerif", Font.BOLD, 12));
             g.setColor(new Color(148, 232, 255));
             g.drawString(radioBannerText, rx + 12, ry + 20);
         }
@@ -4078,26 +4420,23 @@ public class Engine extends JPanel implements Runnable {
         if (plantedC4 != null && player.isAlive() && player.getPosition().dist(plantedC4.pos) < 2.95) {
             int dw = 340, dh = 54;
             int dx = outW / 2 - dw / 2, dy = outH / 2 + 56;
-            g.setColor(new Color(10, 16, 24, 226));
-            g.fillRoundRect(dx, dy, dw, dh, 12, 12);
-            g.setColor(new Color(82, 220, 255));
-            g.drawRoundRect(dx, dy, dw, dh, 12, 12);
+            drawFastHudPanel(g, dx, dy, dw, dh, COL_HUD_CT_PIP);
 
             if (plantedC4.beingDefused) {
                 double p = Math.min(1.0, plantedC4.defuseProgress / plantedC4.defuseRequired);
                 drawCenteredText(g, String.format("ОБЕЗВРЕЖИВАНИЕ C4... %.1f с",
                         Math.max(0.0, plantedC4.defuseRequired - plantedC4.defuseProgress)),
-                        outW / 2, dy + 22, new Font("SansSerif", Font.BOLD, 13), new Color(110, 235, 255));
-                g.setColor(new Color(32, 46, 62));
-                g.fillRoundRect(dx + 20, dy + 32, dw - 40, 11, 6, 6);
+                        outW / 2, dy + 22, uiFont("SansSerif", Font.BOLD, 13), new Color(110, 235, 255));
+                g.setColor(COL_HUD_TRACK);
+                g.fillRect(dx + 20, dy + 32, dw - 40, 11);
                 g.setColor(new Color(72, 226, 255));
-                g.fillRoundRect(dx + 20, dy + 32, (int) ((dw - 40) * p), 11, 6, 6);
+                g.fillRect(dx + 20, dy + 32, (int) ((dw - 40) * p), 11);
             } else {
                 String kitNote = player.hasDefuseKit() ? " (Набор сапёра: 5 сек)" : " (Без набора: 10 сек)";
                 drawCenteredText(g, "ЗАЖМИТЕ [E] — ОБЕЗВРЕДИТЬ БОМБУ C4", outW / 2, dy + 24,
-                        new Font("SansSerif", Font.BOLD, 13), new Color(120, 240, 175));
+                        uiFont("SansSerif", Font.BOLD, 13), new Color(120, 240, 175));
                 drawCenteredText(g, "Дистанция в норме" + kitNote, outW / 2, dy + 43,
-                        new Font("SansSerif", Font.PLAIN, 11), new Color(205, 218, 232));
+                        uiFont("SansSerif", Font.PLAIN, 11), new Color(205, 218, 232));
             }
         }
 
@@ -4106,108 +4445,98 @@ public class Engine extends JPanel implements Runnable {
         int hpX = 20, hpY = outH - hpH - 20;
 
         // Верхняя плашка валюты $ и тактических зарядов [J] / [U] / [K]
-        g.setColor(new Color(12, 18, 28, 222));
-        g.fillRoundRect(hpX, hpY - 38, 424, 32, 10, 10);
-        g.setColor(new Color(92, 232, 148, 120));
-        g.drawRoundRect(hpX, hpY - 38, 424, 32, 10, 10);
+        drawFastHudPanel(g, hpX, hpY - 38, 424, 32, COL_FPS_GOOD);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 17));
+        g.setFont(uiFont("Monospaced", Font.BOLD, 17));
         g.setColor(new Color(98, 244, 138));
         g.drawString("$ " + player.getMoney(), hpX + 12, hpY - 17);
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(248, 206, 88));
         String rightBadge = "[B]Маг • [J]Турель:" + player.getSentryCharges()
                 + " • [U]Авиаудар:" + player.getAirstrikeCharges() + " • [K]Босс";
         g.drawString(rightBadge, hpX + 94, hpY - 17);
 
-        g.setPaint(new GradientPaint(hpX, hpY, new Color(12, 18, 28, 228), hpX, hpY + hpH, new Color(18, 26, 40, 224)));
-        g.fillRoundRect(hpX, hpY, hpW, hpH, 14, 14);
-        g.setColor(new Color(255, 255, 255, 45));
-        g.drawRoundRect(hpX, hpY, hpW, hpH, 14, 14);
-
         int hp = player.getHealth();
-        Color hpColor = hp > 50 ? new Color(92, 242, 136)
-                : (hp > 25 ? new Color(252, 198, 62) : new Color(252, 72, 68));
+        Color hpColor = hp > 50 ? COL_FPS_GOOD : (hp > 25 ? COL_FPS_WARN : COL_FPS_BAD);
+        drawFastHudPanel(g, hpX, hpY, hpW, hpH, hpColor);
+
         g.setColor(hpColor);
-        g.setFont(new Font("SansSerif", Font.BOLD, 36));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 36));
         g.drawString("+" + hp, hpX + 14, hpY + 44);
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(182, 198, 218));
         g.drawString("ЗДОРОВЬЕ", hpX + 16, hpY + 62);
         String dashReadyTxt = player.getDashReadyProgress() >= 0.999 ? "[Alt] РЫВОК ГОТОВ" : "[Alt] ЗАРЯДКА...";
         g.setColor(player.getDashReadyProgress() >= 0.999 ? new Color(96, 228, 255) : new Color(138, 156, 178));
-        g.setFont(new Font("SansSerif", Font.BOLD, 10));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 10));
         g.drawString(dashReadyTxt, hpX + 16, hpY + 78);
 
         int barStartX = hpX + 132, barWidth = 186;
-        g.setColor(new Color(34, 44, 58));
-        g.fillRoundRect(barStartX, hpY + 15, barWidth, 10, 5, 5);
+        g.setColor(COL_HUD_TRACK);
+        g.fillRect(barStartX, hpY + 15, barWidth, 10);
         g.setColor(hpColor);
-        g.fillRoundRect(barStartX, hpY + 15, (int) (barWidth * (hp / 100.0)), 10, 5, 5);
+        g.fillRect(barStartX, hpY + 15, (int) (barWidth * (hp / 100.0)), 10);
 
         int ap = player.getArmor();
         g.setColor(new Color(98, 184, 255));
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         String stance = player.isCrouching() ? " • ПРИСЕД" : (player.isSilentWalking() ? " • ШАГ" : "");
         g.drawString("БРОНЯ: " + ap + " AP" + stance, barStartX, hpY + 42);
-        g.setColor(new Color(34, 44, 58));
-        g.fillRoundRect(barStartX, hpY + 48, barWidth, 7, 4, 4);
+        g.setColor(COL_HUD_TRACK);
+        g.fillRect(barStartX, hpY + 48, barWidth, 7);
         g.setColor(new Color(78, 172, 252));
-        g.fillRoundRect(barStartX, hpY + 48, (int) (barWidth * (ap / 100.0)), 7, 4, 4);
+        g.fillRect(barStartX, hpY + 48, (int) (barWidth * (ap / 100.0)), 7);
 
         // Индикатор перезарядки Тактического рывка [Alt]
-        g.setColor(new Color(34, 44, 58));
-        g.fillRoundRect(barStartX, hpY + 68, barWidth, 6, 4, 4);
+        g.setColor(COL_HUD_TRACK);
+        g.fillRect(barStartX, hpY + 68, barWidth, 6);
         g.setColor(new Color(72, 228, 255));
-        g.fillRoundRect(barStartX, hpY + 68, (int) (barWidth * player.getDashReadyProgress()), 6, 4, 4);
+        g.fillRect(barStartX, hpY + 68, (int) (barWidth * player.getDashReadyProgress()), 6);
 
         // 3. ПАНЕЛЬ ОРУЖИЯ, ШКАЛЫ МАГАЗИНА, STATTRAK™ И 4 ГРАНАТ CS2 (СНИЗУ СПРАВА)
         int amW = 356, amH = 132;
         int amX = outW - amW - 20, amY = outH - amH - 20;
 
-        g.setPaint(new GradientPaint(amX, amY, new Color(12, 18, 28, 228), amX, amY + amH, new Color(18, 26, 40, 224)));
-        g.fillRoundRect(amX, amY, amW, amH, 14, 14);
-        g.setColor(new Color(255, 255, 255, 45));
-        g.drawRoundRect(amX, amY, amW, amH, 14, 14);
+        drawFastHudPanel(g, amX, amY, amW, amH, COL_HUD_T_PIP);
 
         Weapon activeWeapon = player.getCurrentWeapon();
-        g.setFont(new Font("SansSerif", Font.BOLD, 14));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 14));
         g.setColor(new Color(252, 206, 84));
         g.drawString(activeWeapon.getDisplayName().toUpperCase(), amX + 16, amY + 23);
 
         // Цифровой LED-счетчик StatTrak™
-        g.setColor(new Color(44, 24, 12, 232));
-        g.fillRoundRect(amX + amW - 140, amY + 7, 126, 21, 6, 6);
-        g.setColor(new Color(255, 142, 42, 180));
-        g.drawRoundRect(amX + amW - 140, amY + 7, 126, 21, 6, 6);
+        g.setColor(new Color(44, 24, 12));
+        g.fillRect(amX + amW - 140, amY + 7, 126, 21);
+        g.setColor(new Color(220, 124, 38));
+        g.drawRect(amX + amW - 140, amY + 7, 125, 20);
         g.setColor(new Color(255, 146, 44));
-        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setFont(uiFont("Monospaced", Font.BOLD, 11));
         g.drawString(String.format("StatTrak™ %04d", player.getKills()), amX + amW - 132, amY + 21);
 
         if (activeWeapon.isMelee()) {
-            g.setFont(new Font("SansSerif", Font.BOLD, 20));
+            g.setFont(uiFont("SansSerif", Font.BOLD, 20));
             g.setColor(Color.WHITE);
             g.drawString("КЕРАМБИТ • [F] ВРАЩЕНИЕ", amX + 16, amY + 55);
         } else {
             int mag = activeWeapon.getMagAmmo();
             int maxMag = Math.max(1, activeWeapon.getMaxMagAmmo());
-            g.setFont(new Font("Monospaced", Font.BOLD, 34));
-            g.setColor(mag <= Math.max(2, maxMag / 4) ? new Color(255, 92, 82) : Color.WHITE);
+            g.setFont(uiFont("Monospaced", Font.BOLD, 34));
+            g.setColor(mag <= Math.max(2, maxMag / 4) ? COL_FPS_BAD : Color.WHITE);
             g.drawString(String.format("%2d", mag), amX + 16, amY + 58);
 
-            g.setFont(new Font("Monospaced", Font.BOLD, 19));
+            g.setFont(uiFont("Monospaced", Font.BOLD, 19));
             g.setColor(new Color(175, 190, 210));
             int reserveX = (mag >= 100) ? (amX + 86) : (amX + 68);
             g.drawString("/ " + activeWeapon.getReserveAmmo(), reserveX, amY + 56);
 
             // Визуальная шкала наполненности магазина
             int mbX = amX + 158, mbW = amW - 174;
-            g.setColor(new Color(34, 44, 58));
-            g.fillRoundRect(mbX, amY + 38, mbW, 8, 4, 4);
-            g.setColor(mag <= Math.max(2, maxMag / 4) ? new Color(252, 86, 76) : new Color(252, 204, 82));
-            g.fillRoundRect(mbX, amY + 38, (int) (mbW * Math.min(1.0, (double) mag / maxMag)), 8, 4, 4);
+            g.setColor(COL_HUD_TRACK);
+            g.fillRect(mbX, amY + 38, mbW, 8);
+            g.setColor(mag <= Math.max(2, maxMag / 4) ? COL_FPS_BAD : COL_FPS_WARN);
+            g.fillRect(mbX, amY + 38, (int) (mbW * Math.min(1.0, (double) mag / maxMag)), 8);
 
-            g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+            g.setFont(uiFont("SansSerif", Font.PLAIN, 10));
             g.setColor(new Color(168, 186, 208));
             g.drawString("[ПКМ] Зум  •  [F] Осмотр  •  [H] Скин", mbX, amY + 59);
         }
@@ -4220,9 +4549,9 @@ public class Engine extends JPanel implements Runnable {
         for (int i = 0; i < 4; i++) {
             int gx = amX + 15 + i * (gpW + 5);
             int gy = amY + 69;
-            g.setColor(gCounts[i] > 0 ? new Color(32, 48, 68, 220) : new Color(20, 26, 36, 165));
-            g.fillRoundRect(gx, gy, gpW, 22, 6, 6);
-            drawCenteredText(g, gTags[i], gx + gpW / 2, gy + 15, new Font("SansSerif", Font.BOLD, 10),
+            g.setColor(gCounts[i] > 0 ? new Color(30, 46, 66) : new Color(20, 26, 36));
+            g.fillRect(gx, gy, gpW, 22);
+            drawCenteredText(g, gTags[i], gx + gpW / 2, gy + 15, uiFont("SansSerif", Font.BOLD, 10),
                     gCounts[i] > 0 ? new Color(224, 238, 255) : new Color(118, 130, 146));
         }
 
@@ -4235,16 +4564,14 @@ public class Engine extends JPanel implements Runnable {
             int sx = amX + 15 + i * (slotW + slotGap);
             int sy = amY + 98;
             boolean sel = (i == player.getCurrentWeaponIndex());
-            g.setColor(sel ? new Color(248, 192, 66, 236) : new Color(32, 42, 56, 195));
-            g.fillRoundRect(sx, sy, slotW, 24, 6, 6);
-            g.setFont(new Font("SansSerif", Font.BOLD, 10));
-            g.setColor(sel ? new Color(16, 18, 24) : new Color(198, 210, 224));
+            g.setColor(sel ? new Color(248, 192, 66) : new Color(30, 40, 54));
+            g.fillRect(sx, sy, slotW, 24);
             String keyNum = (i == 3) ? "T" : String.valueOf(i + 1);
             String shortName = (i == 2) ? "Керамбит" : (i == 3 ? "Zeus"
                     : (allW[i].getDisplayName().length() > 7
                             ? allW[i].getDisplayName().substring(0, 6) : allW[i].getDisplayName()));
             drawCenteredText(g, keyNum + ":" + shortName, sx + slotW / 2, sy + 16,
-                    new Font("SansSerif", Font.BOLD, 10), sel ? new Color(16, 18, 24) : new Color(202, 214, 228));
+                    uiFont("SansSerif", Font.BOLD, 10), sel ? new Color(16, 18, 24) : new Color(202, 214, 228));
         }
 
         // 4. Карточки фрагов раунда CS2 внизу по центру экрана
@@ -4257,49 +4584,62 @@ public class Engine extends JPanel implements Runnable {
             for (int i = 0; i < rk; i++) {
                 boolean hs = player.isRoundKillHeadshot(i);
                 int cx = startX + i * (cardW + cardGap);
-                g.setColor(hs ? new Color(245, 172, 38, 228) : new Color(34, 48, 68, 224));
-                g.fillRoundRect(cx, cardY, cardW, 42, 8, 8);
-                g.setColor(hs ? new Color(255, 236, 140) : new Color(104, 196, 255));
-                g.drawRoundRect(cx, cardY, cardW, 42, 8, 8);
+                g.setColor(hs ? new Color(245, 172, 38) : new Color(34, 48, 68));
+                g.fillRect(cx, cardY, cardW, 42);
+                g.setColor(hs ? new Color(255, 236, 140) : COL_HUD_CT_PIP);
+                g.drawRect(cx, cardY, cardW - 1, 41);
                 drawCenteredText(g, "☠", cx + cardW / 2, cardY + 23,
-                        new Font("SansSerif", Font.BOLD, 17), Color.WHITE);
+                        uiFont("SansSerif", Font.BOLD, 17), Color.WHITE);
                 drawCenteredText(g, hs ? "HS" : ("K" + (i + 1)), cx + cardW / 2, cardY + 37,
-                        new Font("SansSerif", Font.BOLD, 9), hs ? new Color(24, 18, 10) : new Color(215, 230, 248));
+                        uiFont("SansSerif", Font.BOLD, 9), hs ? new Color(24, 18, 10) : new Color(215, 230, 248));
             }
         }
     }
 
+    private void ensureRadarBaseCached(int inner) {
+        if (cachedRadarBase != null && cachedRadarInnerSize == inner && cachedRadarTheme == map.getCurrentTheme()) {
+            return;
+        }
+        cachedRadarInnerSize = inner;
+        cachedRadarTheme = map.getCurrentTheme();
+        cachedRadarBase = new BufferedImage(inner, inner, BufferedImage.TYPE_INT_RGB);
+        Graphics2D rg = cachedRadarBase.createGraphics();
+        rg.setColor(new Color(20, 26, 36));
+        rg.fillRect(0, 0, inner, inner);
+
+        double span = Map.MAX_X - Map.MIN_X;
+        List<Vec3.Box> boxes = map.getBoxes();
+        for (int i = 0; i < boxes.size(); i++) {
+            Vec3.Box b = boxes.get(i);
+            if (!b.collidable) continue;
+            int bx0 = (int) (((b.minX - Map.MIN_X) / span) * inner);
+            int bz0 = (int) (((Map.MAX_Z - b.maxZ) / span) * inner);
+            int bw = Math.max(2, (int) (((b.maxX - b.minX) / span) * inner));
+            int bh = Math.max(2, (int) (((b.maxZ - b.minZ) / span) * inner));
+            rg.setColor(b.maxY > 2.2 ? new Color(156, 140, 108) : new Color(98, 90, 72));
+            rg.fillRect(bx0, bz0, bw, bh);
+        }
+        rg.setFont(uiFont("SansSerif", Font.BOLD, 9));
+        rg.setColor(new Color(156, 186, 220));
+        rg.drawString("N", inner / 2 - 3, 9);
+        rg.drawString("S", inner / 2 - 3, inner - 2);
+        rg.dispose();
+    }
+
     private void drawMinimapRadar(Graphics2D g, int rx, int ry, int size) {
-        int totalH = size + (settings.showFpsTelemetry ? 24 : 4);
-        g.setPaint(new GradientPaint(rx, ry, new Color(12, 17, 26, 226), rx, ry + totalH, new Color(16, 24, 38, 222)));
-        g.fillRoundRect(rx, ry, size, totalH, 14, 14);
-        g.setColor(new Color(108, 206, 255, 90));
-        g.drawRoundRect(rx, ry, size, totalH, 14, 14);
+        boolean showTel = settings.telemetryMode != GameSettings.HudTelemetryMode.OFF;
+        boolean showGraph = settings.telemetryMode == GameSettings.HudTelemetryMode.FULL_GRAPH;
+        int totalH = size + (showTel ? 24 : 4);
+
+        drawFastHudPanel(g, rx, ry, size, totalH, COL_HUD_CT_PIP);
 
         int pad = 11;
         int inner = size - pad * 2;
         double span = Map.MAX_X - Map.MIN_X;
 
-        g.setColor(new Color(20, 26, 36, 215));
-        g.fillRoundRect(rx + pad, ry + pad, inner, inner, 8, 8);
-
-        List<Vec3.Box> boxes = map.getBoxes();
-        for (int i = 0; i < boxes.size(); i++) {
-            Vec3.Box b = boxes.get(i);
-            if (!b.collidable) continue;
-            int bx0 = rx + pad + (int) (((b.minX - Map.MIN_X) / span) * inner);
-            int bz0 = ry + pad + (int) (((Map.MAX_Z - b.maxZ) / span) * inner);
-            int bw = Math.max(2, (int) (((b.maxX - b.minX) / span) * inner));
-            int bh = Math.max(2, (int) (((b.maxZ - b.minZ) / span) * inner));
-            g.setColor(b.maxY > 2.2 ? new Color(188, 168, 128, 195) : new Color(126, 112, 86, 165));
-            g.fillRect(bx0, bz0, bw, bh);
-        }
-
-        // Метки сторон света на тактическом радаре
-        g.setFont(new Font("SansSerif", Font.BOLD, 9));
-        g.setColor(new Color(156, 186, 220));
-        g.drawString("N", rx + size / 2 - 3, ry + pad + 9);
-        g.drawString("S", rx + size / 2 - 3, ry + pad + inner - 2);
+        // Кэшированная статическая подложка карты (1 блит вместо 120 fillRect в каждом кадре!)
+        ensureRadarBaseCached(inner);
+        g.drawImage(cachedRadarBase, rx + pad, ry + pad, null);
 
         for (int i = 0; i < fireZones.size(); i++) {
             Vec3.FireZone fz = fireZones.get(i);
@@ -4369,7 +4709,7 @@ public class Engine extends JPanel implements Runnable {
             }
             boolean visibleOnRadar = b.isFiringRecently()
                     || b.getState() == Bot.State.ENGAGE
-                    || map.hasLineOfSight(eye, b.getEyePosition(), smokeClouds);
+                    || (eye.dist(b.getEyePosition()) < 34.0 && map.hasLineOfSight(eye, b.getEyePosition(), smokeClouds));
             if (!visibleOnRadar) continue;
 
             int mx = rx + pad + (int) (((b.getPosition().x - Map.MIN_X) / span) * inner);
@@ -4381,28 +4721,33 @@ public class Engine extends JPanel implements Runnable {
         int px = rx + pad + (int) (((player.getPosition().x - Map.MIN_X) / span) * inner);
         int pz = ry + pad + (int) (((Map.MAX_Z - player.getPosition().z) / span) * inner);
         double yaw = player.getYaw();
-        int lx1 = px + (int) (Math.sin(yaw - 0.5) * 18);
-        int lz1 = pz - (int) (Math.cos(yaw - 0.5) * 18);
-        int lx2 = px + (int) (Math.sin(yaw + 0.5) * 18);
-        int lz2 = pz - (int) (Math.cos(yaw + 0.5) * 18);
+        radarPolyX[0] = px;
+        radarPolyX[1] = px + (int) (Math.sin(yaw - 0.5) * 18);
+        radarPolyX[2] = px + (int) (Math.sin(yaw + 0.5) * 18);
+        radarPolyZ[0] = pz;
+        radarPolyZ[1] = pz - (int) (Math.cos(yaw - 0.5) * 18);
+        radarPolyZ[2] = pz - (int) (Math.cos(yaw + 0.5) * 18);
 
         g.setColor(new Color(95, 225, 255, 85));
-        g.fillPolygon(new int[]{px, lx1, lx2}, new int[]{pz, lz1, lz2}, 3);
+        g.fillPolygon(radarPolyX, radarPolyZ, 3);
         g.setColor(new Color(90, 248, 156));
         g.fillOval(px - 4, pz - 4, 9, 9);
 
-        if (settings.showFpsTelemetry) {
-            g.setFont(new Font("SansSerif", Font.BOLD, 10));
+        if (showTel) {
+            g.setFont(uiFont("SansSerif", Font.BOLD, 10));
             g.setColor(new Color(128, 232, 172));
-            g.drawString(String.format("%d FPS • %.1fмс • %d ядер",
-                    currentFps, lastFrameMs, renderer.getWorkerThreads()), rx + 11, ry + totalH - 8);
+            g.drawString(String.format("%d FPS • %.1fмс • 1%%:%d",
+                    currentFps, lastFrameMs, onePercentLowFps), rx + 10, ry + totalH - 8);
+        }
+        if (showGraph) {
+            drawFrameTimeGraphBox(g, rx, ry + totalH + 6, size, 38, false);
         }
     }
 
     private void drawKillFeedAndKd(Graphics2D g, int outW) {
         String kdText = String.format("K: %d   D: %d   K/D: %.2f   HS: %d",
                 player.getKills(), player.getDeaths(), player.getKdRatio(), player.getHeadshots());
-        g.setFont(new Font("SansSerif", Font.BOLD, 13));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 13));
         FontMetrics fm = g.getFontMetrics();
         int boxW = fm.stringWidth(kdText) + 28;
         int boxX = outW - boxW - 18, boxY = 16;
@@ -4414,7 +4759,7 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(245, 247, 250));
         g.drawString(kdText, boxX + 14, boxY + 21);
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         FontMetrics kfm = g.getFontMetrics();
         int ky = boxY + 42;
         for (int i = 0; i < killFeed.size(); i++) {
@@ -4449,9 +4794,9 @@ public class Engine extends JPanel implements Runnable {
                 ? ("ОСАДА: ВОЛНА " + siegeWave + "/" + MAX_SIEGE_WAVES + " • СЛОЖНОСТЬ: " + settings.botDifficulty.label.toUpperCase())
                 : ("РАУНД " + currentRound + " • СЛОЖНОСТЬ: " + settings.botDifficulty.label.toUpperCase());
         drawCenteredText(g, topTitle,
-                outW / 2, by + 28, new Font("SansSerif", Font.BOLD, 16), new Color(252, 212, 92));
+                outW / 2, by + 28, uiFont("SansSerif", Font.BOLD, 16), new Color(252, 212, 92));
         drawCenteredText(g, "Магазин: [B] • Авто-Турель: [J] • Вызов Босс-Вертолёта: [K]",
-                outW / 2, by + 50, new Font("SansSerif", Font.PLAIN, 12), new Color(220, 226, 235));
+                outW / 2, by + 50, uiFont("SansSerif", Font.PLAIN, 12), new Color(220, 226, 235));
     }
 
     private void drawRoundOverBanner(Graphics2D g, int outW, int outH) {
@@ -4466,11 +4811,11 @@ public class Engine extends JPanel implements Runnable {
         String title = lastRoundWonByPlayer
                 ? "РАУНД ВЫИГРАН! (COUNTER-TERRORISTS)"
                 : "РАУНД ПРОИГРАН! (TERRORISTS WIN)";
-        drawCenteredText(g, title, outW / 2, by + 36, new Font("SansSerif", Font.BOLD, 21), accent);
-        drawCenteredText(g, roundResultReason, outW / 2, by + 64, new Font("SansSerif", Font.PLAIN, 15), Color.WHITE);
+        drawCenteredText(g, title, outW / 2, by + 36, uiFont("SansSerif", Font.BOLD, 21), accent);
+        drawCenteredText(g, roundResultReason, outW / 2, by + 64, uiFont("SansSerif", Font.PLAIN, 15), Color.WHITE);
         drawCenteredText(g, String.format("Следующий раунд через %.1f с (Space/Enter — ускорить)",
                         Math.max(0.0, roundOverTimer)),
-                outW / 2, by + 95, new Font("SansSerif", Font.PLAIN, 12), new Color(195, 205, 218));
+                outW / 2, by + 95, uiFont("SansSerif", Font.PLAIN, 12), new Color(195, 205, 218));
     }
 
     private void drawScoreboardOverlay(Graphics2D g, int outW, int outH) {
@@ -4484,11 +4829,11 @@ public class Engine extends JPanel implements Runnable {
         g.drawRoundRect(sx, sy, sw, sh, 14, 14);
 
         drawCenteredText(g, "ТАБЛИЦА СЧЕТА — " + settings.mapTheme.label.toUpperCase() + " • " + settings.gameMode.label,
-                outW / 2, sy + 32, new Font("SansSerif", Font.BOLD, 17), new Color(248, 205, 86));
+                outW / 2, sy + 32, uiFont("SansSerif", Font.BOLD, 17), new Color(248, 205, 86));
         drawCenteredText(g, "Счет по раундам: СПЕЦНАЗ CT " + playerRoundWins + " : " + botRoundWins + " ТЕРРОРИСТЫ T",
-                outW / 2, sy + 54, new Font("SansSerif", Font.BOLD, 13), new Color(200, 212, 228));
+                outW / 2, sy + 54, uiFont("SansSerif", Font.BOLD, 13), new Color(200, 212, 228));
 
-        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         g.setColor(new Color(145, 162, 184));
         g.drawString("БОЕЦ ОТРЯДА", sx + 26, sy + 82);
         g.drawString("СТАТУС", sx + 245, sy + 82);
@@ -4545,20 +4890,20 @@ public class Engine extends JPanel implements Runnable {
         g.setStroke(new BasicStroke(1.0f));
 
         drawCenteredText(g, victory ? "ПОБЕДА В МАТЧЕ!" : "ПОРАЖЕНИЕ В МАТЧЕ",
-                outW / 2, cy + 50, new Font("SansSerif", Font.BOLD, 32), accent);
+                outW / 2, cy + 50, uiFont("SansSerif", Font.BOLD, 32), accent);
         drawCenteredText(g, victory
                 ? ("Спецназ успешно зачистил арену " + settings.mapTheme.label + "!")
                 : "Отряд противников одержал верх",
-                outW / 2, cy + 80, new Font("SansSerif", Font.PLAIN, 15), new Color(214, 222, 234));
+                outW / 2, cy + 80, uiFont("SansSerif", Font.PLAIN, 15), new Color(214, 222, 234));
 
         int statX = cx + 44, statY = cy + 102, statW = cw - 88, statH = 152;
         g.setColor(new Color(25, 32, 44));
         g.fillRoundRect(statX, statY, statW, statH, 12, 12);
 
         drawCenteredText(g, "ИТОГОВЫЙ СЧЕТ РАУНДОВ:  " + playerRoundWins + " : " + botRoundWins,
-                outW / 2, statY + 32, new Font("SansSerif", Font.BOLD, 18), new Color(248, 206, 90));
+                outW / 2, statY + 32, uiFont("SansSerif", Font.BOLD, 18), new Color(248, 206, 90));
 
-        g.setFont(new Font("SansSerif", Font.PLAIN, 15));
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 15));
         g.setColor(Color.WHITE);
         g.drawString("Убийств (Kills): " + player.getKills(), statX + 28, statY + 70);
         g.drawString("Смертей (Deaths): " + player.getDeaths(), statX + 250, statY + 70);
@@ -4594,9 +4939,9 @@ public class Engine extends JPanel implements Runnable {
         g.drawRoundRect(mx, my, mw, mh, 18, 18);
 
         drawCenteredText(g, "ПАУЗА  •  CS-2 JAVA 6.0", outW / 2, my + 40,
-                new Font("SansSerif", Font.BOLD, 23), new Color(252, 208, 88));
+                uiFont("SansSerif", Font.BOLD, 23), new Color(252, 208, 88));
         drawCenteredText(g, "Звание: " + settings.getRankTitle() + "  •  XP: " + settings.careerXp, outW / 2, my + 60,
-                new Font("SansSerif", Font.PLAIN, 12), new Color(172, 194, 220));
+                uiFont("SansSerif", Font.PLAIN, 12), new Color(172, 194, 220));
 
         int bx = mx + 56, bw = mw - 112, by = my + 78;
         addMenuButton(g, new Rectangle(bx, by, bw, 44), "▶  ПРОДОЛЖИТЬ БОЙ (ESC)",
@@ -4638,7 +4983,7 @@ public class Engine extends JPanel implements Runnable {
         Color txtCol = (accentTextDark && baseColor.getRed() > 200 && baseColor.getGreen() > 140)
                 ? new Color(16, 18, 22) : Color.WHITE;
         drawCenteredText(g, label, rect.x + rect.width / 2, rect.y + rect.height / 2 + 5,
-                new Font("SansSerif", Font.BOLD, 13), txtCol);
+                uiFont("SansSerif", Font.BOLD, 13), txtCol);
         uiRegisterClickable(rect, onClick);
     }
 
@@ -4651,12 +4996,12 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(hovered ? new Color(245, 195, 76, 175) : new Color(255, 255, 255, 32));
         g.drawRoundRect(x, y, w, 34, 8, 8);
 
-        g.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 14));
         g.setColor(new Color(224, 232, 242));
         g.drawString(title, x + 14, y + 22);
 
         String pill = "◄  " + valueLabel + "  ►";
-        g.setFont(new Font("SansSerif", Font.BOLD, 13));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 13));
         int pw = g.getFontMetrics().stringWidth(pill) + 18;
         int px = x + w - pw - 10;
         g.setColor(new Color(46, 68, 96));
@@ -4678,7 +5023,7 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(255, 255, 255, 32));
         g.drawRoundRect(x, y, w, 38, 8, 8);
 
-        g.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 14));
         g.setColor(new Color(224, 232, 242));
         g.drawString(title, x + 14, y + 24);
 
@@ -4686,7 +5031,7 @@ public class Engine extends JPanel implements Runnable {
         Rectangle plusR  = new Rectangle(x + w - 48,  y + 5, 38, 28);
 
         addMenuButton(g, minusR, "−", new Color(52, 68, 90), false, onMinus);
-        drawCenteredText(g, valueLabel, x + w - 95, y + 24, new Font("Monospaced", Font.BOLD, 14), new Color(248, 206, 88));
+        drawCenteredText(g, valueLabel, x + w - 95, y + 24, uiFont("Monospaced", Font.BOLD, 14), new Color(248, 206, 88));
         addMenuButton(g, plusR, "+", new Color(52, 68, 90), false, onPlus);
     }
 
@@ -4722,6 +5067,11 @@ public class Engine extends JPanel implements Runnable {
 
     public AppScreen getCurrentScreen() { return currentScreen; }
     public void setCurrentScreen(AppScreen screen) { this.currentScreen = screen; }
+    public void openSettingsForTest(int tab, int subPage) {
+        this.settingsTab = tab;
+        this.graphicsSubPage = subPage;
+        this.currentScreen = AppScreen.SETTINGS;
+    }
     public void setBuyMenuOpen(boolean open) { this.buyMenuOpen = open; }
     public void setScoreTabHeld(boolean held) { this.scoreTabHeld = held; }
     public GameSettings getSettings() { return settings; }

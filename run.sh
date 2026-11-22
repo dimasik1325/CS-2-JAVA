@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "================================================================"
-echo "  CS-2 JAVA 6.0 : Panorama UI • 1:1 Ultra Smooth • Multi-Core"
+echo "  CS-2 JAVA 7.0 : Hyper-Turbo Engine • 24 Graphics Settings"
 echo "================================================================"
 
 if ! command -v javac >/dev/null 2>&1; then
@@ -31,5 +31,5 @@ fi
 echo "[1/2] Компиляция ${SRC_DIR}/*.java -> bin/ ..."
 javac -encoding UTF-8 -cp "${SRC_DIR}:lib/*" -d bin "${SRC_DIR}"/*.java
 
-echo "[2/2] Запуск CS-2 JAVA 5.0 (Smooth HD Engine)..."
+echo "[2/2] Запуск CS-2 JAVA 7.0 (Hyper-Turbo Engine & Pro Graphics Studio)..."
 exec java -Xms256m -Xmx1536m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -cp "bin:lib/*" Main "$@"

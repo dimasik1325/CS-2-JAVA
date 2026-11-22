@@ -1,12 +1,12 @@
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
-title CS-2 JAVA 6.0 — Panorama UI & Ultra-Smooth Multi-Core Edition
+title CS-2 JAVA 7.0 — Hyper-Turbo Multi-Core & Pro Graphics Studio
 
 cd /d "%~dp0"
 
 echo ================================================================
-echo   CS-2 JAVA 6.0 : Panorama UI • 1:1 Ultra Smooth • Multi-Core
+echo   CS-2 JAVA 7.0 : Hyper-Turbo Engine • 24 Graphics Settings
 echo ================================================================
 echo.
 
@@ -117,7 +117,7 @@ echo Компиляция успешно завершена!
 echo.
 
 :: 4. Запуск скомпилированной игры
-echo [4/4] Запуск CS-2 JAVA 5.0 (Smooth HD Engine)...
+echo [4/4] Запуск CS-2 JAVA 7.0 (Hyper-Turbo Engine & Pro Graphics Studio)...
 echo Управление: WASD - движение, B - магазин (M249/RPG-7), J - авто-турель CT,
 echo             K - Босс-Вертолёт, Z - радио, Y - граффити, F11 - полный экран.
 echo.
