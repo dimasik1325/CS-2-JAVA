@@ -679,4 +679,19 @@ public class Vec3 {
             return life > 0.0;
         }
     }
+
+    /**
+     * Лазерный маяк орбитального / артиллерийского авиаудара спецназа [U] (спускает залп из 3 ракет с неба!).
+     */
+    public static class AirstrikeBeacon {
+        public final Vec3 targetPos;
+        public double countdown = 1.45;
+        public int shellsLaunched = 0;
+        public double nextShellTimer = 0.0;
+        public double animPhase = 0.0;
+
+        public AirstrikeBeacon(Vec3 targetPos) {
+            this.targetPos = targetPos.copy();
+        }
+    }
 }

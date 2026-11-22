@@ -51,10 +51,15 @@ public class Player {
     private int flashGrenades = 1;
     private int molotovGrenades = 1;
     private int sentryCharges = 1;
+    private int airstrikeCharges = 1;
     private boolean hasDefuseKit = false;
     private boolean hasZeus = true;
     private boolean flashlightOn = false;
     private double graffitiCooldown = 0.0;
+    private double dashTimer = 0.0;
+    private double dashCooldown = 0.0;
+    private double dashDirX = 0.0;
+    private double dashDirZ = 0.0;
 
     // Прогресс режима «Гонка вооружений» (Arms Race: 0..7) и звезды MVP
     private int armsRaceTier = 0;
@@ -100,6 +105,8 @@ public class Player {
         this.damageFlash = 0.0;
         this.flashBlindTimer = 0.0;
         this.cameraShake = 0.0;
+        this.dashTimer = 0.0;
+        this.dashCooldown = 0.0;
         this.lastDamageSource = null;
         this.roundKills = 0;
 
@@ -113,6 +120,7 @@ public class Player {
             this.flashGrenades = 1;
             this.molotovGrenades = 1;
             this.sentryCharges = 1;
+            this.airstrikeCharges = 1;
             this.hasDefuseKit = false;
             this.hasZeus = true;
         } else {
@@ -123,6 +131,7 @@ public class Player {
             if (smokeGrenades < 1) smokeGrenades = 1;
             if (flashGrenades < 1) flashGrenades = 1;
             if (sentryCharges < 1) sentryCharges = 1;
+            if (airstrikeCharges < 1) airstrikeCharges = 1;
         }
 
         this.alive = true;
@@ -171,6 +180,9 @@ public class Player {
         this.flashGrenades = 1;
         this.molotovGrenades = 1;
         this.sentryCharges = 1;
+        this.airstrikeCharges = 1;
+        this.dashTimer = 0.0;
+        this.dashCooldown = 0.0;
         this.hasDefuseKit = false;
         this.hasZeus = true;
         this.flashlightOn = false;
@@ -282,6 +294,8 @@ public class Player {
         if (damageFlash > 0.0) damageFlash = Math.max(0.0, damageFlash - dt * 2.4);
         if (flashBlindTimer > 0.0) flashBlindTimer = Math.max(0.0, flashBlindTimer - dt);
         if (graffitiCooldown > 0.0) graffitiCooldown = Math.max(0.0, graffitiCooldown - dt);
+        if (dashCooldown > 0.0) dashCooldown = Math.max(0.0, dashCooldown - dt);
+        if (dashTimer > 0.0) dashTimer = Math.max(0.0, dashTimer - dt);
         if (cameraShake > 0.0) {
             cameraShake = Math.max(0.0, cameraShake - dt * 2.6);
             shakePhase += dt * 46.0;
@@ -338,8 +352,13 @@ public class Player {
         }
 
         double accel = onGround ? 18.0 : 10.5;
-        velocity.x += (wishX * maxSpeed - velocity.x) * Math.min(1.0, accel * dt);
-        velocity.z += (wishZ * maxSpeed - velocity.z) * Math.min(1.0, accel * dt);
+        if (dashTimer > 0.0) {
+            velocity.x = dashDirX * 14.8;
+            velocity.z = dashDirZ * 14.8;
+        } else {
+            velocity.x += (wishX * maxSpeed - velocity.x) * Math.min(1.0, accel * dt);
+            velocity.z += (wishZ * maxSpeed - velocity.z) * Math.min(1.0, accel * dt);
+        }
 
         if (jumpRequested && onGround) {
             velocity.y = JUMP_VELOCITY;
@@ -609,6 +628,48 @@ public class Player {
     public int getShotsFired() { return shotsFired; }
     public int getShotsHit() { return shotsHit; }
     public int getRoundKills() { return roundKills; }
+
+    public int getAirstrikeCharges() { return airstrikeCharges; }
+    public void addAirstrikeCharge(int delta) {
+        airstrikeCharges = Math.max(0, Math.min(4, airstrikeCharges + delta));
+    }
+    public boolean consumeAirstrikeCharge() {
+        if (airstrikeCharges <= 0) return false;
+        airstrikeCharges--;
+        return true;
+    }
+
+    public boolean tryTriggerDash(boolean fwd, boolean back, boolean left, boolean right) {
+        if (!alive || dashCooldown > 0.0) return false;
+        double sinY = Math.sin(yaw);
+        double cosY = Math.cos(yaw);
+        double dx = 0.0, dz = 0.0;
+        if (fwd)   { dx += sinY; dz += cosY; }
+        if (back)  { dx -= sinY; dz -= cosY; }
+        if (right) { dx += cosY; dz -= sinY; }
+        if (left)  { dx -= cosY; dz += sinY; }
+        double len = Math.sqrt(dx * dx + dz * dz);
+        if (len < 1e-4) {
+            dx = sinY;
+            dz = cosY;
+        } else {
+            dx /= len;
+            dz /= len;
+        }
+        this.dashDirX = dx;
+        this.dashDirZ = dz;
+        this.dashTimer = 0.22;
+        this.dashCooldown = 2.6;
+        return true;
+    }
+
+    public double getDashReadyProgress() {
+        return dashCooldown <= 0.0 ? 1.0 : Math.max(0.0, 1.0 - dashCooldown / 2.6);
+    }
+
+    public double getDashFovBoostDegrees() {
+        return dashTimer > 0.0 ? Math.sin((dashTimer / 0.22) * Math.PI) * 6.5 : 0.0;
+    }
 
     private static double clamp(double v, double lo, double hi) {
         return Math.max(lo, Math.min(hi, v));

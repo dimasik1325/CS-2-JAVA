@@ -5,29 +5,33 @@ import java.io.FileOutputStream;
 import java.util.Properties;
 
 /**
- * Центральное хранилище настроек игры CS-2 JAVA 5.0 (Source 2 Smooth HD & Siege Edition):
- * - Нативное HD/FullHD разрешение (до 1920x1080), билинейная фильтрация текстур 256x256 с Mipmap и сглаживание FXAA
- * - 4 арены (Dust II, Mirage, Nuke, Inferno), 5 режимов (включая «Осада: Волны + Вертолёт») и 3D-погода
- * - Потокобезопасное сохранение и загрузка в settings.properties
+ * Центральное хранилище настроек и карьерного прогресса CS-2 JAVA 6.0
+ * (Multi-Core Ultra-Smooth Engine & Panorama UI Edition):
+ * - Нативное 1:1 разрешение под размер окна/монитора (0% пикселизации!), 512x512 Mipmap + Span FXAA
+ * - Многопоточный рендер на всех ядрах процессора + Frustum Culling + Early-Z
+ * - Система званий CS2 (Silver -> Global Elite), XP-прогресс, статистика карьеры
  */
 public class GameSettings {
 
+    public static final int CONFIG_VERSION = 6;
+
     public enum QualityPreset {
-        LOW("Низкое (Быстро)"),
-        MEDIUM("Среднее"),
-        HIGH("Высокое (Native HD)"),
-        ULTRA("Ультра (Full HD + FXAA)");
+        LOW("Низкое (Турбо FPS)"),
+        MEDIUM("Среднее (Плавный HD)"),
+        HIGH("Высокое (Native 1:1 + FXAA)"),
+        ULTRA("Ультра (1:1 FullHD + Все эффекты)");
 
         public final String title;
         QualityPreset(String title) { this.title = title; }
     }
 
     public enum ResolutionScale {
-        LOW_854("854×480 (Макс. FPS)", 854, 480),
-        MED_1024("1024×576 (Плавный HD)", 1024, 576),
-        HIGH_1280("1280×720 (Native HD 720p)", 1280, 720),
-        ULTRA_1600("1600×900 (HD+ Чёткость)", 1600, 900),
-        EXTREME_1920("1920×1080 (Full HD 1080p)", 1920, 1080);
+        LOW_854("960×540 (Турбо FPS)", 960, 540),
+        MED_1024("1152×648 (Быстрый HD)", 1152, 648),
+        HIGH_1280("1280×720 (HD 720p)", 1280, 720),
+        ULTRA_1600("1600×900 (HD+ 900p)", 1600, 900),
+        EXTREME_1920("1920×1080 (Full HD 1080p)", 1920, 1080),
+        NATIVE_WINDOW("Нативное 1:1 (Без пикселей!)", 0, 0);
 
         public final String label;
         public final int width;
@@ -38,12 +42,26 @@ public class GameSettings {
             this.width = width;
             this.height = height;
         }
+
+        public int resolveWidth(int windowW) {
+            if (this == NATIVE_WINDOW) {
+                return Math.max(960, Math.min(1920, windowW));
+            }
+            return width;
+        }
+
+        public int resolveHeight(int windowH) {
+            if (this == NATIVE_WINDOW) {
+                return Math.max(540, Math.min(1080, windowH));
+            }
+            return height;
+        }
     }
 
     public enum ShadowMode {
         OFF("Выкл"),
-        BLOBS("Мягкие под объектами"),
-        SUN_PROJECTED("Реалистичные солнечные");
+        BLOBS("Мягкие контактные"),
+        SUN_PROJECTED("Солнечные 3D-тени");
 
         public final String label;
         ShadowMode(String label) { this.label = label; }
@@ -59,7 +77,7 @@ public class GameSettings {
     }
 
     public enum WeatherMode {
-        CLEAR("Ясно (Без осадков)"),
+        CLEAR("Ясно"),
         RAIN_STORM("Ливень и гроза"),
         SNOW("Снегопад");
 
@@ -88,11 +106,11 @@ public class GameSettings {
     }
 
     public enum CrosshairColor {
-        GREEN("Зеленый CS2", new Color(86, 255, 134)),
-        CYAN("Голубой Pro", new Color(72, 240, 255)),
-        YELLOW("Желтый", new Color(255, 228, 72)),
-        WHITE("Белый", new Color(248, 250, 252)),
-        MAGENTA("Пурпурный", new Color(255, 92, 232));
+        GREEN("Изумрудный CS2", new Color(76, 255, 138)),
+        CYAN("Кибер-Голубой", new Color(64, 240, 255)),
+        YELLOW("Золотой", new Color(255, 226, 68)),
+        WHITE("Кристально-белый", new Color(248, 250, 255)),
+        MAGENTA("Неон-Пурпурный", new Color(255, 88, 232));
 
         public final String label;
         public final Color color;
@@ -103,33 +121,47 @@ public class GameSettings {
     }
 
     public enum MapTheme {
-        DUST_II("Dust II (Пески)"),
-        MIRAGE("Mirage (Дворец)"),
-        NUKE("Nuke (Комплекс)"),
-        INFERNO("Inferno (Старый город)");
+        INFERNO("Inferno", "Старый город • Фонтан", new Color(235, 118, 52)),
+        DUST_II("Dust II", "Песчаный каньон • Мид", new Color(228, 182, 78)),
+        MIRAGE("Mirage", "Королевский дворец", new Color(214, 96, 132)),
+        NUKE("Nuke", "Реакторный комплекс", new Color(66, 178, 245));
 
+        public final String shortName;
+        public final String subtitle;
+        public final Color accent;
         public final String label;
-        MapTheme(String label) { this.label = label; }
+
+        MapTheme(String shortName, String subtitle, Color accent) {
+            this.shortName = shortName;
+            this.subtitle = subtitle;
+            this.accent = accent;
+            this.label = shortName + " (" + subtitle.split(" • ")[0] + ")";
+        }
     }
 
     public enum GameMode {
-        BOMB_DEFUSAL("Операция C4 (Пленты A/B)"),
-        SIEGE_WAVES("Осада (Волны + Вертолёт)"),
-        ARMS_RACE("Гонка вооружений"),
-        ELIMINATION("Классика: Зачистка"),
-        DEATHMATCH("Бой насмерть (DM)");
+        SIEGE_WAVES("Осада: Босс-Вертолёт", "5 волн • Джаггернауты • ПВО"),
+        BOMB_DEFUSAL("Операция C4", "Пленты A/B • Тактика 5v5"),
+        ARMS_RACE("Гонка вооружений", "8 уровней до Золотого Керамбита"),
+        ELIMINATION("Зачистка спецназа", "Командный бой на выбывание"),
+        DEATHMATCH("Бой насмерть", "Мгновенное возрождение • Все пушки");
 
         public final String label;
-        GameMode(String label) { this.label = label; }
+        public final String description;
+
+        GameMode(String label, String description) {
+            this.label = label;
+            this.description = description;
+        }
     }
 
     public enum WeaponSkin {
-        STANDARD("Стандарт (Военный)", 0, 0, 0),
-        ASIIMOV("Asiimov (Азимов)", 0xEEF2F7, 0xFF6B1A, 0x1D222B),
-        GOLD_FADE("Золотой Градиент (Fade)", 0xF4C438, 0xE6397A, 0x622B96),
-        REDLINE("Redline (Карбон)", 0x1B1F26, 0xE82C3C, 0x343B46),
-        PRINTSTREAM("Printstream (Кибер-Неон)", 0xE8EEF6, 0x2CE8FF, 0x1C2536),
-        HYPER_BEAST("Неоновый Зверь", 0x202A68, 0xFF3E8E, 0x2EFFB4);
+        STANDARD("Военный Стандарт", 0, 0, 0),
+        ASIIMOV("Asiimov (Азимов)", 0xF0F4F8, 0xFF6B1A, 0x1B2029),
+        GOLD_FADE("Золотой Градиент (Fade)", 0xF6C63C, 0xE8387C, 0x662C9A),
+        REDLINE("Redline (Карбон)", 0x1A1E26, 0xEC2B3D, 0x343C48),
+        PRINTSTREAM("Printstream (Перламутр)", 0xECF2FA, 0x32EAFF, 0x1A2334),
+        HYPER_BEAST("Неоновый Зверь", 0x1E2968, 0xFF3C8E, 0x2EFFB4);
 
         public final String label;
         public final int primary;
@@ -144,20 +176,47 @@ public class GameSettings {
         }
     }
 
+    private static final String[] RANK_NAMES = {
+        "Silver I (Серебро)",
+        "Silver Elite",
+        "Gold Nova I",
+        "Gold Nova Master",
+        "Master Guardian",
+        "Master Guardian Elite",
+        "Distinguished MG",
+        "Legendary Eagle (Беркут)",
+        "Supreme Master",
+        "★ THE GLOBAL ELITE ★"
+    };
+
+    private static final Color[] RANK_COLORS = {
+        new Color(168, 178, 192),
+        new Color(192, 204, 218),
+        new Color(242, 198, 72),
+        new Color(255, 214, 64),
+        new Color(74, 196, 255),
+        new Color(58, 162, 255),
+        new Color(158, 112, 255),
+        new Color(238, 134, 56),
+        new Color(248, 76, 96),
+        new Color(255, 215, 58)
+    };
+
     private static final String SETTINGS_FILE = "settings.properties";
 
-    // --- НАСТРОЙКИ ГЛАДКОЙ HD-ГРАФИКИ (БЕЗ ПИКСЕЛИЗАЦИИ!) ---
+    // --- НАСТРОЙКИ ГЛАДКОЙ НЕПИКСЕЛЬНОЙ HD-ГРАФИКИ И МНОГОЯДЕРНОЙ ОПТИМИЗАЦИИ ---
     public QualityPreset qualityPreset = QualityPreset.HIGH;
-    public ResolutionScale resolutionScale = ResolutionScale.HIGH_1280;
+    public ResolutionScale resolutionScale = ResolutionScale.NATIVE_WINDOW;
     public ShadowMode shadowMode = ShadowMode.SUN_PROJECTED;
     public boolean bilinearFiltering = true;
     public boolean smoothTextures = true;
     public boolean fxaaAntiAliasing = true;
+    public boolean multiCoreRendering = true;
     public boolean skyCloudsAndSunFlare = true;
     public boolean decalsAndShells = true;
     public boolean fogAndVignette = true;
-    public int fovDegrees = 68;         // Вертикальный FOV (55..84)
-    public int fpsLimit = 60;           // 60, 120 или 0 (без лимита)
+    public int fovDegrees = 70;         // Вертикальный FOV (56..86)
+    public int fpsLimit = 120;          // 60, 120, 240 или 0 (без лимита)
     public boolean showFpsTelemetry = true;
     public boolean fullscreen = false;
     public TimeOfDay timeOfDay = TimeOfDay.DAY;
@@ -171,17 +230,23 @@ public class GameSettings {
     public boolean leftHandedModel = false;
     public boolean showDamageNumbers = true;
 
-    // --- ПАРАМЕТРЫ МАТЧА И АРСЕНАЛА ---
+    // --- ПАРАМЕТРЫ МАТЧА ---
     public MapTheme mapTheme = MapTheme.INFERNO;
-    public GameMode gameMode = GameMode.BOMB_DEFUSAL;
-    public WeaponSkin weaponSkin = WeaponSkin.STANDARD;
+    public GameMode gameMode = GameMode.SIEGE_WAVES;
+    public WeaponSkin weaponSkin = WeaponSkin.ASIIMOV;
     public BotDifficulty botDifficulty = BotDifficulty.NORMAL;
     public int botCount = 5;
     public int allyCount = 2;
     public int roundsToWin = 5;
 
+    // --- КАРЬЕРА И РАНГ ИГРОКА CS2 ---
+    public int careerXp = 220;
+    public int careerKills = 0;
+    public int careerHeadshots = 0;
+    public int careerWins = 0;
+
     // --- НАСТРОЙКИ АУДИО ---
-    public double masterVolume = 0.85;  // 0.0 .. 1.0
+    public double masterVolume = 0.85;
     public boolean footstepSounds = true;
 
     private final Object saveLock = new Object();
@@ -191,6 +256,36 @@ public class GameSettings {
         load();
     }
 
+    public int getRankIndex() {
+        return Math.max(0, Math.min(RANK_NAMES.length - 1, careerXp / 400));
+    }
+
+    public String getRankTitle() {
+        return RANK_NAMES[getRankIndex()];
+    }
+
+    public Color getRankColor() {
+        return RANK_COLORS[getRankIndex()];
+    }
+
+    public double getRankProgress() {
+        if (getRankIndex() >= RANK_NAMES.length - 1) return 1.0;
+        return (careerXp % 400) / 400.0;
+    }
+
+    /**
+     * Начисляет карьерный опыт и возвращает true, если игрок повысил своё звание CS2!
+     */
+    public boolean addCareerXp(int xpDelta, boolean kill, boolean headshot, boolean matchWin) {
+        int oldRank = getRankIndex();
+        careerXp = Math.max(0, careerXp + xpDelta);
+        if (kill) careerKills++;
+        if (headshot) careerHeadshots++;
+        if (matchWin) careerWins++;
+        save();
+        return getRankIndex() > oldRank;
+    }
+
     public void applyGraphicsPreset(QualityPreset preset) {
         this.qualityPreset = preset;
         switch (preset) {
@@ -198,28 +293,31 @@ public class GameSettings {
                 resolutionScale = ResolutionScale.LOW_854;
                 shadowMode = ShadowMode.OFF;
                 bilinearFiltering = true;
-                smoothTextures = false;
+                smoothTextures = true;
                 fxaaAntiAliasing = false;
+                multiCoreRendering = true;
                 skyCloudsAndSunFlare = false;
                 decalsAndShells = false;
                 fogAndVignette = false;
                 break;
             case MEDIUM:
-                resolutionScale = ResolutionScale.MED_1024;
+                resolutionScale = ResolutionScale.HIGH_1280;
                 shadowMode = ShadowMode.BLOBS;
                 bilinearFiltering = true;
                 smoothTextures = true;
-                fxaaAntiAliasing = false;
+                fxaaAntiAliasing = true;
+                multiCoreRendering = true;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
                 fogAndVignette = true;
                 break;
             case HIGH:
-                resolutionScale = ResolutionScale.HIGH_1280;
+                resolutionScale = ResolutionScale.NATIVE_WINDOW;
                 shadowMode = ShadowMode.SUN_PROJECTED;
                 bilinearFiltering = true;
                 smoothTextures = true;
                 fxaaAntiAliasing = true;
+                multiCoreRendering = true;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
                 fogAndVignette = true;
@@ -230,6 +328,7 @@ public class GameSettings {
                 bilinearFiltering = true;
                 smoothTextures = true;
                 fxaaAntiAliasing = true;
+                multiCoreRendering = true;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
                 fogAndVignette = true;
@@ -243,20 +342,33 @@ public class GameSettings {
         Properties p = new Properties();
         try (FileInputStream fis = new FileInputStream(file)) {
             p.load(fis);
+            int ver = clampInt(p.getProperty("configVersion"), 1, 99, 1);
+
             qualityPreset = parseEnum(p.getProperty("qualityPreset"), QualityPreset.class, qualityPreset);
             resolutionScale = parseEnum(p.getProperty("resolutionScale"), ResolutionScale.class, resolutionScale);
             shadowMode = parseEnum(p.getProperty("shadowMode"), ShadowMode.class, shadowMode);
             bilinearFiltering = Boolean.parseBoolean(p.getProperty("bilinearFiltering", String.valueOf(bilinearFiltering)));
             smoothTextures = Boolean.parseBoolean(p.getProperty("smoothTextures", String.valueOf(smoothTextures)));
             fxaaAntiAliasing = Boolean.parseBoolean(p.getProperty("fxaaAntiAliasing", String.valueOf(fxaaAntiAliasing)));
+            multiCoreRendering = Boolean.parseBoolean(p.getProperty("multiCoreRendering", String.valueOf(multiCoreRendering)));
             skyCloudsAndSunFlare = Boolean.parseBoolean(p.getProperty("skyCloudsAndSunFlare", String.valueOf(skyCloudsAndSunFlare)));
             decalsAndShells = Boolean.parseBoolean(p.getProperty("decalsAndShells", String.valueOf(decalsAndShells)));
             fogAndVignette = Boolean.parseBoolean(p.getProperty("fogAndVignette", String.valueOf(fogAndVignette)));
-            fovDegrees = clampInt(p.getProperty("fovDegrees"), 55, 84, fovDegrees);
+            fovDegrees = clampInt(p.getProperty("fovDegrees"), 55, 86, fovDegrees);
             fpsLimit = clampInt(p.getProperty("fpsLimit"), 0, 240, fpsLimit);
             showFpsTelemetry = Boolean.parseBoolean(p.getProperty("showFpsTelemetry", String.valueOf(showFpsTelemetry)));
             timeOfDay = parseEnum(p.getProperty("timeOfDay"), TimeOfDay.class, timeOfDay);
             weatherMode = parseEnum(p.getProperty("weatherMode"), WeatherMode.class, weatherMode);
+
+            // Автоматическая миграция старых конфигураций v1..v5 на 100% гладкий непиксельный рендер v6.0!
+            if (ver < CONFIG_VERSION) {
+                resolutionScale = ResolutionScale.NATIVE_WINDOW;
+                bilinearFiltering = true;
+                smoothTextures = true;
+                fxaaAntiAliasing = true;
+                multiCoreRendering = true;
+                if (fpsLimit == 60) fpsLimit = 120;
+            }
 
             mouseSensitivity = clampDouble(p.getProperty("mouseSensitivity"), 0.0005, 0.0080, mouseSensitivity);
             invertMouseY = Boolean.parseBoolean(p.getProperty("invertMouseY", String.valueOf(invertMouseY)));
@@ -273,6 +385,11 @@ public class GameSettings {
             allyCount = clampInt(p.getProperty("allyCount"), 0, 4, allyCount);
             roundsToWin = clampInt(p.getProperty("roundsToWin"), 2, 10, roundsToWin);
 
+            careerXp = clampInt(p.getProperty("careerXp"), 0, 999999, careerXp);
+            careerKills = clampInt(p.getProperty("careerKills"), 0, 999999, careerKills);
+            careerHeadshots = clampInt(p.getProperty("careerHeadshots"), 0, 999999, careerHeadshots);
+            careerWins = clampInt(p.getProperty("careerWins"), 0, 999999, careerWins);
+
             masterVolume = clampDouble(p.getProperty("masterVolume"), 0.0, 1.0, masterVolume);
             footstepSounds = Boolean.parseBoolean(p.getProperty("footstepSounds", String.valueOf(footstepSounds)));
         } catch (Throwable ignored) {
@@ -287,7 +404,7 @@ public class GameSettings {
                 if (!savePending) return;
                 savePending = false;
                 try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                    snapshot.store(fos, "CS-2 JAVA 5.0 Configuration");
+                    snapshot.store(fos, "CS-2 JAVA 6.0 Ultra-Smooth Panorama Configuration");
                 } catch (Throwable ignored) {
                 }
             }
@@ -301,7 +418,7 @@ public class GameSettings {
         synchronized (saveLock) {
             savePending = false;
             try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                snapshot.store(fos, "CS-2 JAVA 5.0 Configuration");
+                snapshot.store(fos, "CS-2 JAVA 6.0 Ultra-Smooth Panorama Configuration");
             } catch (Throwable ignored) {
             }
         }
@@ -309,12 +426,14 @@ public class GameSettings {
 
     private Properties buildPropertiesSnapshot() {
         Properties p = new Properties();
+        p.setProperty("configVersion", String.valueOf(CONFIG_VERSION));
         p.setProperty("qualityPreset", qualityPreset.name());
         p.setProperty("resolutionScale", resolutionScale.name());
         p.setProperty("shadowMode", shadowMode.name());
         p.setProperty("bilinearFiltering", String.valueOf(bilinearFiltering));
         p.setProperty("smoothTextures", String.valueOf(smoothTextures));
         p.setProperty("fxaaAntiAliasing", String.valueOf(fxaaAntiAliasing));
+        p.setProperty("multiCoreRendering", String.valueOf(multiCoreRendering));
         p.setProperty("skyCloudsAndSunFlare", String.valueOf(skyCloudsAndSunFlare));
         p.setProperty("decalsAndShells", String.valueOf(decalsAndShells));
         p.setProperty("fogAndVignette", String.valueOf(fogAndVignette));
@@ -338,6 +457,11 @@ public class GameSettings {
         p.setProperty("botCount", String.valueOf(botCount));
         p.setProperty("allyCount", String.valueOf(allyCount));
         p.setProperty("roundsToWin", String.valueOf(roundsToWin));
+
+        p.setProperty("careerXp", String.valueOf(careerXp));
+        p.setProperty("careerKills", String.valueOf(careerKills));
+        p.setProperty("careerHeadshots", String.valueOf(careerHeadshots));
+        p.setProperty("careerWins", String.valueOf(careerWins));
 
         p.setProperty("masterVolume", String.valueOf(masterVolume));
         p.setProperty("footstepSounds", String.valueOf(footstepSounds));

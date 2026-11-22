@@ -622,10 +622,13 @@ public class Map {
         return supportY;
     }
 
-    public void renderFloorAndShadows(Renderer3D renderer, GameSettings.ShadowMode shadowMode, List<Bot> bots) {
-        renderer.drawFloorGrid(MIN_X, MAX_X, MIN_Z, MAX_Z, 4.0, floorTexId, 0.42);
-        renderer.drawFloorZoneQuad(-21.6, 0.004, 12.2, -14.8, 18.8, Renderer3D.TEX_BOMBSITE, 0xFFFFFF);
+    public void renderFloorOnly(Renderer3D renderer) {
+        renderer.drawFloorGrid(MIN_X, MAX_X, MIN_Z, MAX_Z, 7.0, floorTexId, 0.26);
+        renderer.drawFloorZoneQuad(-21.6, 0.005, 12.2, -14.8, 18.8, Renderer3D.TEX_BOMBSITE, 0xFFFFFF);
+        renderer.drawFloorZoneQuad(14.8, siteAFloorY + 0.005, 13.5, 22.0, 19.8, Renderer3D.TEX_BOMBSITE, 0xFFFFFF);
+    }
 
+    public void renderShadowsOnly(Renderer3D renderer, GameSettings.ShadowMode shadowMode, List<Bot> bots) {
         if (shadowMode == GameSettings.ShadowMode.SUN_PROJECTED) {
             for (int i = 0; i < boxes.size(); i++) {
                 renderer.drawBoxSunShadow(boxes.get(i), MIN_X, MAX_X, MIN_Z, MAX_Z);
@@ -654,6 +657,11 @@ public class Map {
         }
     }
 
+    public void renderFloorAndShadows(Renderer3D renderer, GameSettings.ShadowMode shadowMode, List<Bot> bots) {
+        renderFloorOnly(renderer);
+        renderShadowsOnly(renderer, shadowMode, bots);
+    }
+
     public void renderStructures(Renderer3D renderer) {
         for (int i = 0; i < boxes.size(); i++) {
             Vec3.Box b = boxes.get(i);
@@ -669,7 +677,6 @@ public class Map {
             SmoothEllipsoidProp e = smoothEllipsoids.get(i);
             renderer.drawWorldEllipsoid(e.cx, e.cy, e.cz, e.rx, e.ry, e.rz, e.segments, e.rings, e.color);
         }
-        renderer.drawFloorZoneQuad(14.8, siteAFloorY + 0.004, 13.5, 22.0, 19.8, Renderer3D.TEX_BOMBSITE, 0xFFFFFF);
     }
 
     /**

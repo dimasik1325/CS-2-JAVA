@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "================================================================"
-echo "  CS-2 JAVA 5.0 : Smooth HD • Inferno • Siege Bosses Edition"
+echo "  CS-2 JAVA 6.0 : Panorama UI • 1:1 Ultra Smooth • Multi-Core"
 echo "================================================================"
 
 if ! command -v javac >/dev/null 2>&1; then

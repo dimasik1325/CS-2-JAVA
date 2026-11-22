@@ -1,12 +1,12 @@
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
-title CS-2 JAVA 5.0 — Smooth HD & Siege Edition
+title CS-2 JAVA 6.0 — Panorama UI & Ultra-Smooth Multi-Core Edition
 
 cd /d "%~dp0"
 
 echo ================================================================
-echo   CS-2 JAVA 5.0 : Smooth HD • Inferno • Siege Bosses Edition
+echo   CS-2 JAVA 6.0 : Panorama UI • 1:1 Ultra Smooth • Multi-Core
 echo ================================================================
 echo.
 

@@ -687,11 +687,14 @@ public class Bot {
     }
 
     public void render(Renderer3D r) {
+        double s = getModelScale();
+        if (!r.isSphereVisible(position.x, position.y + 0.90 * s, position.z, 1.55 * s)) {
+            return;
+        }
         boolean flashing = hitFlashTimer > 0.0 && alive;
         boolean ct = (team == Team.COUNTER_TERRORIST);
         boolean jug = (archetype == Archetype.JUGGERNAUT);
         boolean sniper = (archetype == Archetype.SNIPER);
-        double s = getModelScale();
 
         int pantsColor = flashing ? 0xFF5555 : (jug ? 0x1F242C : (ct ? 0x223650 : 0x3D4652));
         int bootsColor = flashing ? 0xFF4444 : 0x181C22;

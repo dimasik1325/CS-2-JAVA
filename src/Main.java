@@ -18,9 +18,9 @@ import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
 /**
- * Точка входа в игру CS-2 JAVA 5.0 (Source 2 Smooth HD & Siege Bosses Edition).
+ * Точка входа в игру CS-2 JAVA 6.0 (Panorama UI • Ultra Smooth 1:1 HD • Multi-Core Edition).
  * Управляет окном JFrame, безрамочным полноэкранным режимом F11 / Alt+Enter (без чёрного экрана!)
- * и запуском гладкого непиксельного 3D-движка Engine.
+ * и запуском многопоточного ультра-гладкого 3D-движка Engine.
  */
 public class Main {
 
@@ -40,7 +40,7 @@ public class Main {
         }
 
         SwingUtilities.invokeLater(() -> {
-            final JFrame frame = new JFrame("CS-2 JAVA 5.0 | Smooth HD • Inferno • Siege Bosses Edition");
+            final JFrame frame = new JFrame("CS-2 JAVA 6.0 | Panorama UI • Ultra Smooth 1:1 HD • Multi-Core");
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
             frame.getContentPane().setBackground(new Color(10, 14, 22));
@@ -156,34 +156,40 @@ public class Main {
             Engine engine = new Engine(true);
             Player player = engine.getPlayer();
 
-            // Гарантируем максимальную гладкость без пикселизации
-            engine.getSettings().resolutionScale = GameSettings.ResolutionScale.HIGH_1280;
+            // Гарантируем максимальную гладкость 1:1 без пикселизации и многопоточный рендер 6.0
+            engine.getSettings().resolutionScale = GameSettings.ResolutionScale.NATIVE_WINDOW;
+            engine.getSettings().multiCoreRendering = true;
             engine.getSettings().smoothTextures = true;
             engine.getSettings().fxaaAntiAliasing = true;
             engine.getSettings().bilinearFiltering = true;
             engine.getSettings().weatherMode = GameSettings.WeatherMode.CLEAR;
 
-            // 1. Главное меню 5.0 на карте INFERNO (Фонтан, Колокольня, Кипарисы + Боевой Вертолёт Осады!)
+            // 1. Главное меню Panorama Glass 6.0 (3D-Оперативник SAS CT + Звание CS2 + 4 карточки карт!)
             engine.getSettings().mapTheme = GameSettings.MapTheme.INFERNO;
             engine.getSettings().gameMode = GameSettings.GameMode.SIEGE_WAVES;
+            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.PRINTSTREAM;
             engine.startNewMatch();
             engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
             for (int i = 0; i < 30; i++) {
                 engine.updateGame(1.0 / 60.0);
             }
-            saveTestScreenshot(engine, new File(dir, "01_main_menu_inferno_v5.png"));
+            saveTestScreenshot(engine, new File(dir, "01_main_menu_panorama_v6.png"));
 
-            // 2. Эпичный бой в режиме «Осада»: Босс-Вертолёт в небе, Джаггернаут у Фонтана, Авто-Турель [J] и RPG-7 в руках!
+            // 2. Боевой HUD Panorama 6.0 + Изогнутый Керамбит (Gold Fade) + Маяк Авиаудара [U] + Авто-Турель [J] + Босс!
             engine.launchMatchFromMenu();
             player.addMoney(9000);
-            player.equipPurchasedWeapon(Weapon.Type.RPG7);
-            for (int i = 0; i < 18; i++) engine.updateGame(1.0 / 60.0);
+            player.addAirstrikeCharge(2);
+            player.selectWeaponSlot(2); // Керамбит!
+            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.GOLD_FADE;
+            player.getCurrentWeapon().triggerInspect();
+            for (int i = 0; i < 16; i++) engine.updateGame(1.0 / 60.0);
             player.getPosition().set(-3.2, 0.0, -13.0);
-            player.setAngles(0.22, 0.24);
+            player.setAngles(0.22, -0.06);
             engine.tryDeploySentryTurret();
+            engine.tryCallPrecisionAirstrike();
             engine.trySummonHelicopterChallenge();
-            for (int i = 0; i < 14; i++) engine.updateGame(1.0 / 60.0);
-            // Размещаем Джаггернаута на фоне каменного Фонтана Inferno
+            player.tryTriggerDash(true, false, false, false);
+            for (int i = 0; i < 10; i++) engine.updateGame(1.0 / 60.0);
             for (Bot b : engine.getBots()) {
                 if (!b.isAlly()) {
                     b.setArchetype(Bot.Archetype.JUGGERNAUT);
@@ -191,42 +197,30 @@ public class Main {
                     break;
                 }
             }
-            player.setAngles(0.26, 0.22);
-            saveTestScreenshot(engine, new File(dir, "02_inferno_siege_helicopter_rpg_turret.png"));
+            player.setAngles(0.24, 0.16);
+            saveTestScreenshot(engine, new File(dir, "02_inferno_hud_karambit_airstrike_v6.png"));
 
-            // Выстрел ракетой RPG-7 по области и проверка нанесения урона вертолёту/ботам
-            engine.tryFireCurrentWeapon(false);
-            for (int i = 0; i < 35; i++) engine.updateGame(1.0 / 60.0);
+            // 3. Новый 3-колоночный Магазин CS2 Panorama [B]
+            engine.setBuyMenuOpen(true);
+            saveTestScreenshot(engine, new File(dir, "03_buy_menu_3col_panorama_v6.png"));
+            engine.setBuyMenuOpen(false);
 
-            // 3. Проверка идеальной гладкости ВБЛИЗИ (50 см от стен, брусчатки, воды фонтана и круглого глушителя M4A1-S!)
+            // 4. Проверка 0% пикселизации ВПЛОТНУЮ (45 см от стены, каменного фонтана и глушителя M4A1-S Printstream!)
             player.equipPurchasedWeapon(Weapon.Type.M4A1S);
             engine.getSettings().weaponSkin = GameSettings.WeaponSkin.PRINTSTREAM;
             for (int i = 0; i < 18; i++) engine.updateGame(1.0 / 60.0);
-            player.getPosition().set(-2.6, 0.0, -7.6);
+            player.getPosition().set(-2.5, 0.0, -7.5);
             player.setAngles(0.55, -0.10);
-            saveTestScreenshot(engine, new File(dir, "03_closeup_smooth_hd_no_pixelation.png"));
+            saveTestScreenshot(engine, new File(dir, "04_closeup_zero_pixels_v6.png"));
 
-            // 4. Карта NUKE (круглый бетонный градирный цилиндр АЭС во дворе под открытым небом) + Ливень и гроза + пулемёт M249!
-            engine.getSettings().mapTheme = GameSettings.MapTheme.NUKE;
-            engine.getSettings().gameMode = GameSettings.GameMode.BOMB_DEFUSAL;
-            engine.getSettings().weatherMode = GameSettings.WeatherMode.RAIN_STORM;
-            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.ASIIMOV;
-            engine.launchMatchFromMenu();
-            player.addMoney(9000);
-            player.equipPurchasedWeapon(Weapon.Type.M249);
-            for (int i = 0; i < 18; i++) engine.updateGame(1.0 / 60.0);
-            player.getPosition().set(-6.5, 0.0, 2.5);
-            Vec3 toTower = new Vec3(-19.5, 4.5, 19.0).sub(player.getEyePosition()).normalize();
-            player.setAngles(Math.atan2(toTower.x, toTower.z), Math.asin(toTower.y));
-            saveTestScreenshot(engine, new File(dir, "04_nuke_rain_m249_smooth_silo.png"));
-
-            // 5. 3D Оружейная скинов с 11 пушками и гладкими цилиндрами Гуро
+            // 5. 3D Оружейная скинов 6.0 со шкалами ТТХ
             engine.getSettings().weatherMode = GameSettings.WeatherMode.CLEAR;
             engine.getSettings().mapTheme = GameSettings.MapTheme.MIRAGE;
+            engine.getSettings().weaponSkin = GameSettings.WeaponSkin.ASIIMOV;
             engine.startNewMatch();
             engine.setCurrentScreen(Engine.AppScreen.SKIN_ARMORY);
             for (int i = 0; i < 16; i++) engine.updateGame(1.0 / 60.0);
-            saveTestScreenshot(engine, new File(dir, "05_armory_11_weapons_smooth.png"));
+            saveTestScreenshot(engine, new File(dir, "05_armory_showcase_v6.png"));
 
             // Проверка механики Wallbang на Dust II
             engine.getSettings().mapTheme = GameSettings.MapTheme.DUST_II;
@@ -240,6 +234,9 @@ public class Main {
                 if (!b.isAlly()) { wbTarget = b; break; }
             }
             if (wbTarget != null) {
+                for (Bot b : engine.getBots()) {
+                    if (b != wbTarget) b.getPosition().set(14.0, 0.0, 14.0);
+                }
                 player.getPosition().set(-1.5, 0.0, -3.5);
                 wbTarget.getPosition().set(-1.5, 0.0, 2.8);
                 int hpBefore = wbTarget.getHealth();
@@ -300,20 +297,24 @@ public class Main {
             }
             engine.stop();
             engine.flushPendingInputTasks();
-            engine.getSettings().fpsLimit = 60;
+            engine.getSettings().fpsLimit = 120;
 
             if (registeredClicks != 1000) {
                 throw new IllegalStateException("Lost UI clicks under load! Registered " + registeredClicks + "/1000");
             }
 
-            // Возвращаем дефолтную чистую конфигурацию для игрока
+            // Возвращаем дефолтную чистую конфигурацию 6.0 для игрока
+            engine.getSettings().resolutionScale = GameSettings.ResolutionScale.NATIVE_WINDOW;
+            engine.getSettings().multiCoreRendering = true;
             engine.getSettings().mapTheme = GameSettings.MapTheme.INFERNO;
             engine.getSettings().gameMode = GameSettings.GameMode.SIEGE_WAVES;
+            engine.getSettings().botDifficulty = GameSettings.BotDifficulty.NORMAL;
+            engine.getSettings().timeOfDay = GameSettings.TimeOfDay.DAY;
             engine.getSettings().weaponSkin = GameSettings.WeaponSkin.STANDARD;
             engine.getSettings().weatherMode = GameSettings.WeatherMode.CLEAR;
             engine.getSettings().saveSync();
 
-            System.out.printf("CS-2 JAVA 5.0 SMOOTH HD SELF-TEST PASSED! %d Native-720p FXAA frames in %d ms (%.1f FPS avg), %d/1000 async clicks hit (100%%)%n",
+            System.out.printf("CS-2 JAVA 6.0 ULTRA-SMOOTH MULTI-CORE SELF-TEST PASSED! %d Native-720p FXAA-3.11 frames in %d ms (%.1f FPS avg), %d/1000 async clicks hit (100%%)%n",
                     benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs), registeredClicks);
         } catch (Exception ex) {
             ex.printStackTrace();

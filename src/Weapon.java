@@ -291,7 +291,7 @@ public class Weapon {
 
             case KNIFE:
             default:
-                this.displayName = "Боевой нож";
+                this.displayName = "Керамбит";
                 this.slotNumber = 3;
                 this.price = 0;
                 this.killReward = 1500;
@@ -844,30 +844,33 @@ public class Weapon {
         double inspectSpin = 0.0;
         if (inspectTimer > 0.0) {
             double p = 1.0 - inspectTimer / INSPECT_DURATION;
-            inspectSpin = Math.sin(p * Math.PI * 2.0) * 1.4;
+            inspectSpin = p * Math.PI * 4.0; // Эффектное 2-кратное вращение Керамбита на пальце [F]!
         }
 
         double kx = ox - 0.02 - swing * (heavySlash ? 0.11 : 0.19);
         double ky = oy - 0.01 + swing * 0.06;
-        double kz = oz - 0.09 + swing * (heavySlash ? 0.22 : 0.13);
+        double kz = oz - 0.08 + swing * (heavySlash ? 0.22 : 0.13);
 
-        double rotX = drawHands ? (-0.35 + swing * 0.58 + inspectSpin * 0.6) : overrideRotX;
-        double rotY = drawHands ? (-0.25 - swing * (heavySlash ? 0.35 : 0.85) + inspectSpin * 0.35) : overrideRotY;
-        double rotZ = drawHands ? (0.18 + swing * 0.45) : overrideRotZ;
+        double rotX = drawHands ? (-0.30 + swing * 0.62 + inspectSpin) : overrideRotX;
+        double rotY = drawHands ? (-0.24 - swing * (heavySlash ? 0.35 : 0.85)) : overrideRotY;
+        double rotZ = drawHands ? (0.16 + swing * 0.45) : overrideRotZ;
 
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
-        int handle = custom ? skin.trim : 0x23272E;
-        int guard = 0xD4AF37;
-        int bladeSteel = custom ? skin.primary : 0xC0CCD8;
-        int bladeEdge = custom ? skin.accent : 0xF2F8FF;
+        int handle = custom ? skin.trim : 0x1D222B;
+        int ringGold = 0xF0C244;
+        int bladeSteel = custom ? skin.primary : 0xD2DCE8;
+        int bladeEdge = custom ? skin.accent : 0xFF467E;
 
-        if (drawHands) drawSmoothSleeveAndGlove(r, kx + 0.03, ky + 0.01, kz, 0.00, rotX, rotY, rotZ);
-        r.drawViewModelCylinder(kx, ky + 0.002, kz + 0.01, 0.016, 0.017, 0.11, rotX, rotY, rotZ, kx, ky, kz, 10, handle);
-        r.drawViewModelBox(kx, ky + 0.005, kz + 0.07, 0.048, 0.062, 0.016, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, guard);
-        r.drawViewModelBox(kx, ky + 0.012, kz + 0.170, 0.010, 0.034, 0.185, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
-        r.drawViewModelBox(kx, ky - 0.005, kz + 0.172, 0.006, 0.011, 0.190, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
-        r.drawViewModelBox(kx, ky + 0.006, kz + 0.276, 0.007, 0.021, 0.042, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
-        r.drawViewModelBox(kx, ky + 0.002, kz + 0.304, 0.005, 0.011, 0.026, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
+        if (drawHands) drawSmoothSleeveAndGlove(r, kx + 0.03, ky + 0.01, kz, 0.00, -0.28 + swing * 0.45, rotY, rotZ);
+        // Кольцо Керамбита под указательный палец
+        r.drawViewModelCylinder(kx, ky - 0.024, kz - 0.032, 0.022, 0.022, 0.012, rotX + 1.57, rotY, rotZ, kx, ky, kz, 14, ringGold);
+        // Анатомическая рукоять Керамбита
+        r.drawViewModelCylinder(kx, ky - 0.004, kz + 0.025, 0.015, 0.018, 0.105, rotX - 0.12, rotY, rotZ, kx, ky, kz, 12, handle);
+        // Изогнутый когтеобразный клинок Керамбита из 4 плавных сегментов!
+        r.drawViewModelBox(kx, ky + 0.014, kz + 0.105, 0.009, 0.032, 0.078, rotX + 0.10, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
+        r.drawViewModelBox(kx, ky + 0.028, kz + 0.168, 0.008, 0.028, 0.072, rotX + 0.34, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
+        r.drawViewModelBox(kx, ky + 0.052, kz + 0.218, 0.007, 0.022, 0.062, rotX + 0.62, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
+        r.drawViewModelBox(kx, ky + 0.082, kz + 0.252, 0.005, 0.013, 0.044, rotX + 0.90, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
     }
 
     private void renderMuzzleFlash3D(Renderer3D r, double fx, double fy, double fz, double span) {
