@@ -1,8 +1,9 @@
 /**
- * Расширенный арсенал оружия CS-2 JAVA 3.0 (8 видов оружия + поддержка скинов CS2):
- * Слот 1 (Основное): AK-47, M4A1-S (глушитель), AWP (прицел ПКМ), Дробовик XM1014, ПП MP9
- * Слот 2 (Пистолеты): Glock-18, Desert Eagle (крупнокалиберный хром)
- * Слот 3 (Ближний бой): Боевой нож (быстрый удар ЛКМ, выпад ПКМ, осмотр на F, скины Fade/Asiimov)
+ * Расширенный арсенал оружия CS-2 JAVA 5.0 (11 видов 3D-оружия с гладкими круглыми стволами, оптикой и скинами):
+ * Слот 1 (Основное и Тяжёлое): AK-47, M4A1-S, AWP, Пулемёт M249 (100 патр.), Гранатомёт RPG-7 (3D-ракеты!), XM1014, MP9
+ * Слот 2 (Пистолеты): Glock-18, Desert Eagle
+ * Слот 3 (Ближний бой): Боевой нож
+ * Слот 4 (Спецсредство): Электрошокер Zeus x27
  */
 public class Weapon {
 
@@ -10,6 +11,8 @@ public class Weapon {
         AK47,
         M4A1S,
         AWP,
+        M249,
+        RPG7,
         XM1014,
         MP9,
         GLOCK,
@@ -19,8 +22,8 @@ public class Weapon {
     }
 
     public static final Type[] ARMS_RACE_LADDER = {
-        Type.MP9, Type.XM1014, Type.M4A1S, Type.AK47,
-        Type.AWP, Type.DEAGLE, Type.GLOCK, Type.KNIFE
+        Type.MP9, Type.XM1014, Type.M249, Type.M4A1S, Type.AK47,
+        Type.AWP, Type.RPG7, Type.DEAGLE, Type.KNIFE
     };
 
     private final Type type;
@@ -130,6 +133,50 @@ public class Weapon {
                 this.baseSpread = 0.038;
                 this.recoilPerShot = 0.035;
                 this.moveSpeedMultiplier = 0.82;
+                break;
+
+            case M249:
+                this.displayName = "M249 Para";
+                this.slotNumber = 1;
+                this.price = 5200;
+                this.killReward = 300;
+                this.automatic = true;
+                this.melee = false;
+                this.silenced = false;
+                this.sniperScope = false;
+                this.pelletsPerShot = 1;
+                this.maxMagAmmo = 100;
+                this.initialReserveAmmo = 200;
+                this.fireInterval = 0.078;
+                this.reloadDuration = 3.60;
+                this.bodyDamage = 35;
+                this.headDamage = 108;
+                this.maxRange = 125.0;
+                this.baseSpread = 0.0085;
+                this.recoilPerShot = 0.0095;
+                this.moveSpeedMultiplier = 0.84;
+                break;
+
+            case RPG7:
+                this.displayName = "RPG-7";
+                this.slotNumber = 1;
+                this.price = 4500;
+                this.killReward = 300;
+                this.automatic = false;
+                this.melee = false;
+                this.silenced = false;
+                this.sniperScope = false;
+                this.pelletsPerShot = 1;
+                this.maxMagAmmo = 1;
+                this.initialReserveAmmo = 5;
+                this.fireInterval = 1.10;
+                this.reloadDuration = 2.45;
+                this.bodyDamage = 260;
+                this.headDamage = 320;
+                this.maxRange = 160.0;
+                this.baseSpread = 0.0025;
+                this.recoilPerShot = 0.032;
+                this.moveSpeedMultiplier = 0.85;
                 break;
 
             case XM1014:
@@ -338,9 +385,12 @@ public class Weapon {
         if (equipProgress < 1.0) equipProgress = Math.min(1.0, equipProgress + dt * 4.8);
 
         recoilBloom = Math.max(0.0, recoilBloom - dt * 0.058);
-        recoilKick = Math.max(0.0, recoilKick - dt * (type == Type.AWP ? 3.5 : 6.5));
+        recoilKick = Math.max(0.0, recoilKick - dt * (type == Type.AWP || type == Type.RPG7 ? 3.5 : 6.5));
 
         if (type == Type.ZEUS && magAmmo == 0 && !reloading) {
+            reloading = true;
+            reloadTimer = reloadDuration;
+        } else if (type == Type.RPG7 && magAmmo == 0 && reserveAmmo > 0 && !reloading && fireCooldown <= 0.2) {
             reloading = true;
             reloadTimer = reloadDuration;
         }
@@ -392,7 +442,7 @@ public class Weapon {
             magAmmo = Math.max(0, magAmmo - 1);
             recoilBloom = Math.min(0.075, recoilBloom + recoilPerShot);
             recoilKick = 1.0;
-            muzzleFlashTimer = silenced ? 0.025 : 0.058;
+            muzzleFlashTimer = silenced ? 0.025 : 0.062;
             if (sniperScope && magAmmo > 0) {
                 scopeZoomLevel = 0;
             }
@@ -430,7 +480,7 @@ public class Weapon {
         double cy = Math.cos(player.getYaw());
         Vec3 camUp = new Vec3(-sy * sp, cp, -cy * sp);
 
-        double forwardDist = (type == Type.AWP || type == Type.M4A1S) ? 0.86 : (slotNumber == 1 ? 0.72 : 0.55);
+        double forwardDist = (type == Type.AWP || type == Type.M4A1S || type == Type.RPG7) ? 0.86 : (slotNumber == 1 ? 0.74 : 0.55);
         double sideDist = adsActive ? 0.06 : 0.21;
         return eye.add(forward.scale(forwardDist)).add(right.scale(sideDist)).add(camUp.scale(-0.14));
     }
@@ -440,9 +490,6 @@ public class Weapon {
         renderViewModel(renderer, walkBobPhase, walkSpeedNorm, swayX, swayY, GameSettings.WeaponSkin.STANDARD);
     }
 
-    /**
-     * Рендер 3D-модели оружия от первого лица с выбранным скином CS2.
-     */
     public void renderViewModel(Renderer3D renderer, double walkBobPhase, double walkSpeedNorm,
                                 double swayX, double swayY, GameSettings.WeaponSkin skin) {
         if (sniperScope && scopeZoomLevel > 0) {
@@ -453,7 +500,7 @@ public class Weapon {
         double bobY = Math.abs(Math.cos(walkBobPhase)) * (-0.013) * walkSpeedNorm;
         double equipDrop = (1.0 - equipProgress) * 0.25;
 
-        double rotX = -recoilKick * (type == Type.DEAGLE || type == Type.AWP ? 0.22 : 0.13);
+        double rotX = -recoilKick * (type == Type.DEAGLE || type == Type.AWP || type == Type.RPG7 ? 0.22 : 0.13);
         double rotY = -0.07;
         double rotZ = 0.0;
         double reloadDropY = 0.0;
@@ -486,15 +533,11 @@ public class Weapon {
         dispatchWeaponModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, true);
     }
 
-    /**
-     * Вращающийся 3D-предпросмотр оружия для экрана «Оружейная скинов CS2» в Главном меню.
-     */
     public void renderShowcaseModel(Renderer3D renderer, double spinYaw, GameSettings.WeaponSkin skin) {
-        // Центрируем модель в правой витрине (справа от боковой панели меню) под эффектным углом CS2 Inspect
         double angleY = 1.28 + spinYaw;
         double ox = 0.20;
         double oy = 0.05;
-        double oz = (type == Type.AWP) ? 0.92 : (slotNumber == 1 ? 0.72 : 0.52);
+        double oz = (type == Type.AWP || type == Type.M249 || type == Type.RPG7) ? 0.92 : (slotNumber == 1 ? 0.72 : 0.52);
         double tiltX = 0.10 * Math.sin(spinYaw * 0.8);
         if (type == Type.KNIFE) {
             renderKnifeModel(renderer, ox, oy - 0.01, oz - 0.08, tiltX, angleY, 0.26, skin, false);
@@ -510,6 +553,8 @@ public class Weapon {
             case AK47:   renderAk47Model(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case M4A1S:  renderM4a1sModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case AWP:    renderAwpModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
+            case M249:   renderM249Model(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
+            case RPG7:   renderRpg7Model(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case XM1014: renderShotgunModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case MP9:    renderMp9Model(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case DEAGLE: renderDeagleModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
@@ -519,71 +564,72 @@ public class Weapon {
         }
     }
 
+    private void drawSmoothSleeveAndGlove(Renderer3D r, double ox, double oy, double oz,
+                                          double handZ, double rotX, double rotY, double rotZ) {
+        r.drawViewModelCylinder(ox - 0.038, oy - 0.095, oz - 0.10, 0.041, 0.036, 0.26,
+                rotX, rotY, rotZ, ox, oy, oz, 10, 0x2C415A);
+        r.drawViewModelCylinder(ox - 0.008, oy - 0.048, oz + handZ, 0.033, 0.031, 0.088,
+                rotX, rotY, rotZ, ox, oy, oz, 10, 0x1F242C);
+    }
+
     private void renderAk47Model(Renderer3D r, double ox, double oy, double oz,
                                  double rotX, double rotY, double rotZ,
                                  GameSettings.WeaponSkin skin, boolean drawHands) {
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
-        int wood = custom ? skin.accent : 0x9B5326;
+        int wood = custom ? skin.accent : 0x9E5528;
         int darkWood = custom ? skin.trim : 0x7B3E1B;
-        int steel = custom ? skin.primary : 0x32373E;
-        int darkSteel = 0x20242A;
-        int boltMetal = 0x767E87;
-        int magColor = custom ? skin.accent : 0x3C251B;
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
+        int steel = custom ? skin.primary : 0x343A42;
+        int darkSteel = 0x20252C;
+        int boltMetal = 0x86909B;
+        int magColor = custom ? skin.accent : 0x42281C;
 
-        if (drawHands) {
-            r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(ox - 0.01, oy - 0.05, oz + 0.06, 0.062, 0.055, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
-        }
+        if (drawHands) drawSmoothSleeveAndGlove(r, ox, oy, oz, 0.06, rotX, rotY, rotZ);
 
-        r.drawViewModelBox(ox, oy - 0.025, oz - 0.18, 0.046, 0.082, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkWood);
-        r.drawViewModelBox(ox, oy - 0.085, oz - 0.04, 0.040, 0.095, 0.048, rotX + 0.22, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkWood);
-        r.drawViewModelBox(ox, oy + 0.012, oz + 0.01, 0.052, 0.068, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, steel);
+        r.drawViewModelBox(ox, oy - 0.025, oz - 0.18, 0.044, 0.080, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkWood);
+        r.drawViewModelBox(ox, oy - 0.085, oz - 0.04, 0.038, 0.095, 0.046, rotX + 0.22, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkWood);
+        r.drawViewModelBox(ox, oy + 0.012, oz + 0.01, 0.050, 0.066, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, steel);
         if (custom) {
-            r.drawViewModelBox(ox, oy + 0.036, oz + 0.02, 0.054, 0.014, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, skin.accent);
+            r.drawViewModelBox(ox, oy + 0.036, oz + 0.02, 0.052, 0.014, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, skin.accent);
         }
-        r.drawViewModelBox(ox + 0.029, oy + 0.022, oz + 0.03 - recoilKick * 0.03, 0.018, 0.016, 0.045, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, boltMetal);
+        r.drawViewModelCylinder(ox + 0.027, oy + 0.022, oz + 0.03 - recoilKick * 0.03, 0.009, 0.009, 0.048, rotX, rotY, rotZ, ox, oy, oz, 8, boltMetal);
 
         if (!reloading || reloadTimer > reloadDuration * 0.65 || reloadTimer < reloadDuration * 0.28) {
-            r.drawViewModelBox(ox, oy - 0.095, oz + 0.085, 0.038, 0.145, 0.058, rotX - 0.28, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, magColor);
+            r.drawViewModelBox(ox, oy - 0.095, oz + 0.085, 0.036, 0.145, 0.056, rotX - 0.28, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, magColor);
         }
 
-        r.drawViewModelBox(ox, oy + 0.006, oz + 0.20, 0.048, 0.058, 0.16, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, wood);
-        r.drawViewModelBox(ox, oy + 0.038, oz + 0.19, 0.038, 0.026, 0.14, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkWood);
-        r.drawViewModelBox(ox, oy + 0.014, oz + 0.39, 0.020, 0.020, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
-        r.drawViewModelBox(ox, oy + 0.034, oz + 0.33, 0.016, 0.018, 0.12, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, steel);
-        r.drawViewModelBox(ox, oy + 0.044, oz + 0.48, 0.014, 0.045, 0.024, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
-        r.drawViewModelBox(ox, oy + 0.052, oz + 0.10, 0.028, 0.016, 0.032, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
+        r.drawViewModelBox(ox, oy + 0.006, oz + 0.20, 0.046, 0.054, 0.16, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, wood);
+        r.drawViewModelCylinder(ox, oy + 0.038, oz + 0.19, 0.019, 0.018, 0.15, rotX, rotY, rotZ, ox, oy, oz, 10, darkWood);
+        // Гладкий круглый ствол и газоотводная трубка AK-47!
+        r.drawViewModelCylinder(ox, oy + 0.014, oz + 0.40, 0.011, 0.010, 0.28, rotX, rotY, rotZ, ox, oy, oz, 12, darkSteel);
+        r.drawViewModelCylinder(ox, oy + 0.034, oz + 0.33, 0.009, 0.009, 0.13, rotX, rotY, rotZ, ox, oy, oz, 10, steel);
+        r.drawViewModelBox(ox, oy + 0.040, oz + 0.49, 0.012, 0.042, 0.022, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
 
-        if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, ox, oy + 0.016, oz + 0.55, 0.14);
+        if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, ox, oy + 0.016, oz + 0.56, 0.14);
     }
 
     private void renderM4a1sModel(Renderer3D r, double ox, double oy, double oz,
                                   double rotX, double rotY, double rotZ,
                                   GameSettings.WeaponSkin skin, boolean drawHands) {
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
-        int bodyBlack = custom ? skin.trim : 0x262B33;
-        int railGray = custom ? skin.primary : 0x3A414C;
-        int suppressor = custom ? skin.accent : 0x1A1E24;
-        int accentBlue = custom ? skin.accent : 0x365C82;
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
+        int bodyBlack = custom ? skin.trim : 0x262C35;
+        int railGray = custom ? skin.primary : 0x3D4552;
+        int suppressor = custom ? skin.accent : 0x1A1F26;
+        int accentBlue = custom ? skin.accent : 0x38628C;
 
-        if (drawHands) {
-            r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(ox - 0.01, oy - 0.05, oz + 0.08, 0.062, 0.055, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
-        }
+        if (drawHands) drawSmoothSleeveAndGlove(r, ox, oy, oz, 0.08, rotX, rotY, rotZ);
 
-        r.drawViewModelBox(ox, oy - 0.012, oz - 0.18, 0.042, 0.086, 0.19, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyBlack);
-        r.drawViewModelBox(ox, oy - 0.085, oz - 0.03, 0.038, 0.095, 0.045, rotX + 0.20, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyBlack);
-        r.drawViewModelBox(ox, oy + 0.015, oz + 0.03, 0.050, 0.070, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, railGray);
-        r.drawViewModelBox(ox, oy + 0.062, oz + 0.02, 0.032, 0.024, 0.16, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentBlue);
+        r.drawViewModelCylinder(ox, oy - 0.004, oz - 0.17, 0.024, 0.020, 0.19, rotX, rotY, rotZ, ox, oy, oz, 10, bodyBlack);
+        r.drawViewModelBox(ox, oy - 0.085, oz - 0.03, 0.036, 0.095, 0.044, rotX + 0.20, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyBlack);
+        r.drawViewModelBox(ox, oy + 0.015, oz + 0.03, 0.048, 0.068, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, railGray);
+        r.drawViewModelBox(ox, oy + 0.060, oz + 0.02, 0.030, 0.022, 0.16, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentBlue);
 
         if (!reloading || reloadTimer > reloadDuration * 0.62 || reloadTimer < reloadDuration * 0.28) {
-            r.drawViewModelBox(ox, oy - 0.090, oz + 0.07, 0.034, 0.130, 0.052, rotX - 0.10, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentBlue);
+            r.drawViewModelBox(ox, oy - 0.090, oz + 0.07, 0.032, 0.130, 0.050, rotX - 0.10, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentBlue);
         }
 
-        r.drawViewModelBox(ox, oy + 0.016, oz + 0.23, 0.046, 0.054, 0.19, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, railGray);
-        r.drawViewModelBox(ox, oy + 0.016, oz + 0.47, 0.034, 0.034, 0.30, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, suppressor);
+        // Круглое тактическое цевьё и идеально круглый цилиндр глушителя M4A1-S!
+        r.drawViewModelCylinder(ox, oy + 0.016, oz + 0.23, 0.026, 0.025, 0.19, rotX, rotY, rotZ, ox, oy, oz, 12, railGray);
+        r.drawViewModelCylinder(ox, oy + 0.016, oz + 0.47, 0.018, 0.018, 0.30, rotX, rotY, rotZ, ox, oy, oz, 14, suppressor);
 
         if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, ox, oy + 0.016, oz + 0.63, 0.07);
     }
@@ -592,31 +638,86 @@ public class Weapon {
                                 double rotX, double rotY, double rotZ,
                                 GameSettings.WeaponSkin skin, boolean drawHands) {
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
-        int awpBody = custom ? skin.primary : 0x3D5438;
-        int awpStripe = custom ? skin.accent : 0x2F422B;
-        int darkSteel = 0x20252B;
+        int awpBody = custom ? skin.primary : 0x3D5638;
+        int awpStripe = custom ? skin.accent : 0x2F442B;
+        int darkSteel = 0x20252C;
         int scopeMetal = custom ? skin.trim : 0x181C22;
-        int lensCyan = 0x4FC3F7;
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
+        int lensCyan = 0x58D0FF;
 
-        if (drawHands) {
-            r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(ox - 0.01, oy - 0.05, oz + 0.10, 0.064, 0.054, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
-        }
+        if (drawHands) drawSmoothSleeveAndGlove(r, ox, oy, oz, 0.10, rotX, rotY, rotZ);
 
-        r.drawViewModelBox(ox, oy - 0.020, oz - 0.16, 0.050, 0.092, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, awpBody);
-        r.drawViewModelBox(ox, oy + 0.005, oz + 0.10, 0.052, 0.072, 0.34, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, awpBody);
-        r.drawViewModelBox(ox, oy + 0.022, oz + 0.11, 0.055, 0.018, 0.28, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, awpStripe);
+        r.drawViewModelBox(ox, oy - 0.020, oz - 0.16, 0.048, 0.090, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, awpBody);
+        r.drawViewModelBox(ox, oy + 0.005, oz + 0.10, 0.050, 0.070, 0.34, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, awpBody);
+        r.drawViewModelBox(ox, oy + 0.022, oz + 0.11, 0.053, 0.018, 0.28, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, awpStripe);
 
-        r.drawViewModelBox(ox, oy + 0.062, oz + 0.03, 0.024, 0.032, 0.03, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
-        r.drawViewModelBox(ox, oy + 0.062, oz + 0.15, 0.024, 0.032, 0.03, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
-        r.drawViewModelBox(ox, oy + 0.085, oz + 0.09, 0.042, 0.042, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, scopeMetal);
-        r.drawViewModelBox(ox, oy + 0.085, oz - 0.042, 0.036, 0.036, 0.01, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, lensCyan);
+        r.drawViewModelBox(ox, oy + 0.058, oz + 0.03, 0.022, 0.028, 0.028, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
+        r.drawViewModelBox(ox, oy + 0.058, oz + 0.16, 0.022, 0.028, 0.028, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
+        // Круглый телескопический оптический прицел AWP с раструбом и линзой!
+        r.drawViewModelCylinder(ox, oy + 0.086, oz + 0.09, 0.020, 0.020, 0.22, rotX, rotY, rotZ, ox, oy, oz, 14, scopeMetal);
+        r.drawViewModelCylinder(ox, oy + 0.086, oz + 0.23, 0.020, 0.027, 0.07, rotX, rotY, rotZ, ox, oy, oz, 14, scopeMetal);
+        r.drawViewModelCylinder(ox, oy + 0.086, oz - 0.025, 0.021, 0.019, 0.02, rotX, rotY, rotZ, ox, oy, oz, 12, lensCyan);
 
-        r.drawViewModelBox(ox, oy + 0.022, oz + 0.46, 0.022, 0.022, 0.42, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkSteel);
-        r.drawViewModelBox(ox, oy + 0.022, oz + 0.68, 0.032, 0.028, 0.05, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, scopeMetal);
+        // Длинный круглый снайперский ствол и ДТК
+        r.drawViewModelCylinder(ox, oy + 0.022, oz + 0.46, 0.012, 0.011, 0.42, rotX, rotY, rotZ, ox, oy, oz, 12, darkSteel);
+        r.drawViewModelCylinder(ox, oy + 0.022, oz + 0.68, 0.016, 0.016, 0.055, rotX, rotY, rotZ, ox, oy, oz, 12, scopeMetal);
 
         if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, ox, oy + 0.022, oz + 0.72, 0.19);
+    }
+
+    private void renderM249Model(Renderer3D r, double ox, double oy, double oz,
+                                 double rotX, double rotY, double rotZ,
+                                 GameSettings.WeaponSkin skin, boolean drawHands) {
+        boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
+        int bodyGunmetal = custom ? skin.primary : 0x303742;
+        int heatShield = custom ? skin.accent : 0x454F5E;
+        int ammoBoxGreen = custom ? skin.trim : 0x35543A;
+        int brassBelt = 0xE2B43C;
+
+        if (drawHands) drawSmoothSleeveAndGlove(r, ox, oy, oz, 0.09, rotX, rotY, rotZ);
+
+        // Массивный приклад, ствольная коробка пулемёта M249 и зелёный короб на 100 патронов с латунной лентой!
+        r.drawViewModelBox(ox, oy - 0.018, oz - 0.17, 0.052, 0.088, 0.19, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, 0x1E232A);
+        r.drawViewModelBox(ox, oy + 0.018, oz + 0.06, 0.064, 0.082, 0.30, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyGunmetal);
+        r.drawViewModelBox(ox, oy + 0.064, oz + 0.04, 0.056, 0.018, 0.22, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, heatShield);
+
+        if (!reloading || reloadTimer < reloadDuration * 0.4) {
+            r.drawViewModelBox(ox - 0.022, oy - 0.082, oz + 0.06, 0.095, 0.105, 0.115, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, ammoBoxGreen);
+            r.drawViewModelBox(ox - 0.036, oy - 0.012, oz + 0.06, 0.042, 0.046, 0.055, rotX, rotY, rotZ + 0.35, ox, oy, oz, Renderer3D.TEX_SOLID, brassBelt);
+        }
+
+        // Кожух охлаждения, тяжёлый круглый ствол и газовый цилиндр M249
+        r.drawViewModelBox(ox, oy + 0.014, oz + 0.28, 0.056, 0.062, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, heatShield);
+        r.drawViewModelCylinder(ox, oy + 0.030, oz + 0.46, 0.014, 0.013, 0.34, rotX, rotY, rotZ, ox, oy, oz, 12, 0x1C2026);
+        r.drawViewModelCylinder(ox, oy + 0.002, oz + 0.42, 0.011, 0.011, 0.24, rotX, rotY, rotZ, ox, oy, oz, 10, bodyGunmetal);
+
+        if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, ox, oy + 0.030, oz + 0.65, 0.18);
+    }
+
+    private void renderRpg7Model(Renderer3D r, double ox, double oy, double oz,
+                                 double rotX, double rotY, double rotZ,
+                                 GameSettings.WeaponSkin skin, boolean drawHands) {
+        boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
+        int tubeSteel = custom ? skin.primary : 0x3B4338;
+        int woodWrap = custom ? skin.accent : 0x8C4A24;
+        int warheadOlive = custom ? skin.trim : 0x4E633A;
+
+        if (drawHands) drawSmoothSleeveAndGlove(r, ox, oy, oz, 0.08, rotX, rotY, rotZ);
+
+        // Длинная круглая пусковая труба RPG-7 с деревянной теплоизоляцией и соплом!
+        r.drawViewModelCylinder(ox, oy + 0.025, oz - 0.12, 0.034, 0.026, 0.28, rotX, rotY, rotZ, ox, oy, oz, 14, woodWrap);
+        r.drawViewModelCylinder(ox, oy + 0.025, oz + 0.18, 0.026, 0.027, 0.36, rotX, rotY, rotZ, ox, oy, oz, 14, tubeSteel);
+        r.drawViewModelCylinder(ox, oy + 0.025, oz + 0.37, 0.027, 0.036, 0.05, rotX, rotY, rotZ, ox, oy, oz, 14, 0x242A24);
+        r.drawViewModelBox(ox, oy - 0.062, oz + 0.08, 0.034, 0.105, 0.044, rotX + 0.18, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, woodWrap);
+        r.drawViewModelBox(ox, oy + 0.068, oz + 0.28, 0.014, 0.042, 0.024, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, 0x202428);
+
+        // Наддульная кумулятивная граната ПГ-7В (когда заряжена!)
+        if (magAmmo > 0 && !reloading) {
+            r.drawViewModelCylinder(ox, oy + 0.025, oz + 0.45, 0.022, 0.052, 0.13, rotX, rotY, rotZ, ox, oy, oz, 14, warheadOlive);
+            r.drawViewModelCylinder(ox, oy + 0.025, oz + 0.57, 0.052, 0.010, 0.14, rotX, rotY, rotZ, ox, oy, oz, 14, warheadOlive);
+            r.drawViewModelCylinder(ox, oy + 0.025, oz + 0.65, 0.010, 0.006, 0.04, rotX, rotY, rotZ, ox, oy, oz, 10, 0xC8CED6);
+        }
+
+        if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, ox, oy + 0.025, oz + 0.44, 0.24);
     }
 
     private void renderShotgunModel(Renderer3D r, double ox, double oy, double oz,
@@ -624,22 +725,19 @@ public class Weapon {
                                     GameSettings.WeaponSkin skin, boolean drawHands) {
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
         int polyDark = custom ? skin.trim : 0x25282E;
-        int receiverSilver = custom ? skin.primary : 0x626A75;
+        int receiverSilver = custom ? skin.primary : 0x68727E;
         int forendCol = custom ? skin.accent : 0x25282E;
-        int barrelSteel = 0x2E333B;
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
+        int barrelSteel = 0x2E343E;
 
-        if (drawHands) {
-            r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.075, 0.075, 0.26, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(ox - 0.01, oy - 0.04, oz + 0.20, 0.064, 0.055, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
-        }
+        if (drawHands) drawSmoothSleeveAndGlove(r, ox, oy, oz, 0.18, rotX, rotY, rotZ);
 
-        r.drawViewModelBox(ox, oy - 0.025, oz - 0.16, 0.048, 0.085, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, polyDark);
-        r.drawViewModelBox(ox, oy + 0.015, oz + 0.04, 0.054, 0.070, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, receiverSilver);
-        r.drawViewModelBox(ox, oy - 0.012, oz + 0.24, 0.052, 0.048, 0.18, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, forendCol);
+        r.drawViewModelBox(ox, oy - 0.025, oz - 0.16, 0.046, 0.084, 0.20, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, polyDark);
+        r.drawViewModelBox(ox, oy + 0.015, oz + 0.04, 0.052, 0.068, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, receiverSilver);
+        r.drawViewModelCylinder(ox, oy - 0.010, oz + 0.24, 0.026, 0.024, 0.18, rotX, rotY, rotZ, ox, oy, oz, 10, forendCol);
 
-        r.drawViewModelBox(ox, oy + 0.032, oz + 0.36, 0.024, 0.024, 0.42, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, barrelSteel);
-        r.drawViewModelBox(ox, oy + 0.005, oz + 0.34, 0.022, 0.022, 0.36, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, polyDark);
+        // Две гладкие круглые трубки ствола и подствольного магазина XM1014!
+        r.drawViewModelCylinder(ox, oy + 0.032, oz + 0.36, 0.013, 0.013, 0.42, rotX, rotY, rotZ, ox, oy, oz, 12, barrelSteel);
+        r.drawViewModelCylinder(ox, oy + 0.005, oz + 0.34, 0.012, 0.012, 0.36, rotX, rotY, rotZ, ox, oy, oz, 12, polyDark);
 
         if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, ox, oy + 0.032, oz + 0.58, 0.18);
     }
@@ -651,24 +749,18 @@ public class Weapon {
         int bodyCol = custom ? skin.primary : 0x353D47;
         int accentCol = custom ? skin.accent : 0x4E5B6B;
         int darkCol = custom ? skin.trim : 0x1F242B;
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
 
-        if (drawHands) {
-            r.drawViewModelBox(ox - 0.04, oy - 0.10, oz - 0.10, 0.074, 0.074, 0.24, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(ox - 0.01, oy - 0.06, oz + 0.06, 0.062, 0.055, 0.09, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, glove);
-        }
+        if (drawHands) drawSmoothSleeveAndGlove(r, ox, oy, oz, 0.06, rotX, rotY, rotZ);
 
-        // Складной рамочный приклад и компактная ствольная коробка MP9
-        r.drawViewModelBox(ox, oy + 0.012, oz - 0.15, 0.028, 0.052, 0.18, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkCol);
-        r.drawViewModelBox(ox, oy + 0.022, oz + 0.04, 0.052, 0.068, 0.25, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyCol);
-        r.drawViewModelBox(ox, oy + 0.060, oz + 0.04, 0.036, 0.016, 0.22, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentCol);
-        // Пистолетная рукоятка с прямым длинным магазином + передняя тактическая рукоятка
-        r.drawViewModelBox(ox, oy - 0.075, oz + 0.01, 0.038, 0.125, 0.046, rotX + 0.10, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkCol);
+        r.drawViewModelBox(ox, oy + 0.012, oz - 0.15, 0.026, 0.050, 0.18, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkCol);
+        r.drawViewModelBox(ox, oy + 0.022, oz + 0.04, 0.050, 0.066, 0.25, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, bodyCol);
+        r.drawViewModelBox(ox, oy + 0.058, oz + 0.04, 0.034, 0.016, 0.22, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentCol);
+        r.drawViewModelBox(ox, oy - 0.075, oz + 0.01, 0.036, 0.125, 0.044, rotX + 0.10, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkCol);
         if (!reloading || reloadTimer > reloadDuration * 0.62 || reloadTimer < reloadDuration * 0.28) {
-            r.drawViewModelBox(ox, oy - 0.135, oz + 0.02, 0.028, 0.16, 0.034, rotX + 0.06, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentCol);
+            r.drawViewModelBox(ox, oy - 0.135, oz + 0.02, 0.026, 0.16, 0.032, rotX + 0.06, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, accentCol);
         }
-        r.drawViewModelBox(ox, oy - 0.048, oz + 0.13, 0.030, 0.085, 0.032, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkCol);
-        r.drawViewModelBox(ox, oy + 0.022, oz + 0.22, 0.024, 0.024, 0.14, rotX, rotY, rotZ, ox, oy, oz, Renderer3D.TEX_SOLID, darkCol);
+        r.drawViewModelCylinder(ox, oy - 0.048, oz + 0.13, 0.015, 0.014, 0.08, rotX + 1.4, rotY, rotZ, ox, oy, oz, 8, darkCol);
+        r.drawViewModelCylinder(ox, oy + 0.022, oz + 0.23, 0.014, 0.013, 0.15, rotX, rotY, rotZ, ox, oy, oz, 12, darkCol);
 
         if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, ox, oy + 0.022, oz + 0.31, 0.11);
     }
@@ -677,23 +769,19 @@ public class Weapon {
                                    double rotX, double rotY, double rotZ,
                                    GameSettings.WeaponSkin skin, boolean drawHands) {
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
-        int chrome = custom ? skin.primary : 0xC8D2DC;
-        int darkChrome = custom ? skin.accent : 0x8F9AA6;
+        int chrome = custom ? skin.primary : 0xCCD6E0;
+        int darkChrome = custom ? skin.accent : 0x909BA8;
         int gripBlack = custom ? skin.trim : 0x1D2026;
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
 
         double gx = ox - 0.02, gy = oy + 0.01, gz = oz - 0.04;
         double slideBack = recoilKick * 0.058;
 
-        if (drawHands) {
-            r.drawViewModelBox(gx - 0.03, gy - 0.11, gz - 0.12, 0.072, 0.070, 0.25, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(gx, gy - 0.06, gz - 0.01, 0.066, 0.070, 0.08, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, glove);
-        }
-        r.drawViewModelBox(gx, gy - 0.058, gz + 0.00, 0.042, 0.112, 0.054, rotX + 0.20, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, gripBlack);
-        r.drawViewModelBox(gx, gy + 0.006, gz + 0.09, 0.044, 0.032, 0.23, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, darkChrome);
-        r.drawViewModelBox(gx, gy + 0.038, gz + 0.09 - slideBack, 0.048, 0.048, 0.24, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, chrome);
-        r.drawViewModelBox(gx, gy + 0.065, gz - 0.02 - slideBack, 0.030, 0.012, 0.015, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, gripBlack);
-        r.drawViewModelBox(gx, gy + 0.065, gz + 0.19, 0.012, 0.014, 0.015, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, gripBlack);
+        if (drawHands) drawSmoothSleeveAndGlove(r, gx, gy - 0.01, gz, -0.01, rotX, rotY, rotZ);
+
+        r.drawViewModelBox(gx, gy - 0.058, gz + 0.00, 0.040, 0.112, 0.052, rotX + 0.20, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, gripBlack);
+        r.drawViewModelBox(gx, gy + 0.006, gz + 0.09, 0.042, 0.030, 0.23, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, darkChrome);
+        r.drawViewModelBox(gx, gy + 0.038, gz + 0.09 - slideBack, 0.046, 0.046, 0.24, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, chrome);
+        r.drawViewModelCylinder(gx, gy + 0.036, gz + 0.16, 0.012, 0.012, 0.12, rotX, rotY, rotZ, gx, gy, gz, 10, 0x22262E);
 
         if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, gx, gy + 0.038, gz + 0.24, 0.15);
     }
@@ -703,24 +791,21 @@ public class Weapon {
                                   GameSettings.WeaponSkin skin, boolean drawHands) {
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
         int frameBlack = custom ? skin.trim : 0x1E2126;
-        int slideSteel = custom ? skin.primary : 0x434A54;
+        int slideSteel = custom ? skin.primary : 0x454D58;
         int barrelDark = custom ? skin.accent : 0x262A30;
         int sightWhite = 0xEDF3F8;
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
 
         double gx = ox - 0.02, gy = oy + 0.01, gz = oz - 0.05;
         double slideBack = recoilKick * 0.048;
 
-        if (drawHands) {
-            r.drawViewModelBox(gx - 0.03, gy - 0.11, gz - 0.12, 0.072, 0.070, 0.25, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(gx, gy - 0.06, gz - 0.01, 0.064, 0.068, 0.075, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, glove);
-        }
-        r.drawViewModelBox(gx, gy - 0.055, gz + 0.00, 0.038, 0.105, 0.048, rotX + 0.20, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, frameBlack);
-        r.drawViewModelBox(gx, gy + 0.002, gz + 0.065, 0.040, 0.030, 0.19, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, frameBlack);
-        r.drawViewModelBox(gx, gy + 0.030, gz + 0.065 - slideBack, 0.042, 0.038, 0.195, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, slideSteel);
-        r.drawViewModelBox(gx, gy + 0.026, gz + 0.14, 0.020, 0.020, 0.09, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, barrelDark);
-        r.drawViewModelBox(gx, gy + 0.053, gz - 0.02 - slideBack, 0.026, 0.010, 0.012, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sightWhite);
-        r.drawViewModelBox(gx, gy + 0.053, gz + 0.15 - slideBack, 0.009, 0.011, 0.012, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sightWhite);
+        if (drawHands) drawSmoothSleeveAndGlove(r, gx, gy - 0.01, gz, -0.01, rotX, rotY, rotZ);
+
+        r.drawViewModelBox(gx, gy - 0.055, gz + 0.00, 0.036, 0.105, 0.046, rotX + 0.20, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, frameBlack);
+        r.drawViewModelBox(gx, gy + 0.002, gz + 0.065, 0.038, 0.028, 0.19, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, frameBlack);
+        r.drawViewModelBox(gx, gy + 0.030, gz + 0.065 - slideBack, 0.040, 0.036, 0.195, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, slideSteel);
+        r.drawViewModelCylinder(gx, gy + 0.028, gz + 0.145, 0.010, 0.010, 0.09, rotX, rotY, rotZ, gx, gy, gz, 10, barrelDark);
+        r.drawViewModelBox(gx, gy + 0.052, gz - 0.02 - slideBack, 0.024, 0.009, 0.012, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sightWhite);
+        r.drawViewModelBox(gx, gy + 0.052, gz + 0.15 - slideBack, 0.008, 0.010, 0.012, rotX, rotY, rotZ, gx, gy, gz, Renderer3D.TEX_SOLID, sightWhite);
 
         if (muzzleFlashTimer > 0.0 && drawHands) renderMuzzleFlash3D(r, gx, gy + 0.028, gz + 0.21, 0.10);
     }
@@ -733,23 +818,16 @@ public class Weapon {
         int hazardYellow = custom ? skin.accent : 0xF2BE22;
         int steel = custom ? skin.primary : 0x8A96A4;
         int chargeLed = (magAmmo > 0) ? 0x2AF2FF : 0xFF4436;
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
 
         double zx = ox - 0.02, zy = oy + 0.01, zz = oz - 0.04;
-        if (drawHands) {
-            r.drawViewModelBox(zx - 0.03, zy - 0.11, zz - 0.12, 0.072, 0.070, 0.25, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(zx, zy - 0.06, zz - 0.01, 0.064, 0.068, 0.075, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, glove);
-        }
+        if (drawHands) drawSmoothSleeveAndGlove(r, zx, zy - 0.01, zz, -0.01, rotX, rotY, rotZ);
 
-        // Эргономичная рукоятка + черно-желтый корпус электрошокера Zeus x27
-        r.drawViewModelBox(zx, zy - 0.055, zz + 0.00, 0.040, 0.105, 0.052, rotX + 0.22, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, bodyDark);
-        r.drawViewModelBox(zx, zy + 0.018, zz + 0.065, 0.052, 0.064, 0.19, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, bodyDark);
-        r.drawViewModelBox(zx, zy + 0.024, zz + 0.085, 0.056, 0.026, 0.13, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, hazardYellow);
-        // Верхний цифровой индикатор заряда батареи
-        r.drawViewModelBox(zx, zy + 0.054, zz + 0.045, 0.028, 0.010, 0.075, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, chargeLed);
-        // Два высоковольтных электрода спереди
-        r.drawViewModelBox(zx - 0.014, zy + 0.026, zz + 0.18, 0.009, 0.012, 0.055, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, steel);
-        r.drawViewModelBox(zx + 0.014, zy + 0.026, zz + 0.18, 0.009, 0.012, 0.055, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, steel);
+        r.drawViewModelBox(zx, zy - 0.055, zz + 0.00, 0.038, 0.105, 0.050, rotX + 0.22, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, bodyDark);
+        r.drawViewModelBox(zx, zy + 0.018, zz + 0.065, 0.050, 0.062, 0.19, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, bodyDark);
+        r.drawViewModelBox(zx, zy + 0.024, zz + 0.085, 0.054, 0.026, 0.13, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, hazardYellow);
+        r.drawViewModelBox(zx, zy + 0.053, zz + 0.045, 0.026, 0.010, 0.075, rotX, rotY, rotZ, zx, zy, zz, Renderer3D.TEX_SOLID, chargeLed);
+        r.drawViewModelCylinder(zx - 0.014, zy + 0.026, zz + 0.18, 0.005, 0.004, 0.055, rotX, rotY, rotZ, zx, zy, zz, 8, steel);
+        r.drawViewModelCylinder(zx + 0.014, zy + 0.026, zz + 0.18, 0.005, 0.004, 0.055, rotX, rotY, rotZ, zx, zy, zz, 8, steel);
 
         if (muzzleFlashTimer > 0.0 && drawHands) {
             r.drawViewModelBox(zx, zy + 0.026, zz + 0.21, 0.09, 0.09, 0.04, 0.0, 0.0, 0.4, zx, zy, zz, Renderer3D.TEX_SOLID, 0x48F5FF);
@@ -778,22 +856,18 @@ public class Weapon {
         double rotZ = drawHands ? (0.18 + swing * 0.45) : overrideRotZ;
 
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
-        int sleeve = 0x2C3E54, glove = 0x1E2228;
         int handle = custom ? skin.trim : 0x23272E;
         int guard = 0xD4AF37;
-        int bladeSteel = custom ? skin.primary : 0xB8C4D0;
-        int bladeEdge = custom ? skin.accent : 0xEDF4FA;
+        int bladeSteel = custom ? skin.primary : 0xC0CCD8;
+        int bladeEdge = custom ? skin.accent : 0xF2F8FF;
 
-        if (drawHands) {
-            r.drawViewModelBox(kx + 0.02, ky - 0.09, kz - 0.10, 0.072, 0.070, 0.22, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, sleeve);
-            r.drawViewModelBox(kx, ky - 0.03, kz + 0.00, 0.062, 0.058, 0.075, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, glove);
-        }
-        r.drawViewModelBox(kx, ky + 0.00, kz + 0.01, 0.030, 0.036, 0.11, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, handle);
+        if (drawHands) drawSmoothSleeveAndGlove(r, kx + 0.03, ky + 0.01, kz, 0.00, rotX, rotY, rotZ);
+        r.drawViewModelCylinder(kx, ky + 0.002, kz + 0.01, 0.016, 0.017, 0.11, rotX, rotY, rotZ, kx, ky, kz, 10, handle);
         r.drawViewModelBox(kx, ky + 0.005, kz + 0.07, 0.048, 0.062, 0.016, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, guard);
-        r.drawViewModelBox(kx, ky + 0.012, kz + 0.170, 0.011, 0.034, 0.185, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
-        r.drawViewModelBox(kx, ky - 0.005, kz + 0.172, 0.007, 0.011, 0.190, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
-        r.drawViewModelBox(kx, ky + 0.006, kz + 0.276, 0.008, 0.021, 0.042, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
-        r.drawViewModelBox(kx, ky + 0.002, kz + 0.304, 0.006, 0.011, 0.026, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
+        r.drawViewModelBox(kx, ky + 0.012, kz + 0.170, 0.010, 0.034, 0.185, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
+        r.drawViewModelBox(kx, ky - 0.005, kz + 0.172, 0.006, 0.011, 0.190, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
+        r.drawViewModelBox(kx, ky + 0.006, kz + 0.276, 0.007, 0.021, 0.042, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
+        r.drawViewModelBox(kx, ky + 0.002, kz + 0.304, 0.005, 0.011, 0.026, rotX, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
     }
 
     private void renderMuzzleFlash3D(Renderer3D r, double fx, double fy, double fz, double span) {
@@ -829,13 +903,14 @@ public class Weapon {
     public boolean hasMuzzleFlash() { return muzzleFlashTimer > 0.0; }
 
     public boolean canWallbang() {
-        return type == Type.AWP || type == Type.AK47 || type == Type.M4A1S
-            || type == Type.DEAGLE || type == Type.MP9 || type == Type.GLOCK;
+        return type == Type.AWP || type == Type.M249 || type == Type.AK47
+            || type == Type.M4A1S || type == Type.DEAGLE || type == Type.MP9 || type == Type.GLOCK;
     }
 
     public double getWallbangDamageFactor() {
         switch (type) {
             case AWP:    return 0.78;
+            case M249:   return 0.68;
             case AK47:   return 0.60;
             case DEAGLE: return 0.62;
             case M4A1S:  return 0.54;

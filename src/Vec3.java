@@ -573,4 +573,110 @@ public class Vec3 {
             return life > 0.0;
         }
     }
+
+    /**
+     * Физическая 3D-ракета гранатомёта RPG-7 с реактивным шлейфом дыма и пламени.
+     */
+    public static class Rocket {
+        public final Vec3 pos;
+        public final Vec3 vel;
+        public final double yaw;
+        public final double pitch;
+        public double life = 4.5;
+        public double smokeEmitTimer = 0.0;
+
+        public Rocket(Vec3 startPos, Vec3 dir, double speed) {
+            this.pos = startPos.copy();
+            Vec3 n = dir.normalize();
+            this.vel = n.scale(speed);
+            this.yaw = Math.atan2(n.x, n.z);
+            this.pitch = Math.asin(Math.max(-1.0, Math.min(1.0, n.y)));
+        }
+    }
+
+    /**
+     * Развёртываемая 3D авто-турель спецназа CT (клавиша J) с поворотной головкой, лазером и автоматическим огнём.
+     */
+    public static class SentryTurret {
+        public final Vec3 pos;
+        public double yaw;
+        public double pitch = 0.0;
+        public int health = 220;
+        public final int maxHealth = 220;
+        public double life = 55.0;
+        public double fireCooldown = 0.0;
+        public double muzzleFlash = 0.0;
+        public double scanPhase = 0.0;
+        public boolean hasTarget = false;
+
+        public SentryTurret(Vec3 pos, double initialYaw) {
+            this.pos = pos.copy();
+            this.yaw = initialYaw;
+        }
+
+        public boolean isAlive() {
+            return health > 0 && life > 0.0;
+        }
+    }
+
+    /**
+     * Боевой ударный вертолёт-босс в небе над ареной (режим «Осада: Волны и Боссы»):
+     * вращающиеся лопасти несущего и рулевого винтов, прожектор, пулемётные очереди и сбитие из RPG-7 / M249 / AWP!
+     */
+    public static class AttackHelicopter {
+        public final Vec3 pos;
+        public double orbitAngle = 0.0;
+        public double yaw = 0.0;
+        public double rotorPhase = 0.0;
+        public int health;
+        public final int maxHealth;
+        public double fireCooldown = 2.0;
+        public int burstShotsLeft = 0;
+        public double burstShotTimer = 0.0;
+        public double hitFlashTimer = 0.0;
+
+        public AttackHelicopter(int maxHealth) {
+            this.maxHealth = maxHealth;
+            this.health = maxHealth;
+            this.pos = new Vec3(0.0, 12.2, 0.0);
+        }
+
+        public boolean isAlive() {
+            return health > 0;
+        }
+
+        public boolean takeDamage(int dmg) {
+            if (health <= 0) return false;
+            health = Math.max(0, health - dmg);
+            hitFlashTimer = 0.14;
+            return health == 0;
+        }
+    }
+
+    /**
+     * Воздушный сброс снабжения на парашюте (Supply Drop) с боеприпасами, бронёй, турелью и бонусом $.
+     */
+    public static class SupplyDrop {
+        public final Vec3 pos;
+        public double beaconPhase = 0.0;
+        public double life = 40.0;
+        public boolean landed = false;
+
+        public SupplyDrop(double x, double startY, double z) {
+            this.pos = new Vec3(x, startY, z);
+        }
+
+        public boolean update(double dt) {
+            life -= dt;
+            beaconPhase += dt * 5.5;
+            if (!landed) {
+                pos.y -= dt * 3.4;
+                if (pos.y <= 0.0) {
+                    pos.y = 0.0;
+                    landed = true;
+                }
+            }
+            return life > 0.0;
+        }
+    }
 }

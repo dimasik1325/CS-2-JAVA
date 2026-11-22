@@ -50,6 +50,7 @@ public class Player {
     private int smokeGrenades = 1;
     private int flashGrenades = 1;
     private int molotovGrenades = 1;
+    private int sentryCharges = 1;
     private boolean hasDefuseKit = false;
     private boolean hasZeus = true;
     private boolean flashlightOn = false;
@@ -111,6 +112,7 @@ public class Player {
             this.smokeGrenades = 1;
             this.flashGrenades = 1;
             this.molotovGrenades = 1;
+            this.sentryCharges = 1;
             this.hasDefuseKit = false;
             this.hasZeus = true;
         } else {
@@ -120,6 +122,7 @@ public class Player {
             if (heGrenades < 1) heGrenades = 1;
             if (smokeGrenades < 1) smokeGrenades = 1;
             if (flashGrenades < 1) flashGrenades = 1;
+            if (sentryCharges < 1) sentryCharges = 1;
         }
 
         this.alive = true;
@@ -167,6 +170,7 @@ public class Player {
         this.smokeGrenades = 1;
         this.flashGrenades = 1;
         this.molotovGrenades = 1;
+        this.sentryCharges = 1;
         this.hasDefuseKit = false;
         this.hasZeus = true;
         this.flashlightOn = false;
@@ -222,10 +226,12 @@ public class Player {
     public void applyWeaponRecoilKick(Weapon.Type type) {
         double kick;
         switch (type) {
+            case RPG7:   kick = 0.052; cameraShake = Math.max(cameraShake, 0.34); break;
             case AWP:    kick = 0.045; cameraShake = Math.max(cameraShake, 0.25); break;
             case DEAGLE: kick = 0.032; cameraShake = Math.max(cameraShake, 0.14); break;
             case XM1014: kick = 0.028; cameraShake = Math.max(cameraShake, 0.12); break;
             case AK47:   kick = 0.019; break;
+            case M249:   kick = 0.015; cameraShake = Math.max(cameraShake, 0.06); break;
             case M4A1S:  kick = 0.012; break;
             case MP9:    kick = 0.009; break;
             case GLOCK:  kick = 0.010; break;
@@ -497,6 +503,13 @@ public class Player {
     public void addSmokeGrenade() { smokeGrenades = Math.min(2, smokeGrenades + 1); }
     public void addFlashGrenade() { flashGrenades = Math.min(2, flashGrenades + 1); }
     public void addMolotovGrenade() { molotovGrenades = Math.min(2, molotovGrenades + 1); }
+    public int getSentryCharges() { return sentryCharges; }
+    public void addSentryCharge() { sentryCharges = Math.min(2, sentryCharges + 1); }
+    public boolean consumeSentryCharge() {
+        if (sentryCharges <= 0) return false;
+        sentryCharges--;
+        return true;
+    }
     public void setHasDefuseKit(boolean v) { this.hasDefuseKit = v; }
     public boolean hasDefuseKit() { return hasDefuseKit; }
     public void setHasZeus(boolean v) { this.hasZeus = v; }

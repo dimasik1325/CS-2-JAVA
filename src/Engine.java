@@ -150,6 +150,9 @@ public class Engine extends JPanel implements Runnable {
     private final List<Vec3.FireZone> fireZones = new ArrayList<>();
     private final List<Vec3.Graffiti> graffitis = new ArrayList<>();
     private final List<Vec3.Pickup> pickups = new ArrayList<>();
+    private final List<Vec3.Rocket> rockets = new ArrayList<>();
+    private final List<Vec3.SentryTurret> sentryTurrets = new ArrayList<>();
+    private final List<Vec3.SupplyDrop> supplyDrops = new ArrayList<>();
     private final List<DamagePopup> damagePopups = new ArrayList<>();
     private final List<KillFeedEntry> killFeed = new ArrayList<>();
 
@@ -169,6 +172,10 @@ public class Engine extends JPanel implements Runnable {
     private double clickFlashTimer = 0.0;
 
     private Vec3.BombC4 plantedC4 = null;
+    private Vec3.AttackHelicopter bossHelicopter = null;
+    private int siegeWave = 1;
+    private static final int MAX_SIEGE_WAVES = 5;
+    private double siegeInterWaveTimer = 0.0;
     private double dmPlayerRespawnTimer = 0.0;
     private int nextGraffitiStyle = 0;
     private int radioOrderIndex = 0;
@@ -179,6 +186,8 @@ public class Engine extends JPanel implements Runnable {
         new Weapon(Weapon.Type.AK47),
         new Weapon(Weapon.Type.M4A1S),
         new Weapon(Weapon.Type.AWP),
+        new Weapon(Weapon.Type.M249),
+        new Weapon(Weapon.Type.RPG7),
         new Weapon(Weapon.Type.XM1014),
         new Weapon(Weapon.Type.MP9),
         new Weapon(Weapon.Type.DEAGLE),
@@ -630,6 +639,10 @@ public class Engine extends JPanel implements Runnable {
             throwGrenade(Vec3.Grenade.Kind.MOLOTOV);
         } else if (code == KeyEvent.VK_Y) {
             trySprayGraffiti();
+        } else if (code == KeyEvent.VK_J) {
+            tryDeploySentryTurret();
+        } else if (code == KeyEvent.VK_K) {
+            trySummonHelicopterChallenge();
         } else if (code == KeyEvent.VK_Z) {
             issueNextRadioCommand();
         } else if (code == KeyEvent.VK_L) {
@@ -658,12 +671,13 @@ public class Engine extends JPanel implements Runnable {
             case KeyEvent.VK_1: tryPurchaseWeapon(Weapon.Type.AK47); break;
             case KeyEvent.VK_2: tryPurchaseWeapon(Weapon.Type.M4A1S); break;
             case KeyEvent.VK_3: tryPurchaseWeapon(Weapon.Type.AWP); break;
-            case KeyEvent.VK_4: tryPurchaseWeapon(Weapon.Type.XM1014); break;
-            case KeyEvent.VK_5: tryPurchaseWeapon(Weapon.Type.MP9); break;
-            case KeyEvent.VK_6: tryPurchaseWeapon(Weapon.Type.DEAGLE); break;
-            case KeyEvent.VK_7: tryPurchaseUtility(1); break;
-            case KeyEvent.VK_8: tryPurchaseUtility(2); break;
+            case KeyEvent.VK_4: tryPurchaseWeapon(Weapon.Type.M249); break;
+            case KeyEvent.VK_5: tryPurchaseWeapon(Weapon.Type.RPG7); break;
+            case KeyEvent.VK_6: tryPurchaseWeapon(Weapon.Type.XM1014); break;
+            case KeyEvent.VK_7: tryPurchaseWeapon(Weapon.Type.DEAGLE); break;
+            case KeyEvent.VK_8: tryPurchaseUtility(1); break;
             case KeyEvent.VK_9: tryPurchaseUtility(3); break;
+            case KeyEvent.VK_0: tryPurchaseUtility(4); break;
             default: break;
         }
     }
@@ -704,9 +718,60 @@ public class Engine extends JPanel implements Runnable {
                 player.selectWeaponSlot(0);
                 soundSystem.playBuy();
             } else soundSystem.playEmptyClick();
+        } else if (kind == 4 && player.getSentryCharges() < 2) {
+            if (player.spendMoney(freeDm ? 0 : 1200)) {
+                player.addSentryCharge();
+                soundSystem.playBuy();
+                streakBannerText = "★ ПОЛУЧЕНА АВТО-ТУРЕЛЬ СПЕЦНАЗА (НАЖМИТЕ [J] ДЛЯ УСТАНОВКИ) ★";
+                streakBannerTimer = 2.4;
+            } else soundSystem.playEmptyClick();
         } else {
             soundSystem.playEmptyClick();
         }
+    }
+
+    /**
+     * Развёртывание полевой 3D авто-турели спецназа CT перед игроком (клавиша J).
+     */
+    public void tryDeploySentryTurret() {
+        if (!player.isAlive() || matchState != MatchState.PLAYING) return;
+        if (!player.consumeSentryCharge()) {
+            soundSystem.playEmptyClick();
+            streakBannerText = "НЕТ ЗАРЯДОВ ТУРЕЛИ — КУПИТЕ В МАГАЗИНЕ [B] ИЛИ ПОДБЕРИТЕ АВИАСБРОС!";
+            streakBannerTimer = 2.0;
+            return;
+        }
+        double yaw = player.getYaw();
+        double tx = clampVal(player.getPosition().x + Math.sin(yaw) * 1.45, Map.MIN_X + 1.5, Map.MAX_X - 1.5);
+        double tz = clampVal(player.getPosition().z + Math.cos(yaw) * 1.45, Map.MIN_Z + 1.5, Map.MAX_Z - 1.5);
+        double floorY = map.getSupportingFloorY(tx, tz, 0.35, player.getPosition().y + 0.4);
+        sentryTurrets.add(new Vec3.SentryTurret(new Vec3(tx, floorY, tz), yaw));
+        while (sentryTurrets.size() > 3) {
+            sentryTurrets.remove(0);
+        }
+        soundSystem.playC4Keypad();
+        streakBannerText = "⚙ АВТО-ТУРЕЛЬ СПЕЦНАЗА УСТАНОВЛЕНА! СЕКТОР ПОД ОХРАНОЙ ⚙";
+        streakBannerTimer = 2.2;
+    }
+
+    /**
+     * Ручной вызов Боевого Вертолёта-Босса в небо по клавише [K] для эпичной схватки на любой карте!
+     */
+    public void trySummonHelicopterChallenge() {
+        if (matchState != MatchState.PLAYING) return;
+        if (bossHelicopter != null && bossHelicopter.isAlive()) {
+            streakBannerText = "⚠ БОЕВОЙ ВЕРТОЛЁТ УЖЕ В ВОЗДУХЕ! СБЕЙТЕ ЕГО ИЗ RPG-7 / M249 / AWP! ⚠";
+            streakBannerTimer = 2.2;
+            return;
+        }
+        bossHelicopter = new Vec3.AttackHelicopter(850);
+        soundSystem.playRadioBeep();
+        streakBannerText = "⚠ ТРЕВОГА: В НЕБЕ УДАРНЫЙ ВЕРТОЛЁТ БОССА (850 HP)! ⚠";
+        streakBannerTimer = 3.2;
+    }
+
+    private static double clampVal(double v, double lo, double hi) {
+        return Math.max(lo, Math.min(hi, v));
     }
 
     public void trySprayGraffiti() {
@@ -953,6 +1018,9 @@ public class Engine extends JPanel implements Runnable {
         this.killFeed.clear();
         this.graffitis.clear();
         this.bots.clear();
+        this.siegeWave = 1;
+        this.siegeInterWaveTimer = 0.0;
+        this.bossHelicopter = null;
         applySettingsToSubsystems();
         setupRound(true);
     }
@@ -964,8 +1032,10 @@ public class Engine extends JPanel implements Runnable {
         this.matchState = MatchState.PLAYING;
         boolean respawnMode = (settings.gameMode == GameSettings.GameMode.DEATHMATCH
                 || settings.gameMode == GameSettings.GameMode.ARMS_RACE);
-        this.roundTimeLeft = respawnMode ? 210.0 : ROUND_TIME_SECONDS;
-        this.roundBannerTimer = 2.2;
+        this.roundTimeLeft = (settings.gameMode == GameSettings.GameMode.SIEGE_WAVES)
+                ? 260.0
+                : (respawnMode ? 210.0 : ROUND_TIME_SECONDS);
+        this.roundBannerTimer = 2.4;
         this.roundOverTimer = 0.0;
         this.buyMenuOpen = false;
         this.tracers.clear();
@@ -976,8 +1046,13 @@ public class Engine extends JPanel implements Runnable {
         this.smokeClouds.clear();
         this.fireZones.clear();
         this.pickups.clear();
+        this.rockets.clear();
+        this.sentryTurrets.clear();
+        this.supplyDrops.clear();
         this.damagePopups.clear();
         this.plantedC4 = null;
+        this.bossHelicopter = null;
+        this.siegeInterWaveTimer = 0.0;
         this.dmPlayerRespawnTimer = 0.0;
         this.hitMarkerTimer = 0.0;
         this.streakBannerTimer = 0.0;
@@ -987,6 +1062,11 @@ public class Engine extends JPanel implements Runnable {
             player.addMoney(16000);
         } else if (settings.gameMode == GameSettings.GameMode.ARMS_RACE) {
             player.applyArmsRaceTierLoadout();
+        } else if (settings.gameMode == GameSettings.GameMode.SIEGE_WAVES) {
+            this.siegeWave = 1;
+            player.addMoney(1600);
+            spawnSiegeWave(1, true);
+            return;
         }
 
         List<Vec3> tSpawns = map.getBotSpawns();
@@ -1034,6 +1114,74 @@ public class Engine extends JPanel implements Runnable {
                 }
             }
         }
+    }
+
+    /**
+     * Генератор волн спецоперации «Осада: Волны + Босс-Вертолёт и Джаггернаут» (Волны 1..5).
+     */
+    private void spawnSiegeWave(int wave, boolean rebuildAllies) {
+        List<Vec3> tSpawns = map.getBotSpawns();
+        List<Vec3> ctSpawns = map.getAllySpawns();
+        List<Vec3> waypoints = map.getPatrolWaypoints();
+
+        if (rebuildAllies) {
+            bots.clear();
+            int allies = Math.max(1, settings.allyCount);
+            for (int i = 0; i < allies; i++) {
+                Vec3 sp = ctSpawns.get(i % ctSpawns.size());
+                bots.add(new Bot(CT_ALLY_NAMES[i % CT_ALLY_NAMES.length], Bot.Team.COUNTER_TERRORIST,
+                        sp, (i * 3) % Math.max(1, waypoints.size()), 7000L + i * 41L));
+            }
+        } else {
+            // Удаляем павших врагов прошлой волны и лечим/возрождаем напарников CT!
+            bots.removeIf(b -> !b.isAlly());
+            int ctIdx = 0;
+            for (int i = 0; i < bots.size(); i++) {
+                Bot b = bots.get(i);
+                if (!b.isAlive()) {
+                    b.respawn(ctSpawns.get(ctIdx % ctSpawns.size()), ctIdx % Math.max(1, waypoints.size()));
+                }
+                ctIdx++;
+            }
+        }
+
+        int enemyCount = Math.min(8, 3 + wave);
+        int juggernauts = (wave == 3) ? 1 : (wave >= 5 ? 2 : (wave == 4 ? 1 : 0));
+        int snipers = (wave >= 2) ? 2 : 0;
+
+        for (int i = 0; i < enemyCount; i++) {
+            Vec3 sp = tSpawns.get((i + wave) % tSpawns.size());
+            int wp = (i * 3 + wave) % Math.max(1, waypoints.size());
+            String bName;
+            Bot.Archetype arch;
+            if (i < juggernauts) {
+                bName = "БОСС ДЖАГГЕРНАУТ #" + (i + 1);
+                arch = Bot.Archetype.JUGGERNAUT;
+            } else if (i < juggernauts + snipers) {
+                bName = "Снайпер «Кобра» #" + (i + 1);
+                arch = Bot.Archetype.SNIPER;
+            } else {
+                bName = BOT_NAMES[(i + wave) % BOT_NAMES.length];
+                arch = Bot.Archetype.STANDARD;
+            }
+            Bot enemy = new Bot(bName, Bot.Team.TERRORIST, sp, wp, 2000L + wave * 101L + i * 37L);
+            enemy.setArchetype(arch);
+            enemy.respawn(sp, wp);
+            bots.add(enemy);
+        }
+
+        if (wave == 3 || wave == 5) {
+            bossHelicopter = new Vec3.AttackHelicopter(wave == 5 ? 1150 : 850);
+            soundSystem.playRadioBeep();
+            streakBannerText = "⚠ ВОЛНА " + wave + "/" + MAX_SIEGE_WAVES
+                    + ": БОЕВОЙ ВЕРТОЛЁТ И ДЖАГГЕРНАУТ! СБЕЙТЕ ИЗ RPG-7 / M249 [B]! ⚠";
+            streakBannerTimer = 4.2;
+        } else {
+            bossHelicopter = null;
+            streakBannerText = "★ ШТУРМОВАЯ ВОЛНА " + wave + " ИЗ " + MAX_SIEGE_WAVES + " НАЧАЛАСЬ! ★";
+            streakBannerTimer = 2.8;
+        }
+        roundTimeLeft = 240.0;
     }
 
     private void advanceToNextRound() {
@@ -1262,6 +1410,18 @@ public class Engine extends JPanel implements Runnable {
             }
         }
 
+        // Обновление десантируемых на парашюте контейнеров снабжения (Supply Drop)
+        updateSupplyDrops(dt);
+
+        // Обновление реактивных 3D-ракет гранатомёта RPG-7
+        updateRockets(dt);
+
+        // Обновление авто-турелей спецназа CT [J] и боевого вертолёта-босса в небе
+        if (matchState == MatchState.PLAYING) {
+            updateSentryTurrets(dt);
+            updateBossHelicopter(dt);
+        }
+
         if (matchState == MatchState.MATCH_VICTORY || matchState == MatchState.MATCH_DEFEAT) {
             return;
         }
@@ -1386,6 +1546,42 @@ public class Engine extends JPanel implements Runnable {
                     roundTimeLeft = 0.0;
                     matchState = MatchState.MATCH_VICTORY;
                     setMouseCaptured(false);
+                }
+            } else if (settings.gameMode == GameSettings.GameMode.SIEGE_WAVES) {
+                roundTimeLeft -= dt;
+                boolean heliAlive = (bossHelicopter != null && bossHelicopter.isAlive());
+                if (!player.isAlive() && aliveAllies == 0) {
+                    finishRound(false, "Оборона прорвана на волне " + siegeWave + " (+$2200 на реванш)");
+                } else if (aliveEnemies == 0 && !heliAlive) {
+                    if (siegeWave >= MAX_SIEGE_WAVES) {
+                        playerRoundWins = settings.roundsToWin;
+                        player.addMoney(5000);
+                        player.addMvpStar();
+                        soundSystem.playRoundWin();
+                        matchState = MatchState.MATCH_VICTORY;
+                        setMouseCaptured(false);
+                    } else if (siegeInterWaveTimer <= 0.0) {
+                        siegeInterWaveTimer = 4.5;
+                        soundSystem.playLevelUp();
+                        player.addMoney(1800);
+                        player.addSentryCharge();
+                        // Сбрасываем с неба парашютный груз снабжения перед следующей волной!
+                        supplyDrops.add(new Vec3.SupplyDrop(
+                                clampVal(player.getPosition().x + 2.5, -16.0, 16.0),
+                                15.0,
+                                clampVal(player.getPosition().z + 3.5, -16.0, 16.0)));
+                        streakBannerText = "★ ВОЛНА " + siegeWave + " ОТБИТА! +$1800 И АВИАСБРОС СНАБЖЕНИЯ! ★";
+                        streakBannerTimer = 4.2;
+                    } else {
+                        siegeInterWaveTimer -= dt;
+                        if (siegeInterWaveTimer <= 0.0) {
+                            siegeWave++;
+                            playerRoundWins = siegeWave - 1;
+                            spawnSiegeWave(siegeWave, false);
+                        }
+                    }
+                } else if (roundTimeLeft <= 0.0) {
+                    finishRound(false, "Время удержания волны истекло");
                 }
             } else {
                 if (plantedC4 == null) {
@@ -1791,6 +1987,16 @@ public class Engine extends JPanel implements Runnable {
 
         Vec3 muzzle = gun.getMuzzleWorldPosition(player, settings.leftHandedModel);
 
+        // Реактивный гранатомёт RPG-7 выпускает физическую 3D-ракету со шлейфом дыма!
+        if (gun.getType() == Weapon.Type.RPG7) {
+            Vec3 rocketDir = look.add(right.scale(rng.nextGaussian() * spread))
+                    .add(up.scale(rng.nextGaussian() * spread)).normalize();
+            rockets.add(new Vec3.Rocket(muzzle.add(rocketDir.scale(0.35)), rocketDir, 38.0));
+            spawnHitParticles(muzzle, rocketDir.scale(-1.0), 0xFFB848, 10);
+            player.recordShot(true);
+            return;
+        }
+
         // Выброс латунной 3D-гильзы (кроме электрошокера Zeus x27)!
         if (settings.decalsAndShells && gun.getType() != Weapon.Type.ZEUS) {
             double sideSign = settings.leftHandedModel ? -1.0 : 1.0;
@@ -1821,6 +2027,20 @@ public class Engine extends JPanel implements Runnable {
             Bot hitBot = null;
             Bot.HitResult bestBotHit = null;
             boolean penetratedWallbang = false;
+            boolean hitHelicopter = false;
+
+            // Проверка попадания пули по Боевому Вертолёту-Боссу в небе!
+            if (bossHelicopter != null && bossHelicopter.isAlive()) {
+                Vec3 hp = bossHelicopter.pos;
+                Vec3.Box heliBox = new Vec3.Box(hp.x - 2.3, hp.y - 1.0, hp.z - 2.3,
+                        hp.x + 2.3, hp.y + 1.35, hp.z + 2.3, 0, 0, 0, true);
+                double tHeli = heliBox.intersectRay(eye, shotDir, maxDist, null);
+                if (tHeli >= 0.0 && tHeli < maxDist) {
+                    maxDist = tHeli;
+                    endPoint = eye.add(shotDir.scale(tHeli));
+                    hitHelicopter = true;
+                }
+            }
 
             for (int i = 0; i < bots.size(); i++) {
                 Bot bot = bots.get(i);
@@ -1830,6 +2050,7 @@ public class Engine extends JPanel implements Runnable {
                     maxDist = hr.distance;
                     bestBotHit = hr;
                     hitBot = bot;
+                    hitHelicopter = false;
                     endPoint = hr.point;
                 }
             }
@@ -1899,8 +2120,16 @@ public class Engine extends JPanel implements Runnable {
 
                 if (killed) {
                     String wTag = gun.getDisplayName() + (penetratedWallbang ? " • ПРОСТРЕЛ" : "");
-                    onBotKilledByPlayer(hitBot, wTag, bestBotHit.headshot, gun.getKillReward(), gun.getType());
+                    int reward = hitBot.getArchetype() == Bot.Archetype.JUGGERNAUT ? 1000 : gun.getKillReward();
+                    onBotKilledByPlayer(hitBot, wTag, bestBotHit.headshot, reward, gun.getType());
                 }
+            } else if (hitHelicopter && bossHelicopter != null && bossHelicopter.isAlive()) {
+                anyPelletHit = true;
+                int heliDmg = Math.max(8, gun.getBodyDamage());
+                if (gun.getType() == Weapon.Type.AWP) heliDmg = 210;
+                else if (gun.getType() == Weapon.Type.M249) heliDmg = 46;
+                spawnHitParticles(endPoint, shotDir.scale(-1.0), 0xFFB838, 7);
+                damageBossHelicopter(heliDmg, gun.getDisplayName(), endPoint);
             } else if (wallHit != null) {
                 spawnHitParticles(wallHit.point, wallHit.normal, 0xE4C896, pellets > 1 ? 3 : 7);
                 if (p == 0) {
@@ -1946,6 +2175,357 @@ public class Engine extends JPanel implements Runnable {
     private void addKillFeed(String killer, String weapon, String victim, boolean headshot, boolean playerInvolved) {
         killFeed.add(0, new KillFeedEntry(killer, weapon, victim, headshot, playerInvolved));
         while (killFeed.size() > 5) killFeed.remove(killFeed.size() - 1);
+    }
+
+    /**
+     * Физика полёта и взрыва 3D-ракет RPG-7 с дымовым шлейфом и сокрушительным осколочным радиусом!
+     */
+    private void updateRockets(double dt) {
+        for (Iterator<Vec3.Rocket> it = rockets.iterator(); it.hasNext(); ) {
+            Vec3.Rocket r = it.next();
+            r.life -= dt;
+            if (r.life <= 0.0) {
+                detonateRocket(r.pos);
+                it.remove();
+                continue;
+            }
+
+            double stepDist = r.vel.length() * dt;
+            Vec3 dir = r.vel.normalize();
+
+            // Дымово-огненный шлейф позади ракеты
+            r.smokeEmitTimer -= dt;
+            if (r.smokeEmitTimer <= 0.0) {
+                r.smokeEmitTimer = 0.018;
+                particles.add(new Vec3.Particle(
+                        r.pos.x, r.pos.y, r.pos.z,
+                        (rng.nextDouble() - 0.5) * 1.1, 0.6 + rng.nextDouble() * 0.8, (rng.nextDouble() - 0.5) * 1.1,
+                        rng.nextBoolean() ? 0xD8DCE2 : 0xFFA236, 0.14, 0.36, 0.0));
+            }
+
+            Vec3.RayHit wallHit = map.raycast(r.pos, dir, stepDist + 0.25);
+            Vec3 impactPos = null;
+            if (wallHit != null && wallHit.distance <= stepDist + 0.15) {
+                impactPos = wallHit.point;
+            }
+
+            // Прямое попадание в Боевой Вертолёт-Босс!
+            if (impactPos == null && bossHelicopter != null && bossHelicopter.isAlive()) {
+                Vec3 hp = bossHelicopter.pos;
+                Vec3.Box heliBox = new Vec3.Box(hp.x - 2.6, hp.y - 1.2, hp.z - 2.6,
+                        hp.x + 2.6, hp.y + 1.5, hp.z + 2.6, 0, 0, 0, true);
+                double th = heliBox.intersectRay(r.pos, dir, stepDist + 0.4, null);
+                if (th >= 0.0) {
+                    impactPos = r.pos.add(dir.scale(th));
+                }
+            }
+
+            // Прямое попадание во вражеского бота
+            if (impactPos == null) {
+                for (int i = 0; i < bots.size(); i++) {
+                    Bot b = bots.get(i);
+                    if (!b.isAlive() || b.isAlly()) continue;
+                    Bot.HitResult hr = b.intersectShotRay(r.pos, dir, stepDist + 0.35);
+                    if (hr != null) {
+                        impactPos = hr.point;
+                        break;
+                    }
+                }
+            }
+
+            if (impactPos != null) {
+                detonateRocket(impactPos);
+                it.remove();
+            } else {
+                r.pos.x += r.vel.x * dt;
+                r.pos.y += r.vel.y * dt;
+                r.pos.z += r.vel.z * dt;
+            }
+        }
+    }
+
+    private void detonateRocket(Vec3 pos) {
+        double distToPlayer = pos.dist(player.getPosition());
+        soundSystem.playExplosion(distToPlayer * 0.7);
+        if (distToPlayer < 22.0) {
+            player.addCameraShake(Math.max(0.25, (1.0 - distToPlayer / 22.0) * 1.0));
+        }
+
+        for (int i = 0; i < 48; i++) {
+            double ang = rng.nextDouble() * Math.PI * 2.0;
+            double spd = 4.0 + rng.nextDouble() * 12.5;
+            int col = (i % 3 == 0) ? 0xFFF4A8 : ((i % 2 == 0) ? 0xFF7020 : 0x484440);
+            particles.add(new Vec3.Particle(
+                    pos.x, pos.y + 0.15, pos.z,
+                    Math.cos(ang) * spd, 3.5 + rng.nextDouble() * 9.0, Math.sin(ang) * spd,
+                    col, 0.18 + rng.nextDouble() * 0.14, 0.55 + rng.nextDouble() * 0.45));
+        }
+        if (settings.decalsAndShells && pos.y < 0.7) {
+            addBulletDecal(new Vec3(pos.x, 0.005, pos.z), new Vec3(0, 1, 0), 1.85, 0x221E1A);
+        }
+
+        double blastRadius = 9.6;
+        for (int i = 0; i < bots.size(); i++) {
+            Bot b = bots.get(i);
+            if (!b.isAlive() || b.isAlly()) continue;
+            double d = b.getPosition().add(0, 0.9, 0).dist(pos);
+            if (d <= blastRadius) {
+                int dmg = (int) Math.round((1.0 - d / blastRadius) * 265.0) + 25;
+                if (settings.showDamageNumbers) {
+                    damagePopups.add(new DamagePopup(b.getPosition().add(0, 2.0, 0), dmg, false));
+                }
+                boolean killed = b.takeDamage(dmg, player.getPosition());
+                hitMarkerTimer = 0.24;
+                hitMarkerHeadshot = false;
+                if (killed) {
+                    int reward = b.getArchetype() == Bot.Archetype.JUGGERNAUT ? 1000 : 300;
+                    onBotKilledByPlayer(b, "RPG-7", false, reward, Weapon.Type.RPG7);
+                }
+            }
+        }
+
+        if (bossHelicopter != null && bossHelicopter.isAlive()) {
+            double dh = bossHelicopter.pos.dist(pos);
+            if (dh <= 8.5) {
+                int hDmg = (int) Math.round(420.0 * Math.max(0.35, 1.0 - dh / 9.5));
+                damageBossHelicopter(hDmg, "RPG-7", bossHelicopter.pos);
+            }
+        }
+
+        if (player.isAlive() && distToPlayer < 5.2) {
+            int selfDmg = (int) ((1.0 - distToPlayer / 5.2) * 48.0);
+            if (selfDmg > 3) player.takeDamage(selfDmg, pos);
+        }
+    }
+
+    /**
+     * ИИ развёрнутых полевых авто-турелей спецназа CT [J]: автоматический поиск цели и стрельба!
+     */
+    private void updateSentryTurrets(double dt) {
+        for (Iterator<Vec3.SentryTurret> it = sentryTurrets.iterator(); it.hasNext(); ) {
+            Vec3.SentryTurret t = it.next();
+            t.life -= dt;
+            if (t.muzzleFlash > 0.0) t.muzzleFlash = Math.max(0.0, t.muzzleFlash - dt);
+            if (t.fireCooldown > 0.0) t.fireCooldown = Math.max(0.0, t.fireCooldown - dt);
+            if (!t.isAlive()) {
+                it.remove();
+                continue;
+            }
+
+            Vec3 sensorPos = new Vec3(t.pos.x, t.pos.y + 0.88, t.pos.z);
+            Bot bestBot = null;
+            double bestDist = 28.0;
+
+            for (int i = 0; i < bots.size(); i++) {
+                Bot b = bots.get(i);
+                if (!b.isAlive() || b.isAlly()) continue;
+                double d = sensorPos.dist(b.getEyePosition());
+                if (d < bestDist && map.hasLineOfSight(sensorPos, b.getEyePosition(), smokeClouds)) {
+                    bestDist = d;
+                    bestBot = b;
+                }
+            }
+
+            boolean lockHeli = (bestBot == null && bossHelicopter != null && bossHelicopter.isAlive()
+                    && sensorPos.dist(bossHelicopter.pos) < 36.0
+                    && map.hasLineOfSight(sensorPos, bossHelicopter.pos, smokeClouds));
+
+            if (bestBot != null || lockHeli) {
+                t.hasTarget = true;
+                Vec3 aim = (bestBot != null)
+                        ? new Vec3(bestBot.getPosition().x, bestBot.getPosition().y + 1.25, bestBot.getPosition().z)
+                        : bossHelicopter.pos;
+                Vec3 diff = aim.sub(sensorPos);
+                double targetYaw = Math.atan2(diff.x, diff.z);
+                double diffYaw = targetYaw - t.yaw;
+                while (diffYaw > Math.PI) diffYaw -= Math.PI * 2.0;
+                while (diffYaw < -Math.PI) diffYaw += Math.PI * 2.0;
+                double step = Math.min(Math.abs(diffYaw), dt * 8.5);
+                t.yaw += Math.copySign(step, diffYaw);
+                t.pitch = -Math.asin(clampVal(diff.y / Math.max(0.5, diff.length()), -0.8, 0.8));
+
+                if (Math.abs(diffYaw) < 0.26 && t.fireCooldown <= 0.0) {
+                    t.fireCooldown = 0.16;
+                    t.muzzleFlash = 0.06;
+                    Vec3 muz = new Vec3(t.pos.x + Math.sin(t.yaw) * 0.65, t.pos.y + 0.85, t.pos.z + Math.cos(t.yaw) * 0.65);
+                    tracers.add(new Vec3.Tracer(muz, aim, 0x52EAFF, 0.07));
+                    soundSystem.playTurretShot(t.pos.dist(player.getPosition()));
+
+                    if (bestBot != null) {
+                        int dmg = 16;
+                        if (settings.showDamageNumbers) {
+                            damagePopups.add(new DamagePopup(bestBot.getPosition().add(0, 1.9, 0), dmg, false));
+                        }
+                        if (bestBot.takeDamage(dmg, t.pos)) {
+                            int reward = bestBot.getArchetype() == Bot.Archetype.JUGGERNAUT ? 1000 : 250;
+                            onBotKilledByPlayer(bestBot, "Авто-Турель CT", false, reward, null);
+                        }
+                    } else if (bossHelicopter != null && bossHelicopter.isAlive()) {
+                        damageBossHelicopter(14, "Авто-Турель CT", aim);
+                    }
+                }
+            } else {
+                t.hasTarget = false;
+                t.scanPhase += dt * 1.4;
+                t.yaw += Math.sin(t.scanPhase) * dt * 0.85;
+                t.pitch *= 0.92;
+            }
+        }
+    }
+
+    /**
+     * Полёт, вращение лопастей и пулемётные атаки Ударного Вертолёта-Босса в 3D-небе!
+     */
+    private void updateBossHelicopter(double dt) {
+        if (bossHelicopter == null || !bossHelicopter.isAlive()) return;
+
+        bossHelicopter.orbitAngle += dt * 0.36;
+        bossHelicopter.rotorPhase += dt * 26.0;
+        if (bossHelicopter.hitFlashTimer > 0.0) {
+            bossHelicopter.hitFlashTimer = Math.max(0.0, bossHelicopter.hitFlashTimer - dt);
+        }
+
+        double rx = Math.cos(bossHelicopter.orbitAngle) * 14.2;
+        double rz = Math.sin(bossHelicopter.orbitAngle * 0.85) * 13.5;
+        double ry = 11.4 + Math.sin(bossHelicopter.orbitAngle * 2.1) * 0.85;
+        double vx = -Math.sin(bossHelicopter.orbitAngle);
+        double vz = Math.cos(bossHelicopter.orbitAngle * 0.85) * 0.85;
+        bossHelicopter.pos.set(rx, ry, rz);
+
+        if (player.isAlive()) {
+            bossHelicopter.yaw = Math.atan2(player.getPosition().x - rx, player.getPosition().z - rz);
+        } else {
+            bossHelicopter.yaw = Math.atan2(vx, vz);
+        }
+
+        // Дым из двигателя при критических повреждениях (< 40% HP)
+        if (bossHelicopter.health < bossHelicopter.maxHealth * 0.40 && rng.nextDouble() < 0.35) {
+            particles.add(new Vec3.Particle(
+                    rx, ry + 0.5, rz,
+                    (rng.nextDouble() - 0.5) * 1.8, 1.8 + rng.nextDouble() * 1.5, (rng.nextDouble() - 0.5) * 1.8,
+                    rng.nextBoolean() ? 0x363A40 : 0xFF7B24, 0.22, 0.55, 0.0));
+        }
+
+        bossHelicopter.fireCooldown -= dt;
+        if (bossHelicopter.fireCooldown <= 0.0 && bossHelicopter.burstShotsLeft <= 0) {
+            bossHelicopter.burstShotsLeft = 4;
+            bossHelicopter.burstShotTimer = 0.0;
+            bossHelicopter.fireCooldown = 2.4;
+        }
+
+        if (bossHelicopter.burstShotsLeft > 0) {
+            bossHelicopter.burstShotTimer -= dt;
+            if (bossHelicopter.burstShotTimer <= 0.0) {
+                bossHelicopter.burstShotTimer = 0.13;
+                bossHelicopter.burstShotsLeft--;
+
+                Vec3 gunMuzzle = new Vec3(
+                        rx + Math.sin(bossHelicopter.yaw) * 2.1,
+                        ry - 0.58,
+                        rz + Math.cos(bossHelicopter.yaw) * 2.1);
+
+                Vec3 target = null;
+                boolean targetIsPlayer = false;
+                Bot targetAlly = null;
+
+                if (player.isAlive() && map.hasLineOfSight(gunMuzzle, player.getCenterTargetPosition(), smokeClouds)) {
+                    target = player.getCenterTargetPosition();
+                    targetIsPlayer = true;
+                } else {
+                    for (int i = 0; i < bots.size(); i++) {
+                        Bot b = bots.get(i);
+                        if (b.isAlive() && b.isAlly() && map.hasLineOfSight(gunMuzzle, b.getEyePosition(), smokeClouds)) {
+                            target = b.getEyePosition();
+                            targetAlly = b;
+                            break;
+                        }
+                    }
+                }
+
+                if (target != null) {
+                    Vec3 dir = target.sub(gunMuzzle).normalize();
+                    Vec3 spreadDir = new Vec3(
+                            dir.x + rng.nextGaussian() * 0.045,
+                            dir.y + rng.nextGaussian() * 0.045,
+                            dir.z + rng.nextGaussian() * 0.045).normalize();
+                    Vec3.RayHit wh = map.raycast(gunMuzzle, spreadDir, 55.0);
+                    Vec3 endPt = (wh != null) ? wh.point : gunMuzzle.add(spreadDir.scale(40.0));
+                    tracers.add(new Vec3.Tracer(gunMuzzle, endPt, 0xFF5630, 0.10));
+                    soundSystem.playBotShot(gunMuzzle.dist(player.getPosition()) * 0.65);
+
+                    if (targetIsPlayer && player.isAlive() && endPt.dist(player.getCenterTargetPosition()) < 1.35) {
+                        boolean wasAlive = player.isAlive();
+                        player.takeDamage(10, bossHelicopter.pos);
+                        soundSystem.playPlayerHurt();
+                        if (wasAlive && !player.isAlive()) {
+                            addKillFeed("ВЕРТОЛЁТ БОССА", "Авиапушка 30мм", "ВЫ", false, true);
+                        }
+                    } else if (targetAlly != null && targetAlly.isAlive() && endPt.dist(targetAlly.getEyePosition()) < 1.5) {
+                        if (targetAlly.takeDamage(12, bossHelicopter.pos)) {
+                            addKillFeed("ВЕРТОЛЁТ БОССА", "Авиапушка 30мм", targetAlly.getName(), false, false);
+                        }
+                    } else if (wh != null) {
+                        spawnHitParticles(wh.point, wh.normal, 0xFFD27D, 4);
+                    }
+                }
+            }
+        }
+    }
+
+    private void damageBossHelicopter(int dmg, String weaponName, Vec3 hitPos) {
+        if (bossHelicopter == null || !bossHelicopter.isAlive()) return;
+        if (settings.showDamageNumbers) {
+            damagePopups.add(new DamagePopup(hitPos.copy(), dmg, dmg >= 150));
+        }
+        hitMarkerTimer = 0.20;
+        hitMarkerHeadshot = (dmg >= 150);
+        soundSystem.playHitMarker(dmg >= 150);
+
+        if (bossHelicopter.takeDamage(dmg)) {
+            // ГРАНДИОЗНЫЙ ВЗРЫВ СБИТОГО БОЕВОГО ВЕРТОЛЁТА В НЕБЕ!
+            Vec3 crashPos = bossHelicopter.pos.copy();
+            soundSystem.playExplosion(0.0);
+            player.addCameraShake(1.0);
+            player.recordKill(true, 2000);
+            addKillFeed("ВЫ", weaponName, "БОЕВОЙ ВЕРТОЛЁТ", true, true);
+            streakBannerText = "★ УДАРНЫЙ ВЕРТОЛЁТ БОССА СБИТ! +$2000 И АВИАСБРОС СНАБЖЕНИЯ! ★";
+            streakBannerTimer = 4.5;
+
+            for (int i = 0; i < 68; i++) {
+                double ang = rng.nextDouble() * Math.PI * 2.0;
+                double spd = 4.0 + rng.nextDouble() * 14.0;
+                int col = (i % 3 == 0) ? 0xFFF6B0 : ((i % 2 == 0) ? 0xFF6A1A : 0x2E3238);
+                particles.add(new Vec3.Particle(
+                        crashPos.x, crashPos.y, crashPos.z,
+                        Math.cos(ang) * spd, -2.0 + rng.nextDouble() * 11.0, Math.sin(ang) * spd,
+                        col, 0.26, 1.15));
+            }
+            supplyDrops.add(new Vec3.SupplyDrop(
+                    clampVal(crashPos.x, -16.0, 16.0),
+                    crashPos.y,
+                    clampVal(crashPos.z, -16.0, 16.0)));
+        }
+    }
+
+    private void updateSupplyDrops(double dt) {
+        for (Iterator<Vec3.SupplyDrop> it = supplyDrops.iterator(); it.hasNext(); ) {
+            Vec3.SupplyDrop sd = it.next();
+            if (!sd.update(dt)) {
+                it.remove();
+                continue;
+            }
+            if (sd.landed && player.isAlive() && player.getPosition().dist(sd.pos) < 1.85) {
+                player.healAndRestoreArmor(100, 100);
+                for (Weapon w : player.getWeapons()) w.refillReserveAmmo();
+                player.addHeGrenade();
+                player.addSentryCharge();
+                player.addMoney(1200);
+                soundSystem.playLevelUp();
+                streakBannerText = "★ АВИАСБРОС ПОДОБРАН: 100 HP/AP + БОЕЗАПАС + АВТО-ТУРЕЛЬ [J] + $1200! ★";
+                streakBannerTimer = 3.0;
+                it.remove();
+            }
+        }
     }
 
     private void renderWindowFrame() {
@@ -1999,6 +2579,11 @@ public class Engine extends JPanel implements Runnable {
                 settings.resolutionScale.width,
                 settings.resolutionScale.height,
                 effectiveFov
+        );
+        renderer.setSmoothQualityFlags(
+                settings.smoothTextures,
+                settings.fxaaAntiAliasing,
+                settings.weatherMode
         );
         renderer.applyTimeOfDay(settings.timeOfDay);
         renderer.setGraphicsFlags(
@@ -2078,12 +2663,32 @@ public class Engine extends JPanel implements Runnable {
             }
         }
 
-        // 6. 3D-боты
+        // 6. 3D-боты, полевые авто-турели спецназа [J], авиасбросы, ракеты RPG-7 и Ударный Вертолёт-Босс!
         for (int i = 0; i < bots.size(); i++) {
             bots.get(i).render(renderer);
         }
+        for (int i = 0; i < sentryTurrets.size(); i++) {
+            renderer.drawSentryTurret(sentryTurrets.get(i));
+        }
+        for (int i = 0; i < supplyDrops.size(); i++) {
+            renderer.drawSupplyDrop(supplyDrops.get(i));
+        }
+        for (int i = 0; i < rockets.size(); i++) {
+            renderer.drawRocketProjectile(rockets.get(i));
+        }
+        if (bossHelicopter != null && bossHelicopter.isAlive()) {
+            renderer.drawAttackHelicopter(bossHelicopter);
+        } else if (currentScreen == AppScreen.MAIN_MENU && settings.gameMode == GameSettings.GameMode.SIEGE_WAVES) {
+            // Кинематографический пролёт Боевого Вертолёта на живом фоне Главного меню в режиме «Осада»!
+            Vec3.AttackHelicopter menuHeli = new Vec3.AttackHelicopter(850);
+            double a = globalAnimTime * 0.42;
+            menuHeli.pos.set(Math.cos(a) * 10.5, 9.2 + Math.sin(a * 2.0) * 0.6, Math.sin(a) * 10.5);
+            menuHeli.yaw = Math.atan2(-Math.sin(a), Math.cos(a));
+            menuHeli.rotorPhase = globalAnimTime * 25.0;
+            renderer.drawAttackHelicopter(menuHeli);
+        }
 
-        // 7. Трассеры, частицы и объемные облака дыма CS2
+        // 7. Трассеры, частицы, 3D-погода (ливень / снегопад) и объемные облака дыма CS2
         for (int i = 0; i < tracers.size(); i++) {
             Vec3.Tracer tr = tracers.get(i);
             renderer.draw3DLine(tr.start, tr.end, tr.color, 2);
@@ -2091,6 +2696,7 @@ public class Engine extends JPanel implements Runnable {
         for (int i = 0; i < particles.size(); i++) {
             renderer.drawParticle(particles.get(i));
         }
+        renderer.drawWeatherParticles(globalAnimTime, map);
         for (int i = 0; i < smokeClouds.size(); i++) {
             renderer.drawSmokeCloud(smokeClouds.get(i));
         }
@@ -2123,6 +2729,9 @@ public class Engine extends JPanel implements Runnable {
             armoryShowcaseWeapons[armoryWeaponIdx].renderShowcaseModel(
                     renderer, globalAnimTime * 1.15, settings.weaponSkin);
         }
+
+        // Сглаживание диагональных граней FXAA (убирает любые «лесенки» на архитектуре, солдатах и оружии!)
+        renderer.applyFxaaPass();
 
         // Вывод 3D-буфера с выбранным в настройках сглаживанием
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
@@ -2200,10 +2809,10 @@ public class Engine extends JPanel implements Runnable {
 
         g.setColor(Color.WHITE);
         g.setFont(new Font("SansSerif", Font.BOLD, 28));
-        g.drawString("CS-2 JAVA 4.0", 104, 62);
+        g.drawString("CS-2 JAVA 5.0", 104, 62);
         g.setColor(new Color(245, 195, 76));
         g.setFont(new Font("SansSerif", Font.BOLD, 12));
-        g.drawString("DUST II • MIRAGE • NUKE EDITION", 105, 83);
+        g.drawString("SMOOTH HD • INFERNO • SIEGE BOSSES", 105, 83);
 
         int btnX = 34;
         int btnW = leftW - 68;
@@ -2244,10 +2853,10 @@ public class Engine extends JPanel implements Runnable {
         g.drawString("Скин: " + settings.weaponSkin.label + " • F11 Полный экран", 34, outH - 22);
 
         // Правая карточка быстрой настройки параметров боя (с живым предпросмотром 3D-карты!)
-        int cardW = 478;
-        int cardH = 398;
+        int cardW = 486;
+        int cardH = 434;
         int cardX = outW - cardW - 34;
-        int cardY = outH - cardH - 28;
+        int cardY = outH - cardH - 24;
 
         g.setColor(new Color(12, 17, 26, 214));
         g.fillRoundRect(cardX, cardY, cardW, cardH, 16, 16);
@@ -2256,16 +2865,17 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(new Font("SansSerif", Font.BOLD, 16));
         g.setColor(new Color(248, 204, 84));
-        g.drawString("ОПЕРАЦИЯ: " + settings.mapTheme.label.toUpperCase(), cardX + 24, cardY + 30);
+        g.drawString("ОПЕРАЦИЯ: " + settings.mapTheme.label.toUpperCase(), cardX + 24, cardY + 28);
 
-        int rowY = cardY + 46;
+        int rowY = cardY + 42;
+        int cStep = 43;
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "3D-Карта арены", settings.mapTheme.label, () -> {
             int ord = (settings.mapTheme.ordinal() + 1) % GameSettings.MapTheme.values().length;
             settings.mapTheme = GameSettings.MapTheme.values()[ord];
             settings.save();
             startNewMatch();
         });
-        rowY += 45;
+        rowY += cStep;
 
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Режим игры", settings.gameMode.label, () -> {
             int ord = (settings.gameMode.ordinal() + 1) % GameSettings.GameMode.values().length;
@@ -2273,7 +2883,7 @@ public class Engine extends JPanel implements Runnable {
             settings.save();
             startNewMatch();
         });
-        rowY += 45;
+        rowY += cStep;
 
         String allyLabel = (settings.allyCount == 0) ? "Без напарников (Соло)" : (settings.allyCount + " бойца CT");
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Отряд союзников", allyLabel, () -> {
@@ -2281,31 +2891,38 @@ public class Engine extends JPanel implements Runnable {
             settings.save();
             startNewMatch();
         });
-        rowY += 45;
+        rowY += cStep;
 
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Противников", settings.botCount + " ботов T", () -> {
             settings.botCount = (settings.botCount >= 8) ? 3 : settings.botCount + 1;
             settings.save();
             startNewMatch();
         });
-        rowY += 45;
+        rowY += cStep;
 
         drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Сложность ИИ", settings.botDifficulty.label, () -> {
             int ord = (settings.botDifficulty.ordinal() + 1) % GameSettings.BotDifficulty.values().length;
             settings.botDifficulty = GameSettings.BotDifficulty.values()[ord];
             settings.save();
         });
-        rowY += 45;
+        rowY += cStep;
 
-        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Освещение карты", settings.timeOfDay.label, () -> {
+        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "Время суток", settings.timeOfDay.label, () -> {
             int ord = (settings.timeOfDay.ordinal() + 1) % GameSettings.TimeOfDay.values().length;
             settings.timeOfDay = GameSettings.TimeOfDay.values()[ord];
             renderer.applyTimeOfDay(settings.timeOfDay);
             settings.save();
         });
+        rowY += cStep;
 
-        drawCenteredText(g, "Zeus [8/T] • Граффити [Y] • Радио CT [Z] • C4 [E] • Скины [H]",
-                cardX + cardW / 2, cardY + cardH - 14,
+        drawOptionStepperRow(g, cardX + 24, rowY, cardW - 48, "3D-Погода", settings.weatherMode.label, () -> {
+            int ord = (settings.weatherMode.ordinal() + 1) % GameSettings.WeatherMode.values().length;
+            settings.weatherMode = GameSettings.WeatherMode.values()[ord];
+            settings.save();
+        });
+
+        drawCenteredText(g, "RPG-7 & M249 [B] • Авто-Турель [J] • Вызов Вертолёта [K] • Радио [Z]",
+                cardX + cardW / 2, cardY + cardH - 12,
                 new Font("SansSerif", Font.PLAIN, 12), new Color(184, 198, 216));
     }
 
@@ -2331,23 +2948,27 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(185, 198, 216));
         g.drawString("ВЫБЕРИТЕ ОРУЖИЕ ДЛЯ 3D-ОСМОТРА:", 30, 96);
 
-        int wx = 30, wy = 106;
-        int btnW = (panelW - 76) / 3;
+        int wx = 30, wy = 104;
+        int cols = 4;
+        int btnW = (panelW - 60 - (cols - 1) * 6) / cols;
         for (int i = 0; i < armoryShowcaseWeapons.length; i++) {
             final int idx = i;
             Weapon w = armoryShowcaseWeapons[i];
-            int col = i % 3;
-            int row = i / 3;
-            Rectangle r = new Rectangle(wx + col * (btnW + 8), wy + row * 40, btnW, 34);
+            int col = i % cols;
+            int row = i / cols;
+            Rectangle r = new Rectangle(wx + col * (btnW + 6), wy + row * 38, btnW, 32);
             boolean sel = (armoryWeaponIdx == i);
             String label = w.getType() == Weapon.Type.DEAGLE ? "Deagle"
-                    : (w.getType() == Weapon.Type.KNIFE ? "Нож" : w.getDisplayName());
+                    : (w.getType() == Weapon.Type.M249 ? "M249"
+                    : (w.getType() == Weapon.Type.GLOCK ? "Glock"
+                    : (w.getType() == Weapon.Type.ZEUS ? "Zeus"
+                    : (w.getType() == Weapon.Type.KNIFE ? "Нож" : w.getDisplayName()))));
             addMenuButton(g, r, label,
                     sel ? new Color(228, 152, 38) : new Color(34, 45, 62), sel,
                     () -> armoryWeaponIdx = idx);
         }
 
-        int sy = 250;
+        int sy = 236;
         g.setFont(new Font("SansSerif", Font.BOLD, 13));
         g.setColor(new Color(185, 198, 216));
         g.drawString("КОЛЛЕКЦИОННЫЙ СКИН (ДЛЯ ВСЕГО АРСЕНАЛА):", 30, sy);
@@ -2431,44 +3052,58 @@ public class Engine extends JPanel implements Runnable {
         int listX = px + 34;
         int listW = pw - 68;
         int rowY = py + 114;
-        int rowStep = 41;
 
         if (settingsTab == 0) {
-            // ВКЛАДКА: НАСТРОЙКИ ГРАФИКИ
+            // ВКЛАДКА: НАСТРОЙКИ ГЛАДКОЙ HD-ГРАФИКИ (БЕЗ ПИКСЕЛИЗАЦИИ!)
+            int gStep = 39;
             drawOptionStepperRow(g, listX, rowY, listW, "Общий пресет качества графики", settings.qualityPreset.title, () -> {
                 int next = (settings.qualityPreset.ordinal() + 1) % GameSettings.QualityPreset.values().length;
                 settings.applyGraphicsPreset(GameSettings.QualityPreset.values()[next]);
                 settings.save();
             });
-            rowY += rowStep;
+            rowY += gStep;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Внутреннее 3D-разрешение рендера", settings.resolutionScale.label, () -> {
+            drawOptionStepperRow(g, listX, rowY, listW, "Внутреннее 3D-разрешение (до Full HD 1080p)", settings.resolutionScale.label, () -> {
                 int next = (settings.resolutionScale.ordinal() + 1) % GameSettings.ResolutionScale.values().length;
                 settings.resolutionScale = GameSettings.ResolutionScale.values()[next];
                 settings.save();
             });
-            rowY += rowStep;
+            rowY += gStep;
+
+            drawOptionStepperRow(g, listX, rowY, listW, "Гладкие HD-текстуры 256×256 (Bilinear + Mipmap)",
+                    settings.smoothTextures ? "Включено (Гладко, без пикселей)" : "Выключено (Ретро)", () -> {
+                settings.smoothTextures = !settings.smoothTextures;
+                settings.save();
+            });
+            rowY += gStep;
+
+            drawOptionStepperRow(g, listX, rowY, listW, "Сглаживание краёв геометрии (FXAA)",
+                    settings.fxaaAntiAliasing ? "Включено (Гладкие грани)" : "Выключено", () -> {
+                settings.fxaaAntiAliasing = !settings.fxaaAntiAliasing;
+                settings.save();
+            });
+            rowY += gStep;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Качество солнечных 3D-теней", settings.shadowMode.label, () -> {
                 int next = (settings.shadowMode.ordinal() + 1) % GameSettings.ShadowMode.values().length;
                 settings.shadowMode = GameSettings.ShadowMode.values()[next];
                 settings.save();
             });
-            rowY += rowStep;
+            rowY += gStep;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Фильтрация / Сглаживание кадра",
-                    settings.bilinearFiltering ? "Билинейное сглаживание (Мягко)" : "Четкие пиксели (Резко)", () -> {
+            drawOptionStepperRow(g, listX, rowY, listW, "Масштабирование окна / Fullscreen",
+                    settings.bilinearFiltering ? "Билинейное сглаживание (Мягко)" : "Чёткие пиксели", () -> {
                 settings.bilinearFiltering = !settings.bilinearFiltering;
                 settings.save();
             });
-            rowY += rowStep;
+            rowY += gStep;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Объемные облака и ореол солнца",
-                    settings.skyCloudsAndSunFlare ? "Включено" : "Выключено", () -> {
-                settings.skyCloudsAndSunFlare = !settings.skyCloudsAndSunFlare;
+            drawOptionStepperRow(g, listX, rowY, listW, "3D-Погода на арене", settings.weatherMode.label, () -> {
+                int next = (settings.weatherMode.ordinal() + 1) % GameSettings.WeatherMode.values().length;
+                settings.weatherMode = GameSettings.WeatherMode.values()[next];
                 settings.save();
             });
-            rowY += rowStep;
+            rowY += gStep;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Декали пробоин и вылетающие 3D-гильзы",
                     settings.decalsAndShells ? "Включено (Реализм)" : "Выключено", () -> {
@@ -2476,21 +3111,14 @@ public class Engine extends JPanel implements Runnable {
                 if (!settings.decalsAndShells) { decals.clear(); shells.clear(); }
                 settings.save();
             });
-            rowY += rowStep;
-
-            drawOptionStepperRow(g, listX, rowY, listW, "Атмосферная дымка и кино-виньетка",
-                    settings.fogAndVignette ? "Включено" : "Выключено", () -> {
-                settings.fogAndVignette = !settings.fogAndVignette;
-                settings.save();
-            });
-            rowY += rowStep;
+            rowY += gStep;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Угол обзора камеры (FOV)", settings.fovDegrees + "°", () -> {
                 settings.fovDegrees += 4;
                 if (settings.fovDegrees > 84) settings.fovDegrees = 56;
                 settings.save();
             });
-            rowY += rowStep;
+            rowY += gStep;
 
             String capLabel = (settings.fpsLimit == 0) ? "Без лимита (Макс.)" : (settings.fpsLimit + " FPS");
             drawOptionStepperRow(g, listX, rowY, listW, "Ограничение частоты кадров", capLabel, () -> {
@@ -2499,9 +3127,9 @@ public class Engine extends JPanel implements Runnable {
                 else settings.fpsLimit = 60;
                 settings.save();
             });
-            rowY += rowStep;
+            rowY += gStep;
 
-            drawOptionStepperRow(g, listX, rowY, listW, "Освещение / Время суток Dust II", settings.timeOfDay.label, () -> {
+            drawOptionStepperRow(g, listX, rowY, listW, "Время суток / Освещение неба", settings.timeOfDay.label, () -> {
                 int next = (settings.timeOfDay.ordinal() + 1) % GameSettings.TimeOfDay.values().length;
                 settings.timeOfDay = GameSettings.TimeOfDay.values()[next];
                 renderer.applyTimeOfDay(settings.timeOfDay);
@@ -2621,29 +3249,29 @@ public class Engine extends JPanel implements Runnable {
                 new Font("SansSerif", Font.BOLD, 22), new Color(248, 206, 88));
 
         String[] leftLines = {
-            "УПРАВЛЕНИЕ ПЕРСОНАЖЕМ И ГРАНАТАМИ:",
-            "• WASD / Space / Ctrl — Бег, прыжок, приседание",
-            "• Shift — Тихий шаг (без шума + высокая кучность)",
-            "• 8 / T — Электрошокер Zeus x27 (мгновенный разряд!)",
-            "• Z — Радиокоманды отряду спецназа CT (4 тактики!)",
-            "• Y — Нанести цветное 3D-граффити на стену или пол",
-            "• E (зажать у бомбы) — Обезвреживание C4 на пленте",
+            "УПРАВЛЕНИЕ И ТАКТИЧЕСКИЕ СПЕЦСРЕДСТВА:",
+            "• WASD / Space / Ctrl / Shift — Движение и тихий шаг",
+            "• J — Установить 3D Авто-Турель Спецназа CT!",
+            "• K — Вызвать в небо Боевой Вертолёт-Босс (850 HP)!",
+            "• 8 / T — Электрошокер Zeus x27 • Z — Радиокоманды CT",
+            "• Y — Цветное 3D-граффити • E — Обезвреживание C4",
             "• B — Магазин закупки ($), F — Осмотр, H — Скин",
             "• L — Тактический 3D-фонарик (для Ночной операции!)",
             "• 4/G: HE • 5/Q: Smoke • 6/V: Flash • 7/X: Молотов",
-            "• Прострел (Wallbang): винтовки и AWP бьют сквозь ящики!",
-            "• Пробел (после гибели) — Ускорить бой союзников CT"
+            "• Прострел (Wallbang): винтовки, M249 и AWP бьют сквозь ящики",
+            "• F11 / Alt+Enter — Безрамочный полный экран Windows",
+            "• Пробел (после гибели) — Итог раунда союзников CT"
         };
 
         String[] rightLines = {
-            "КАРТЫ, РЕЖИМЫ И ВООРУЖЕНИЕ 4.0:",
-            "• 3 Карты: Dust II (Пески), Mirage (Дворец), Nuke (АЭС)",
-            "• Гонка вооружений: 8 уровней пушек до Золотого Ножа!",
-            "• Союзники ИИ (Спецназ CT) сражаются и разминируют C4",
-            "• AK-47 ($2700) • M4A1-S ($2900) • AWP ($4750)",
-            "• XM1014 ($2000) • MP9 ($1250) • Deagle ($700)",
-            "• Zeus x27 — автоподзарядка батареи каждые 10 сек",
-            "• 6 коллекций скинов (включая Неоновый Зверь!)",
+            "НОВИНКИ CS-2 JAVA 5.0 (SMOOTH HD & SIEGE):",
+            "• Гладкий движок: HD 720p/1080p, 256×256 Mipmap + FXAA!",
+            "• 4 Карты: Inferno (Фонтан), Dust II, Mirage, Nuke",
+            "• Режим «Осада»: 5 волн, Босс-Вертолёт и Джаггернаут!",
+            "• Пулемёт M249 ($5200, 100 патр.) и Гранатомёт RPG-7 ($4500)",
+            "• 3D-Погода: Ливень с грозой и Снегопад прямо в бою",
+            "• Десантные Авиасбросы (Supply Drop) на парашютах",
+            "• 11 видов оружия с круглыми стволами и оптикой Гуро",
             "",
             "СИСТЕМНЫЕ КЛАВИШИ:",
             "• Tab — Командный счет  • F5 — Быстрый рестарт",
@@ -2753,8 +3381,8 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(8, 12, 18, 186));
         g.fillRect(0, 0, outW, outH);
 
-        int bw = 690;
-        int bh = 516;
+        int bw = 720;
+        int bh = 548;
         int bx = outW / 2 - bw / 2;
         int by = outH / 2 - bh / 2;
 
@@ -2765,7 +3393,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(new Font("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("МАГАЗИН СНАРЯЖЕНИЯ CS2", bx + 28, by + 38);
+        g.drawString("МАГАЗИН СНАРЯЖЕНИЯ И ТЯЖЁЛОГО ОРУЖИЯ", bx + 28, by + 38);
 
         boolean freeDm = (settings.gameMode == GameSettings.GameMode.DEATHMATCH);
         g.setFont(new Font("Monospaced", Font.BOLD, 21));
@@ -2775,8 +3403,8 @@ public class Engine extends JPanel implements Runnable {
 
         int itemX = bx + 28;
         int itemW = bw - 56;
-        int iy = by + 58;
-        int step = 43;
+        int iy = by + 56;
+        int step = 42;
 
         drawBuyRow(g, itemX, iy, itemW, "[1] AK-47 — Штурмовая винтовка (ваншот в голову)", freeDm ? 0 : 2700,
                 () -> tryPurchaseWeapon(Weapon.Type.AK47)); iy += step;
@@ -2784,18 +3412,20 @@ public class Engine extends JPanel implements Runnable {
                 () -> tryPurchaseWeapon(Weapon.Type.M4A1S)); iy += step;
         drawBuyRow(g, itemX, iy, itemW, "[3] AWP — Снайперская винтовка с оптическим прицелом ПКМ", freeDm ? 0 : 4750,
                 () -> tryPurchaseWeapon(Weapon.Type.AWP)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[4] XM1014 — Полуавтоматический дробовик (8 картечин)", freeDm ? 0 : 2000,
+        drawBuyRow(g, itemX, iy, itemW, "[4] M249 Para — Тяжёлый пулемёт (короб 100 патронов!)", freeDm ? 0 : 5200,
+                () -> tryPurchaseWeapon(Weapon.Type.M249)); iy += step;
+        drawBuyRow(g, itemX, iy, itemW, "[5] RPG-7 — Реактивный гранатомёт (против Вертолёта и толп!)", freeDm ? 0 : 4500,
+                () -> tryPurchaseWeapon(Weapon.Type.RPG7)); iy += step;
+        drawBuyRow(g, itemX, iy, itemW, "[6] XM1014 — Автоматический дробовик (8 картечин)", freeDm ? 0 : 2000,
                 () -> tryPurchaseWeapon(Weapon.Type.XM1014)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[5] MP9 — Скорострельный ПП спецназа ($600 за фраг)", freeDm ? 0 : 1250,
-                () -> tryPurchaseWeapon(Weapon.Type.MP9)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[6] Desert Eagle — Крупнокалиберный пистолет", freeDm ? 0 : 700,
+        drawBuyRow(g, itemX, iy, itemW, "[7] Desert Eagle — Крупнокалиберный пистолет", freeDm ? 0 : 700,
                 () -> tryPurchaseWeapon(Weapon.Type.DEAGLE)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[7] Набор гранат: Осколочная HE [G] + Светошумовая Flash [V]", freeDm ? 0 : 400,
-                () -> tryPurchaseUtility(1)); iy += step;
-        drawBuyRow(g, itemX, iy, itemW, "[8] Набор гранат: Дым Smoke [Q] + Зажигательный Молотов [X]", freeDm ? 0 : 600,
-                () -> tryPurchaseUtility(2)); iy += step;
+        drawBuyRow(g, itemX, iy, itemW, "[8] Полный набор гранат: HE [G] + Flash [V] + Дым [Q]", freeDm ? 0 : 500,
+                () -> { tryPurchaseUtility(1); tryPurchaseUtility(2); }); iy += step;
         drawBuyRow(g, itemX, iy, itemW, "[9] Броня 100 AP + Аптечка + Щипцы C4 + Шокер Zeus x27 [T]", freeDm ? 0 : 850,
-                () -> tryPurchaseUtility(3));
+                () -> tryPurchaseUtility(3)); iy += step;
+        drawBuyRow(g, itemX, iy, itemW, "[0] Полевая 3D Авто-Турель Спецназа CT (установка на [J])", freeDm ? 0 : 1200,
+                () -> tryPurchaseUtility(4));
 
         addMenuButton(g, new Rectangle(bx + bw / 2 - 140, by + bh - 50, 280, 38),
                 "ЗАКРЫТЬ МАГАЗИН (B / ESC)", new Color(54, 72, 96), false, () -> {
@@ -2847,11 +3477,11 @@ public class Engine extends JPanel implements Runnable {
             if (!ally && !b.shouldShowHealthBar() && !aimedAt) continue;
             if (!ally && !map.hasLineOfSight(eye, b.getEyePosition(), smokeClouds)) continue;
 
-            if (renderer.projectToScreen(headTop.x, headTop.y, headTop.z, proj)) {
+            if (renderer.projectToScreen(headTop.x, headTop.y + (b.getArchetype() == Bot.Archetype.JUGGERNAUT ? 0.45 : 0.0), headTop.z, proj)) {
                 int sx = (int) (proj[0] * scaleX);
                 int sy = (int) (proj[1] * scaleY);
-                int barW = Math.max(38, Math.min(76, (int) (420.0 / Math.max(3.5, proj[2]))));
-                int barH = 6;
+                int barW = Math.max(38, Math.min(92, (int) ((b.getArchetype() == Bot.Archetype.JUGGERNAUT ? 560.0 : 420.0) / Math.max(3.5, proj[2]))));
+                int barH = b.getArchetype() == Bot.Archetype.JUGGERNAUT ? 8 : 6;
                 int bx = sx - barW / 2;
                 int by = sy - barH / 2;
 
@@ -2859,10 +3489,12 @@ public class Engine extends JPanel implements Runnable {
                 g.fillRoundRect(bx - 2, by - 2, barW + 4, barH + 4, 4, 4);
                 if (ally) {
                     g.setColor(new Color(64, 188, 255));
+                } else if (b.getArchetype() == Bot.Archetype.JUGGERNAUT) {
+                    g.setColor(new Color(255, 62, 48));
                 } else {
                     g.setColor(b.getHealth() > 45 ? new Color(235, 72, 65) : new Color(255, 165, 45));
                 }
-                g.fillRect(bx, by, (int) ((barW * b.getHealth()) / 100.0), barH);
+                g.fillRect(bx, by, (int) ((barW * (double) b.getHealth()) / Math.max(1, b.getMaxHealth())), barH);
 
                 if (ally) {
                     String allyTag = "▲ " + b.getName() + " (" + b.getHealth() + " HP)";
@@ -2872,8 +3504,9 @@ public class Engine extends JPanel implements Runnable {
                 } else if (b.isBlinded()) {
                     drawCenteredText(g, "★ ОСЛЕПЛЁН ★", sx, by - 6,
                             new Font("SansSerif", Font.BOLD, 11), new Color(255, 245, 150));
-                } else if (aimedAt || b.isCarryingC4()) {
-                    String tag = b.getName() + " (" + b.getHealth() + " HP)" + (b.isCarryingC4() ? " [C4]" : "");
+                } else if (aimedAt || b.isCarryingC4() || b.getArchetype() == Bot.Archetype.JUGGERNAUT) {
+                    String tag = (b.getArchetype() == Bot.Archetype.JUGGERNAUT ? "☠ " : "")
+                            + b.getName() + " (" + b.getHealth() + " HP)" + (b.isCarryingC4() ? " [C4]" : "");
                     FontMetrics fm = g.getFontMetrics();
                     g.setColor(b.isCarryingC4() ? new Color(255, 212, 92) : new Color(255, 220, 210));
                     g.drawString(tag, sx - fm.stringWidth(tag) / 2, by - 5);
@@ -3051,6 +3684,10 @@ public class Engine extends JPanel implements Runnable {
                 int totalTiers = Weapon.ARMS_RACE_LADDER.length;
                 subStr = "ГОНКА ВООРУЖЕНИЙ: УРОВЕНЬ " + (tIdx + 1) + "/" + totalTiers
                         + (tIdx == totalTiers - 1 ? " (ЗОЛОТОЙ НОЖ!)" : " • ФРАГОВ: " + player.getArmsRaceTierKills() + "/2");
+            } else if (settings.gameMode == GameSettings.GameMode.SIEGE_WAVES) {
+                subStr = "ОСАДА: ВОЛНА " + siegeWave + "/" + MAX_SIEGE_WAVES
+                        + " • ВРАГОВ: " + countAliveEnemies()
+                        + ((bossHelicopter != null && bossHelicopter.isAlive()) ? " + ВЕРТОЛЁТ!" : "");
             } else if (settings.gameMode == GameSettings.GameMode.DEATHMATCH) {
                 subStr = "БОЙ НАСМЕРТЬ (ДО 25 ФРАГОВ) • СЧЕТ: " + player.getKills() + "/25";
             } else {
@@ -3059,6 +3696,22 @@ public class Engine extends JPanel implements Runnable {
             }
             drawCenteredText(g, subStr, outW / 2, topY + 49,
                     new Font("SansSerif", Font.BOLD, 11), new Color(205, 214, 226));
+        }
+
+        // Эпичная верхняя шкала здоровья БОЕВОГО ВЕРТОЛЁТА-БОССА в небе!
+        if (bossHelicopter != null && bossHelicopter.isAlive()) {
+            int hbW = 430, hbH = 28;
+            int hbX = outW / 2 - hbW / 2, hbY = topY + topH + 8;
+            g.setColor(new Color(20, 12, 14, 222));
+            g.fillRoundRect(hbX, hbY, hbW, hbH, 8, 8);
+            g.setColor(new Color(255, 86, 62, 200));
+            g.drawRoundRect(hbX, hbY, hbW, hbH, 8, 8);
+
+            double frac = Math.max(0.0, Math.min(1.0, (double) bossHelicopter.health / bossHelicopter.maxHealth));
+            g.setColor(new Color(236, 58, 46));
+            g.fillRoundRect(hbX + 6, hbY + 15, (int) ((hbW - 12) * frac), 8, 4, 4);
+            drawCenteredText(g, "▲ БОСС: УДАРНЫЙ БОЕВОЙ ВЕРТОЛЁТ  [" + bossHelicopter.health + " / " + bossHelicopter.maxHealth + " HP] ▲",
+                    outW / 2, hbY + 12, new Font("SansSerif", Font.BOLD, 11), new Color(255, 214, 130));
         }
 
         // Баннер активной радиокоманды спецназу CT [Z]
@@ -3105,16 +3758,15 @@ public class Engine extends JPanel implements Runnable {
         int hpW = 302, hpH = 74;
         int hpX = 20, hpY = outH - hpH - 22;
 
-        // Плашка валюты $, радио [Z], граффити [Y] и фонарика [L]
+        // Плашка валюты $, радио [Z], авто-турели [J] и фонарика [L]
         g.setColor(new Color(14, 20, 26, 208));
-        g.fillRoundRect(hpX, hpY - 38, 354, 32, 10, 10);
+        g.fillRoundRect(hpX, hpY - 38, 388, 32, 10, 10);
         g.setFont(new Font("Monospaced", Font.BOLD, 17));
         g.setColor(new Color(102, 242, 136));
         g.drawString("$ " + player.getMoney(), hpX + 12, hpY - 17);
         g.setFont(new Font("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(245, 202, 86));
-        String rightBadge = "[B]Маг • [Z]Радио • [Y]Спрей • [L]"
-                + (player.isFlashlightOn() ? "ВКЛ" : "Свет");
+        String rightBadge = "[B]Маг • [J]Турель:" + player.getSentryCharges() + " • [Z]Радио • [K]Босс";
         g.drawString(rightBadge, hpX + 94, hpY - 17);
 
         g.setColor(new Color(14, 18, 25, 214));
@@ -3189,11 +3841,12 @@ public class Engine extends JPanel implements Runnable {
 
             g.setFont(new Font("Monospaced", Font.BOLD, 20));
             g.setColor(new Color(175, 188, 204));
-            g.drawString("/ " + activeWeapon.getReserveAmmo(), amX + 68, amY + 57);
+            int reserveX = (mag >= 100) ? (amX + 86) : (amX + 68);
+            g.drawString("/ " + activeWeapon.getReserveAmmo(), reserveX, amY + 57);
 
             g.setFont(new Font("SansSerif", Font.PLAIN, 11));
             g.setColor(new Color(160, 178, 198));
-            g.drawString("[ПКМ] Зум  [F] Осмотр  [H] Скин", amX + 146, amY + 56);
+            g.drawString("[ПКМ] Зум  [F] Осмотр  [H] Скин", amX + 150, amY + 56);
         }
 
         Weapon[] allW = player.getWeapons();
@@ -3286,6 +3939,31 @@ public class Engine extends JPanel implements Runnable {
             g.setColor(Math.sin(plantedC4.blinkPhase) > 0.0 ? new Color(255, 52, 42) : new Color(255, 215, 75));
             g.fillOval(cx - 5, cz - 5, 10, 10);
         }
+        // Авто-турели CT, десантные ящики Supply Drop и Боевой Вертолёт на радаре!
+        for (int i = 0; i < sentryTurrets.size(); i++) {
+            Vec3.SentryTurret t = sentryTurrets.get(i);
+            if (!t.isAlive()) continue;
+            int tx = rx + pad + (int) (((t.pos.x - Map.MIN_X) / span) * inner);
+            int tz = ry + pad + (int) (((Map.MAX_Z - t.pos.z) / span) * inner);
+            g.setColor(new Color(64, 240, 255));
+            g.fillRect(tx - 3, tz - 3, 7, 7);
+        }
+        for (int i = 0; i < supplyDrops.size(); i++) {
+            Vec3.SupplyDrop sd = supplyDrops.get(i);
+            if (sd.life <= 0.0) continue;
+            int dx = rx + pad + (int) (((sd.pos.x - Map.MIN_X) / span) * inner);
+            int dz = ry + pad + (int) (((Map.MAX_Z - sd.pos.z) / span) * inner);
+            g.setColor(new Color(255, 214, 68));
+            g.fillRect(dx - 3, dz - 3, 7, 7);
+        }
+        if (bossHelicopter != null && bossHelicopter.isAlive()) {
+            int hx = rx + pad + (int) (((bossHelicopter.pos.x - Map.MIN_X) / span) * inner);
+            int hz = ry + pad + (int) (((Map.MAX_Z - bossHelicopter.pos.z) / span) * inner);
+            g.setColor(new Color(255, 72, 48));
+            g.fillOval(hx - 5, hz - 5, 11, 11);
+            g.setColor(new Color(255, 226, 120));
+            g.drawOval(hx - 6, hz - 6, 13, 13);
+        }
 
         Vec3 eye = player.getEyePosition();
         for (int i = 0; i < bots.size(); i++) {
@@ -3369,17 +4047,21 @@ public class Engine extends JPanel implements Runnable {
     }
 
     private void drawRoundStartBanner(Graphics2D g, int outW, int outH) {
-        int bw = 460, bh = 68;
-        int bx = outW / 2 - bw / 2, by = 88;
+        int bw = 472, bh = 66;
+        int bx = outW / 2 - bw / 2;
+        int by = (bossHelicopter != null && bossHelicopter.isAlive()) ? 120 : 88;
         g.setColor(new Color(16, 20, 28, 198));
         g.fillRoundRect(bx, by, bw, bh, 12, 12);
         g.setColor(new Color(245, 195, 72, 175));
         g.drawRoundRect(bx, by, bw, bh, 12, 12);
 
-        drawCenteredText(g, "РАУНД " + currentRound + " • СЛОЖНОСТЬ: " + settings.botDifficulty.label.toUpperCase(),
-                outW / 2, by + 29, new Font("SansSerif", Font.BOLD, 17), new Color(252, 212, 92));
-        drawCenteredText(g, "Магазин оружия: [B] • Осмотр: [F] • Гранаты: [G / Q]",
-                outW / 2, by + 52, new Font("SansSerif", Font.PLAIN, 13), new Color(220, 226, 235));
+        String topTitle = (settings.gameMode == GameSettings.GameMode.SIEGE_WAVES)
+                ? ("ОСАДА: ВОЛНА " + siegeWave + "/" + MAX_SIEGE_WAVES + " • СЛОЖНОСТЬ: " + settings.botDifficulty.label.toUpperCase())
+                : ("РАУНД " + currentRound + " • СЛОЖНОСТЬ: " + settings.botDifficulty.label.toUpperCase());
+        drawCenteredText(g, topTitle,
+                outW / 2, by + 28, new Font("SansSerif", Font.BOLD, 16), new Color(252, 212, 92));
+        drawCenteredText(g, "Магазин: [B] • Авто-Турель: [J] • Вызов Босс-Вертолёта: [K]",
+                outW / 2, by + 50, new Font("SansSerif", Font.PLAIN, 12), new Color(220, 226, 235));
     }
 
     private void drawRoundOverBanner(Graphics2D g, int outW, int outH) {
@@ -3474,7 +4156,9 @@ public class Engine extends JPanel implements Runnable {
 
         drawCenteredText(g, victory ? "ПОБЕДА В МАТЧЕ!" : "ПОРАЖЕНИЕ В МАТЧЕ",
                 outW / 2, cy + 50, new Font("SansSerif", Font.BOLD, 32), accent);
-        drawCenteredText(g, victory ? "Спецназ успешно зачистил арену Dust II!" : "Отряд противников одержал верх",
+        drawCenteredText(g, victory
+                ? ("Спецназ успешно зачистил арену " + settings.mapTheme.label + "!")
+                : "Отряд противников одержал верх",
                 outW / 2, cy + 80, new Font("SansSerif", Font.PLAIN, 15), new Color(214, 222, 234));
 
         int statX = cx + 44, statY = cy + 102, statW = cw - 88, statH = 152;

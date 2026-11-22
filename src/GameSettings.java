@@ -5,26 +5,29 @@ import java.io.FileOutputStream;
 import java.util.Properties;
 
 /**
- * Центральное хранилище настроек игры, настроек графики, управления, прицела и звука.
- * Автоматически сохраняет и загружает конфигурацию игрока в файл settings.properties.
+ * Центральное хранилище настроек игры CS-2 JAVA 5.0 (Source 2 Smooth HD & Siege Edition):
+ * - Нативное HD/FullHD разрешение (до 1920x1080), билинейная фильтрация текстур 256x256 с Mipmap и сглаживание FXAA
+ * - 4 арены (Dust II, Mirage, Nuke, Inferno), 5 режимов (включая «Осада: Волны + Вертолёт») и 3D-погода
+ * - Потокобезопасное сохранение и загрузка в settings.properties
  */
 public class GameSettings {
 
     public enum QualityPreset {
-        LOW("Низкое"),
+        LOW("Низкое (Быстро)"),
         MEDIUM("Среднее"),
-        HIGH("Высокое"),
-        ULTRA("Ультра");
+        HIGH("Высокое (Native HD)"),
+        ULTRA("Ультра (Full HD + FXAA)");
 
         public final String title;
         QualityPreset(String title) { this.title = title; }
     }
 
     public enum ResolutionScale {
-        LOW_480("480×270 (Макс. FPS)", 480, 270),
-        MED_640("640×360 (Стандарт)", 640, 360),
-        HIGH_854("854×480 (HD Четкость)", 854, 480),
-        ULTRA_960("960×540 (Ультра)", 960, 540);
+        LOW_854("854×480 (Макс. FPS)", 854, 480),
+        MED_1024("1024×576 (Плавный HD)", 1024, 576),
+        HIGH_1280("1280×720 (Native HD 720p)", 1280, 720),
+        ULTRA_1600("1600×900 (HD+ Чёткость)", 1600, 900),
+        EXTREME_1920("1920×1080 (Full HD 1080p)", 1920, 1080);
 
         public final String label;
         public final int width;
@@ -53,6 +56,15 @@ public class GameSettings {
 
         public final String label;
         TimeOfDay(String label) { this.label = label; }
+    }
+
+    public enum WeatherMode {
+        CLEAR("Ясно (Без осадков)"),
+        RAIN_STORM("Ливень и гроза"),
+        SNOW("Снегопад");
+
+        public final String label;
+        WeatherMode(String label) { this.label = label; }
     }
 
     public enum BotDifficulty {
@@ -93,7 +105,8 @@ public class GameSettings {
     public enum MapTheme {
         DUST_II("Dust II (Пески)"),
         MIRAGE("Mirage (Дворец)"),
-        NUKE("Nuke (Комплекс)");
+        NUKE("Nuke (Комплекс)"),
+        INFERNO("Inferno (Старый город)");
 
         public final String label;
         MapTheme(String label) { this.label = label; }
@@ -101,9 +114,10 @@ public class GameSettings {
 
     public enum GameMode {
         BOMB_DEFUSAL("Операция C4 (Пленты A/B)"),
+        SIEGE_WAVES("Осада (Волны + Вертолёт)"),
+        ARMS_RACE("Гонка вооружений"),
         ELIMINATION("Классика: Зачистка"),
-        DEATHMATCH("Бой насмерть (DM)"),
-        ARMS_RACE("Гонка вооружений");
+        DEATHMATCH("Бой насмерть (DM)");
 
         public final String label;
         GameMode(String label) { this.label = label; }
@@ -132,19 +146,22 @@ public class GameSettings {
 
     private static final String SETTINGS_FILE = "settings.properties";
 
-    // --- НАСТРОЙКИ ГРАФИКИ ---
+    // --- НАСТРОЙКИ ГЛАДКОЙ HD-ГРАФИКИ (БЕЗ ПИКСЕЛИЗАЦИИ!) ---
     public QualityPreset qualityPreset = QualityPreset.HIGH;
-    public ResolutionScale resolutionScale = ResolutionScale.HIGH_854;
+    public ResolutionScale resolutionScale = ResolutionScale.HIGH_1280;
     public ShadowMode shadowMode = ShadowMode.SUN_PROJECTED;
-    public boolean bilinearFiltering = false;
+    public boolean bilinearFiltering = true;
+    public boolean smoothTextures = true;
+    public boolean fxaaAntiAliasing = true;
     public boolean skyCloudsAndSunFlare = true;
     public boolean decalsAndShells = true;
     public boolean fogAndVignette = true;
-    public int fovDegrees = 68;         // Вертикальный FOV (55..82)
+    public int fovDegrees = 68;         // Вертикальный FOV (55..84)
     public int fpsLimit = 60;           // 60, 120 или 0 (без лимита)
     public boolean showFpsTelemetry = true;
     public boolean fullscreen = false;
     public TimeOfDay timeOfDay = TimeOfDay.DAY;
+    public WeatherMode weatherMode = WeatherMode.CLEAR;
 
     // --- НАСТРОЙКИ ГЕЙМПЛЕЯ И УПРАВЛЕНИЯ ---
     public double mouseSensitivity = 0.0024;
@@ -155,7 +172,7 @@ public class GameSettings {
     public boolean showDamageNumbers = true;
 
     // --- ПАРАМЕТРЫ МАТЧА И АРСЕНАЛА ---
-    public MapTheme mapTheme = MapTheme.DUST_II;
+    public MapTheme mapTheme = MapTheme.INFERNO;
     public GameMode gameMode = GameMode.BOMB_DEFUSAL;
     public WeaponSkin weaponSkin = WeaponSkin.STANDARD;
     public BotDifficulty botDifficulty = BotDifficulty.NORMAL;
@@ -167,6 +184,9 @@ public class GameSettings {
     public double masterVolume = 0.85;  // 0.0 .. 1.0
     public boolean footstepSounds = true;
 
+    private final Object saveLock = new Object();
+    private volatile boolean savePending = false;
+
     public GameSettings() {
         load();
     }
@@ -175,33 +195,41 @@ public class GameSettings {
         this.qualityPreset = preset;
         switch (preset) {
             case LOW:
-                resolutionScale = ResolutionScale.LOW_480;
+                resolutionScale = ResolutionScale.LOW_854;
                 shadowMode = ShadowMode.OFF;
-                bilinearFiltering = false;
+                bilinearFiltering = true;
+                smoothTextures = false;
+                fxaaAntiAliasing = false;
                 skyCloudsAndSunFlare = false;
                 decalsAndShells = false;
                 fogAndVignette = false;
                 break;
             case MEDIUM:
-                resolutionScale = ResolutionScale.MED_640;
+                resolutionScale = ResolutionScale.MED_1024;
                 shadowMode = ShadowMode.BLOBS;
-                bilinearFiltering = false;
+                bilinearFiltering = true;
+                smoothTextures = true;
+                fxaaAntiAliasing = false;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
                 fogAndVignette = true;
                 break;
             case HIGH:
-                resolutionScale = ResolutionScale.HIGH_854;
+                resolutionScale = ResolutionScale.HIGH_1280;
                 shadowMode = ShadowMode.SUN_PROJECTED;
-                bilinearFiltering = false;
+                bilinearFiltering = true;
+                smoothTextures = true;
+                fxaaAntiAliasing = true;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
                 fogAndVignette = true;
                 break;
             case ULTRA:
-                resolutionScale = ResolutionScale.ULTRA_960;
+                resolutionScale = ResolutionScale.EXTREME_1920;
                 shadowMode = ShadowMode.SUN_PROJECTED;
                 bilinearFiltering = true;
+                smoothTextures = true;
+                fxaaAntiAliasing = true;
                 skyCloudsAndSunFlare = true;
                 decalsAndShells = true;
                 fogAndVignette = true;
@@ -219,6 +247,8 @@ public class GameSettings {
             resolutionScale = parseEnum(p.getProperty("resolutionScale"), ResolutionScale.class, resolutionScale);
             shadowMode = parseEnum(p.getProperty("shadowMode"), ShadowMode.class, shadowMode);
             bilinearFiltering = Boolean.parseBoolean(p.getProperty("bilinearFiltering", String.valueOf(bilinearFiltering)));
+            smoothTextures = Boolean.parseBoolean(p.getProperty("smoothTextures", String.valueOf(smoothTextures)));
+            fxaaAntiAliasing = Boolean.parseBoolean(p.getProperty("fxaaAntiAliasing", String.valueOf(fxaaAntiAliasing)));
             skyCloudsAndSunFlare = Boolean.parseBoolean(p.getProperty("skyCloudsAndSunFlare", String.valueOf(skyCloudsAndSunFlare)));
             decalsAndShells = Boolean.parseBoolean(p.getProperty("decalsAndShells", String.valueOf(decalsAndShells)));
             fogAndVignette = Boolean.parseBoolean(p.getProperty("fogAndVignette", String.valueOf(fogAndVignette)));
@@ -226,6 +256,7 @@ public class GameSettings {
             fpsLimit = clampInt(p.getProperty("fpsLimit"), 0, 240, fpsLimit);
             showFpsTelemetry = Boolean.parseBoolean(p.getProperty("showFpsTelemetry", String.valueOf(showFpsTelemetry)));
             timeOfDay = parseEnum(p.getProperty("timeOfDay"), TimeOfDay.class, timeOfDay);
+            weatherMode = parseEnum(p.getProperty("weatherMode"), WeatherMode.class, weatherMode);
 
             mouseSensitivity = clampDouble(p.getProperty("mouseSensitivity"), 0.0005, 0.0080, mouseSensitivity);
             invertMouseY = Boolean.parseBoolean(p.getProperty("invertMouseY", String.valueOf(invertMouseY)));
@@ -248,9 +279,6 @@ public class GameSettings {
         }
     }
 
-    private final Object saveLock = new Object();
-    private volatile boolean savePending = false;
-
     public void save() {
         final Properties snapshot = buildPropertiesSnapshot();
         savePending = true;
@@ -259,7 +287,7 @@ public class GameSettings {
                 if (!savePending) return;
                 savePending = false;
                 try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                    snapshot.store(fos, "CS-2 JAVA Configuration");
+                    snapshot.store(fos, "CS-2 JAVA 5.0 Configuration");
                 } catch (Throwable ignored) {
                 }
             }
@@ -273,7 +301,7 @@ public class GameSettings {
         synchronized (saveLock) {
             savePending = false;
             try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                snapshot.store(fos, "CS-2 JAVA Configuration");
+                snapshot.store(fos, "CS-2 JAVA 5.0 Configuration");
             } catch (Throwable ignored) {
             }
         }
@@ -285,6 +313,8 @@ public class GameSettings {
         p.setProperty("resolutionScale", resolutionScale.name());
         p.setProperty("shadowMode", shadowMode.name());
         p.setProperty("bilinearFiltering", String.valueOf(bilinearFiltering));
+        p.setProperty("smoothTextures", String.valueOf(smoothTextures));
+        p.setProperty("fxaaAntiAliasing", String.valueOf(fxaaAntiAliasing));
         p.setProperty("skyCloudsAndSunFlare", String.valueOf(skyCloudsAndSunFlare));
         p.setProperty("decalsAndShells", String.valueOf(decalsAndShells));
         p.setProperty("fogAndVignette", String.valueOf(fogAndVignette));
@@ -292,6 +322,7 @@ public class GameSettings {
         p.setProperty("fpsLimit", String.valueOf(fpsLimit));
         p.setProperty("showFpsTelemetry", String.valueOf(showFpsTelemetry));
         p.setProperty("timeOfDay", timeOfDay.name());
+        p.setProperty("weatherMode", weatherMode.name());
 
         p.setProperty("mouseSensitivity", String.valueOf(mouseSensitivity));
         p.setProperty("invertMouseY", String.valueOf(invertMouseY));

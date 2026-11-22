@@ -1,12 +1,12 @@
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
-title CS-2 JAVA 4.0 — Сборка и запуск
+title CS-2 JAVA 5.0 — Smooth HD & Siege Edition
 
 cd /d "%~dp0"
 
 echo ================================================================
-echo   CS-2 JAVA 4.0 : Dust II • Mirage • Nuke 3D Arena
+echo   CS-2 JAVA 5.0 : Smooth HD • Inferno • Siege Bosses Edition
 echo ================================================================
 echo.
 
@@ -117,11 +117,11 @@ echo Компиляция успешно завершена!
 echo.
 
 :: 4. Запуск скомпилированной игры
-echo [4/4] Запуск CS-2 JAVA...
-echo Управление: WASD - движение, Space - прыжок, Ctrl - присед, ЛКМ - стрельба,
-echo             R - перезарядка, 1/2/3 - оружие, Tab - счет, F5 - рестарт, ESC - пауза.
+echo [4/4] Запуск CS-2 JAVA 5.0 (Smooth HD Engine)...
+echo Управление: WASD - движение, B - магазин (M249/RPG-7), J - авто-турель CT,
+echo             K - Босс-Вертолёт, Z - радио, Y - граффити, F11 - полный экран.
 echo.
-"%JAVA_CMD%" -Xms256m -Xmx1024m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -cp "bin;lib\*" Main
+"%JAVA_CMD%" -Xms256m -Xmx1536m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -cp "bin;lib\*" Main
 if errorlevel 1 goto :RUNTIME_ERROR
 goto :EOF
 

@@ -53,6 +53,9 @@ public class SoundSystem {
     private final byte[] sfxSprayCan;
     private final byte[] sfxRadioChirp;
     private final byte[] sfxLevelUp;
+    private final byte[] sfxM249Shot;
+    private final byte[] sfxRpgLaunch;
+    private final byte[] sfxTurretShot;
 
     public SoundSystem(boolean enabled) {
         this.format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
@@ -89,6 +92,9 @@ public class SoundSystem {
         this.sfxSprayCan    = buildSprayCanSound();
         this.sfxRadioChirp  = buildRadioChirpSound();
         this.sfxLevelUp     = buildLevelUpSound();
+        this.sfxM249Shot    = buildGunshot(0.18, 162.0, 44.0, 1.05, 8888L);
+        this.sfxRpgLaunch   = buildRpgLaunchSound();
+        this.sfxTurretShot  = buildGunshot(0.09, 340.0, 110.0, 0.56, 6161L);
 
         if (this.audioAvailable) {
             this.audioPool = Executors.newCachedThreadPool(r -> {
@@ -119,6 +125,8 @@ public class SoundSystem {
             case AK47:   playAsync(sfxAkShot, 1.0); break;
             case M4A1S:  playAsync(sfxM4Silenced, 0.90); break;
             case AWP:    playAsync(sfxAwpBoom, 1.0); break;
+            case M249:   playAsync(sfxM249Shot, 0.96); break;
+            case RPG7:   playAsync(sfxRpgLaunch, 1.0); break;
             case XM1014: playAsync(sfxShotgun, 0.98); break;
             case MP9:    playAsync(sfxMp9Shot, 0.86); break;
             case GLOCK:  playAsync(sfxGlockShot, 0.90); break;
@@ -126,6 +134,11 @@ public class SoundSystem {
             case ZEUS:   playAsync(sfxZeusZap, 1.0); break;
             case KNIFE:  playAsync(sfxKnifeSlash, 0.85); break;
         }
+    }
+
+    public void playTurretShot(double distance) {
+        double atten = Math.max(0.12, Math.min(0.80, 1.0 - distance / 52.0));
+        playAsync(sfxTurretShot, atten);
     }
 
     public void playBotShot(double distance) {
@@ -544,6 +557,23 @@ public class SoundSystem {
             double local = ((i * 4.0) / count) - idx;
             double env = Math.pow(Math.max(0.0, 1.0 - local * 0.72), 1.2);
             buf[i] = Math.sin(2.0 * Math.PI * notes[idx] * sec) * env * 0.55;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildRpgLaunchSound() {
+        int count = (int) (SAMPLE_RATE * 0.52);
+        double[] buf = new double[count];
+        Random rng = new Random(9090L);
+        double lp = 0.0;
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double sec = i / SAMPLE_RATE;
+            double noise = rng.nextDouble() * 2.0 - 1.0;
+            lp = lp * 0.72 + noise * 0.28;
+            double roar = Math.sin(2.0 * Math.PI * (95.0 + 180.0 * t) * sec) * 0.42;
+            double env = Math.sin(Math.min(1.0, t * 8.0) * Math.PI * 0.5) * Math.pow(1.0 - t, 0.85);
+            buf[i] = Math.tanh((lp * 1.35 + roar) * 1.45) * env;
         }
         return toPcmBytes(buf);
     }

@@ -2,12 +2,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Мульти-картовая 3D-арена CS-2 JAVA 4.0:
- * Поддерживает 3 уникальные тактические карты Counter-Strike 2:
- * 1) DUST_II — песчаные стены, центральные Двойные двери Мида, минарет, Пленты A и B;
- * 2) MIRAGE  — марокканский дворец с колоннадой, Окно снайпера на Миду, Тикет-бокс и Пальмы;
- * 3) NUKE    — индустриальный ядерный комплекс с парными желтыми реакторами Силоса A и бочками B.
- * Также реализует AABB-коллизии, прострел деревянных преград (Wallbang) и перекрытие обзора дымом.
+ * Мульти-картовая 3D-арена CS-2 JAVA 5.0 (Source 2 Smooth Architecture):
+ * Поддерживает 4 уникальные тактические арены с гладкими цилиндрическими колоннами, куполами, деревьями и фонтаном:
+ * 1) INFERNO — европейский старый город с каменной брусчаткой, виллами с черепицей, Фонтаном, Колокольней и Кипарисами;
+ * 2) DUST_II — песчаные стены, центральные Двойные двери Мида, гладкий купол Минарета, Пленты A и B;
+ * 3) MIRAGE  — марокканский дворец с круглой колоннадой, Окном снайпера на Миду, Тикет-боксом и Пальмами;
+ * 4) NUKE    — ядерный комплекс с круглыми желтыми реакторами Силоса A, градирней АЭС и бочками B.
  */
 public class Map {
     public static final double MIN_X = -24.0;
@@ -15,8 +15,48 @@ public class Map {
     public static final double MIN_Z = -24.0;
     public static final double MAX_Z = 24.0;
 
-    private GameSettings.MapTheme currentTheme = GameSettings.MapTheme.DUST_II;
+    private static class SmoothCylinderProp {
+        final double cx, bottomY, cz, radBottom, radTop, height;
+        final int segments, texId, color;
+
+        SmoothCylinderProp(double cx, double bottomY, double cz,
+                           double radBottom, double radTop, double height,
+                           int segments, int texId, int color) {
+            this.cx = cx;
+            this.bottomY = bottomY;
+            this.cz = cz;
+            this.radBottom = radBottom;
+            this.radTop = radTop;
+            this.height = height;
+            this.segments = segments;
+            this.texId = texId;
+            this.color = color;
+        }
+    }
+
+    private static class SmoothEllipsoidProp {
+        final double cx, cy, cz, rx, ry, rz;
+        final int segments, rings, color;
+
+        SmoothEllipsoidProp(double cx, double cy, double cz,
+                            double rx, double ry, double rz,
+                            int segments, int rings, int color) {
+            this.cx = cx;
+            this.cy = cy;
+            this.cz = cz;
+            this.rx = rx;
+            this.ry = ry;
+            this.rz = rz;
+            this.segments = segments;
+            this.rings = rings;
+            this.color = color;
+        }
+    }
+
+    private GameSettings.MapTheme currentTheme = GameSettings.MapTheme.INFERNO;
     private final List<Vec3.Box> boxes = new ArrayList<>();
+    private final List<SmoothCylinderProp> smoothCylinders = new ArrayList<>();
+    private final List<SmoothEllipsoidProp> smoothEllipsoids = new ArrayList<>();
     private final List<Vec3> botSpawns = new ArrayList<>();
     private final List<Vec3> allySpawns = new ArrayList<>();
     private final List<Vec3> patrolWaypoints = new ArrayList<>();
@@ -27,7 +67,7 @@ public class Map {
     private int floorTexId = Renderer3D.TEX_FLOOR_SAND;
 
     public Map() {
-        rebuildForTheme(GameSettings.MapTheme.DUST_II);
+        rebuildForTheme(GameSettings.MapTheme.INFERNO);
     }
 
     public GameSettings.MapTheme getCurrentTheme() { return currentTheme; }
@@ -40,13 +80,18 @@ public class Map {
     public Vec3 getBombsiteBSpot() { return bombsiteBSpot.copy(); }
 
     public void rebuildForTheme(GameSettings.MapTheme theme) {
-        this.currentTheme = (theme != null) ? theme : GameSettings.MapTheme.DUST_II;
+        this.currentTheme = (theme != null) ? theme : GameSettings.MapTheme.INFERNO;
         boxes.clear();
+        smoothCylinders.clear();
+        smoothEllipsoids.clear();
         botSpawns.clear();
         allySpawns.clear();
         patrolWaypoints.clear();
 
         switch (this.currentTheme) {
+            case INFERNO:
+                buildInfernoArena();
+                break;
             case MIRAGE:
                 buildMirageArena();
                 break;
@@ -66,6 +111,11 @@ public class Map {
         allySpawns.add(new Vec3(3.2,  0.0, -19.2));
         allySpawns.add(new Vec3(-6.4, 0.0, -18.4));
         allySpawns.add(new Vec3(6.4,  0.0, -18.4));
+    }
+
+    private void addInvisibleCollider(double x0, double y0, double z0, double x1, double y1, double z1, boolean shadow) {
+        // collidable=true, textureId=-1 означает невидимый физический хитбокс для гладких цилиндров/колонн
+        boxes.add(new Vec3.Box(x0, y0, z0, x1, y1, z1, -1, 0xFFFFFF, 0.0, true, shadow));
     }
 
     private void addWallTex(double x0, double y0, double z0, double x1, double y1, double z1, int texId) {
@@ -97,23 +147,123 @@ public class Map {
     }
 
     private void addBarrel(double cx, double y0, double cz, int tint) {
-        boxes.add(new Vec3.Box(cx - 0.42, y0, cz - 0.42, cx + 0.42, y0 + 1.24, cz + 0.42,
-                Renderer3D.TEX_SOLID, tint, 0.0, true, true));
-        boxes.add(new Vec3.Box(cx - 0.45, y0 + 0.38, cz - 0.45, cx + 0.45, y0 + 0.46, cz + 0.45,
-                Renderer3D.TEX_SOLID, 0x2F343A, 0.0, false, false));
-        boxes.add(new Vec3.Box(cx - 0.45, y0 + 0.82, cz - 0.45, cx + 0.45, y0 + 0.90, cz + 0.45,
-                Renderer3D.TEX_SOLID, 0x2F343A, 0.0, false, false));
+        addInvisibleCollider(cx - 0.42, y0, cz - 0.42, cx + 0.42, y0 + 1.24, cz + 0.42, true);
+        smoothCylinders.add(new SmoothCylinderProp(cx, y0, cz, 0.43, 0.43, 1.24, 12, Renderer3D.TEX_SOLID, tint));
+        smoothCylinders.add(new SmoothCylinderProp(cx, y0 + 0.36, cz, 0.45, 0.45, 0.08, 12, Renderer3D.TEX_SOLID, 0x2B3038));
+        smoothCylinders.add(new SmoothCylinderProp(cx, y0 + 0.82, cz, 0.45, 0.45, 0.08, 12, Renderer3D.TEX_SOLID, 0x2B3038));
     }
 
     private void addPalmTree(double cx, double cz) {
-        addDecor(cx - 0.24, 0.0, cz - 0.24, cx + 0.24, 5.8, cz + 0.24, Renderer3D.TEX_SOLID, 0x6B4828, true);
-        addDecor(cx - 1.7, 5.5, cz - 0.45, cx + 1.7, 6.0, cz + 0.45, Renderer3D.TEX_SOLID, 0x2E8544, false);
-        addDecor(cx - 0.45, 5.5, cz - 1.7, cx + 0.45, 6.0, cz + 1.7, Renderer3D.TEX_SOLID, 0x35964C, false);
-        addDecor(cx - 1.15, 5.8, cz - 1.15, cx + 1.15, 6.3, cz + 1.15, Renderer3D.TEX_SOLID, 0x3EA656, false);
+        smoothCylinders.add(new SmoothCylinderProp(cx, 0.0, cz, 0.28, 0.19, 5.7, 10, Renderer3D.TEX_SOLID, 0x76502E));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(cx, 5.9, cz, 1.85, 0.55, 1.85, 10, 5, 0x35964C));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(cx + 0.55, 5.65, cz - 0.4, 1.35, 0.42, 0.95, 8, 4, 0x2D8040));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(cx - 0.55, 5.65, cz + 0.4, 1.35, 0.42, 0.95, 8, 4, 0x42AD5B));
+    }
+
+    private void addCypressTree(double cx, double cz, double height) {
+        smoothCylinders.add(new SmoothCylinderProp(cx, 0.0, cz, 0.22, 0.16, height * 0.28, 8, Renderer3D.TEX_SOLID, 0x5E4026));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(cx, height * 0.52, cz, 0.88, height * 0.34, 0.88, 10, 6, 0x286B38));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(cx, height * 0.82, cz, 0.56, height * 0.26, 0.56, 10, 5, 0x338244));
     }
 
     // =========================================================================
-    //  КАРТА 1: DUST II (ПЕСЧАНАЯ КЛАССИКА)
+    //  КАРТА 0 (НОВАЯ!): INFERNO — ЕВРОПЕЙСКИЙ СТАРЫЙ ГОРОД С ФОНТАНОМ И КОЛОКОЛЬНЕЙ
+    // =========================================================================
+    private void buildInfernoArena() {
+        floorTexId = Renderer3D.TEX_INFERNO_COBBLE;
+        playerSpawn = new Vec3(0.0, 0.0, -19.5);
+        bombsiteASpot = new Vec3(17.2, 0.0, 14.8);
+        bombsiteBSpot = new Vec3(-16.5, 0.0, 14.2);
+        siteAFloorY = 0.0;
+
+        double wallH = 5.6;
+        double t = 1.2;
+        int stucco = Renderer3D.TEX_INFERNO_STUCCO;
+        int roof = Renderer3D.TEX_ROOF_TILES;
+
+        // Внешние фасады итальянских вилл с черепичными карнизами
+        addWallTex(MIN_X - t, 0.0, MIN_Z - t, MAX_X + t, wallH, MIN_Z, stucco);
+        addWallTex(MIN_X - t, 0.0, MAX_Z,     MAX_X + t, wallH, MAX_Z + t, stucco);
+        addWallTex(MIN_X - t, 0.0, MIN_Z,     MIN_X,     wallH, MAX_Z, stucco);
+        addWallTex(MAX_X,     0.0, MIN_Z,     MAX_X + t, wallH, MAX_Z, stucco);
+
+        addDecor(MIN_X - t, wallH, MAX_Z - 0.3, MAX_X + t, wallH + 0.75, MAX_Z + t, roof, 0xFFFFFF, false);
+        addDecor(MIN_X - t, wallH, MIN_Z - t, MAX_X + t, wallH + 0.75, MIN_Z + 0.3, roof, 0xFFFFFF, false);
+        addDecor(MIN_X - t, wallH, MIN_Z, MIN_X + 0.3, wallH + 0.75, MAX_Z, roof, 0xFFFFFF, false);
+        addDecor(MAX_X - 0.3, wallH, MIN_Z, MAX_X + t, wallH + 0.75, MAX_Z, roof, 0xFFFFFF, false);
+
+        // Высокая итальянская Колокольня (Bell Tower) над площадью!
+        addDecor(3.5, wallH, MAX_Z + 0.8, 8.5, wallH + 8.6, MAX_Z + 5.8, stucco, 0xFFF3E2, false);
+        smoothCylinders.add(new SmoothCylinderProp(6.0, wallH + 8.6, MAX_Z + 3.3, 3.1, 0.15, 3.4, 8, roof, 0xD86848));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(6.0, wallH + 7.2, MAX_Z + 3.3, 0.65, 0.75, 0.65, 10, 5, 0xE6B83A));
+
+        // Кипарисы по периметру старинных улочек
+        addCypressTree(-10.5, -15.5, 6.8);
+        addCypressTree(10.8,  -15.2, 6.6);
+        addCypressTree(-21.5,   3.5, 7.2);
+        addCypressTree(21.5,    8.5, 7.0);
+
+        // ЗНАМЕНИТЫЙ КАМЕННЫЙ ФОНТАН НА ЦЕНТРАЛЬНОЙ ПЛОЩАДИ / B-SITE INFERNO!
+        double fx = 0.0, fz = -5.5;
+        addInvisibleCollider(fx - 2.1, 0.0, fz - 2.1, fx + 2.1, 1.05, fz + 2.1, true);
+        smoothCylinders.add(new SmoothCylinderProp(fx, 0.0,  fz, 2.35, 2.45, 0.82, 16, Renderer3D.TEX_CONCRETE, 0xDDD4C6));
+        smoothCylinders.add(new SmoothCylinderProp(fx, 0.02, fz, 2.05, 2.05, 0.76, 16, Renderer3D.TEX_WATER, 0xFFFFFF));
+        smoothCylinders.add(new SmoothCylinderProp(fx, 0.75, fz, 0.46, 0.32, 1.55, 12, Renderer3D.TEX_CONCRETE, 0xEAE2D6));
+        smoothCylinders.add(new SmoothCylinderProp(fx, 1.65, fz, 0.95, 1.08, 0.24, 14, Renderer3D.TEX_CONCRETE, 0xEAE2D6));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(fx, 2.48, fz, 0.36, 0.42, 0.36, 10, 5, 0x8CE8FF));
+
+        // Центральная арка Мида с деревянными воротами и черепичным навесом
+        addWallTex(-10.8, 0.0, 0.6, -2.8, 4.6, 2.0, stucco);
+        addWallTex(2.8,   0.0, 0.6, 10.8, 4.6, 2.0, stucco);
+        addConcrete(-3.0, 3.4, 0.4, 3.0, 4.7, 2.2, 0xDDD2C2);
+        addDecor(-11.0, 4.6, 0.2, 11.0, 5.2, 2.4, roof, 0xFFFFFF, true);
+        boxes.add(new Vec3.Box(-2.8, 0.0, 1.15, -0.9, 3.4, 1.48,
+                Renderer3D.TEX_METAL_DOOR, 0xC89B6E, 0.0, true, true));
+        boxes.add(new Vec3.Box(0.9,  0.0, 1.15,  2.8, 3.4, 1.48,
+                Renderer3D.TEX_METAL_DOOR, 0xC89B6E, 0.0, true, true));
+
+        // Аллея «Банан» (Banana) слева с каменными колоннами, дровами и винными бочками
+        for (int i = 0; i < 3; i++) {
+            double bz = -10.5 + i * 5.6;
+            addInvisibleCollider(-14.2, 0.0, bz - 0.5, -13.1, 4.2, bz + 0.5, true);
+            smoothCylinders.add(new SmoothCylinderProp(-13.65, 0.0, bz, 0.52, 0.46, 4.2, 12, Renderer3D.TEX_CONCRETE, 0xE6DCCB));
+        }
+        addDecor(-24.0, 4.2, -11.5, -13.0, 4.75, 1.5, roof, 0xFFFFFF, true);
+        addWoodCrate(-18.2, 0.0, -7.8, 1.65, 1.50);
+        addBarrel(-16.2, 0.0, -2.4, 0x7A482A);
+        addBarrel(-15.2, 0.0, -2.1, 0x7A482A);
+
+        // Плент B (Старинная площадь с гробами/ящиками и каменным укрытием)
+        addWallTex(-18.6, 0.0, 6.8, -12.6, 3.7, 8.2, stucco);
+        addMilitaryCrate(-20.8, 0.0, 14.8, -17.6, 1.65, 16.8);
+        addWoodCrate(-19.2, 1.65, 15.8, 1.50, 1.42);
+        addWoodCrate(-14.2, 0.0, 17.6, 1.70, 1.62);
+        addBarrel(-17.4, 0.0, 12.2, 0x8C3D2B);
+
+        // Балкон Апартаментов (Apartments) справа и Плент A с круглой ротондой
+        addWallTex(13.8, 0.0, -9.5, 18.8, 3.5, -6.8, stucco);
+        addDecor(13.4, 3.5, -9.9, 19.2, 4.1, -6.4, roof, 0xFFFFFF, true);
+        addWoodCrate(15.2, 0.0, -2.5, 1.65, 1.55);
+
+        // Колонны Библиотеки / Pit на Пленте A
+        for (int i = 0; i < 2; i++) {
+            double px = 14.2 + i * 5.8;
+            addInvisibleCollider(px - 0.5, 0.0, 10.5, px + 0.5, 4.4, 11.5, true);
+            smoothCylinders.add(new SmoothCylinderProp(px, 0.0, 11.0, 0.54, 0.48, 4.4, 12, Renderer3D.TEX_CONCRETE, 0xEAE0D0));
+        }
+        addDecor(13.4, 4.4, 10.2, 20.8, 5.0, 11.8, roof, 0xFFFFFF, true);
+
+        addWoodCrate(18.2, 0.0, 16.8, 1.75, 1.70);
+        addWoodCrate(20.0, 0.0, 16.8, 1.75, 1.70);
+        addWoodCrate(19.1, 1.70, 16.8, 1.55, 1.48);
+        addMilitaryCrate(-3.8, 0.0, 8.8, -0.6, 1.42, 10.6);
+        addWoodCrate(5.2, 0.0, 7.6, 1.65, 1.55);
+
+        populateStandardSpawnsAndWaypoints(0.0);
+    }
+
+    // =========================================================================
+    //  КАРТА 1: DUST II (ПЕСЧАНАЯ КЛАССИКА С ГЛАДКИМ МИНАРЕТОМ)
     // =========================================================================
     private void buildDust2Arena() {
         floorTexId = Renderer3D.TEX_FLOOR_SAND;
@@ -134,8 +284,12 @@ public class Map {
         addDecor(MIN_X - t, wallH, MIN_Z - t, MAX_X + t, wallH + 0.55, MIN_Z, Renderer3D.TEX_CONCRETE, 0xE8D4B2, false);
         addDecor(-17.5, wallH, MAX_Z + 0.3, -11.5, wallH + 4.5, MAX_Z + 4.8, Renderer3D.TEX_WALL_SANDSTONE, 0xF2DEC0, false);
         addDecor(10.5,  wallH, MAX_Z + 0.3,  17.5, wallH + 5.2, MAX_Z + 5.5, Renderer3D.TEX_WALL_SANDSTONE, 0xF5E4C8, false);
-        addDecor(-2.0, wallH, MAX_Z + 2.5, 1.2, wallH + 7.8, MAX_Z + 5.7, Renderer3D.TEX_CONCRETE, 0xF4E4C8, false);
-        addDecor(-1.4, wallH + 7.8, MAX_Z + 3.1, 0.6, wallH + 9.6, MAX_Z + 5.1, Renderer3D.TEX_SOLID, 0xD8B47C, false);
+
+        // Гладкий круглый Минарет и золотой купол на горизонте Dust II!
+        smoothCylinders.add(new SmoothCylinderProp(-0.4, wallH, MAX_Z + 4.1, 1.55, 1.25, 7.6, 14, Renderer3D.TEX_CONCRETE, 0xF4E4C8));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(-0.4, wallH + 8.2, MAX_Z + 4.1, 1.45, 1.65, 1.45, 14, 7, 0xE5BE68));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(14.0, wallH + 5.4, MAX_Z + 3.0, 2.5, 1.8, 2.5, 14, 6, 0xDFBA78));
+
         addDecor(-26.8, wallH, -7.5, -24.1, wallH + 4.0, 1.5, Renderer3D.TEX_WALL_SANDSTONE, 0xEED8B4, false);
         addDecor(24.1,  wallH,  2.5,  27.5, wallH + 4.4, 12.5, Renderer3D.TEX_WALL_SANDSTONE, 0xEED8B4, false);
 
@@ -155,8 +309,7 @@ public class Map {
         for (int b = -2; b <= 2; b += 2) {
             addDecor(-24.0, 4.45, b * 1.1 - 0.18, -12.3, 4.72, b * 1.1 + 0.18, Renderer3D.TEX_SOLID, 0x6E4726, true);
         }
-        addDecor(-8.8, 0.0, -9.8, -8.45, 6.2, -9.45, Renderer3D.TEX_SOLID, 0x5C3D22, true);
-        addDecor(-9.3, 5.7, -9.72, -7.95, 5.84, -9.52, Renderer3D.TEX_SOLID, 0x4A311C, false);
+        smoothCylinders.add(new SmoothCylinderProp(-8.6, 0.0, -9.6, 0.18, 0.15, 6.2, 8, Renderer3D.TEX_SOLID, 0x5C3D22));
 
         addConcrete(-4.6, 0.0, -12.6, -1.3, 1.12, -11.6, 0xE5D2B0);
         addConcrete(1.8,  0.0, -14.8,  5.0, 1.12, -13.8, 0xE5D2B0);
@@ -208,7 +361,7 @@ public class Map {
     }
 
     // =========================================================================
-    //  КАРТА 2: MIRAGE (МАРОККАНСКИЙ ДВОРЕЦ И СНАЙПЕРСКОЕ ОКНО)
+    //  КАРТА 2: MIRAGE (МАРОККАНСКИЙ ДВОРЕЦ С КРУГЛЫМИ КОЛОННАМИ И КУПОЛАМИ)
     // =========================================================================
     private void buildMirageArena() {
         floorTexId = Renderer3D.TEX_MIRAGE_TILE;
@@ -221,53 +374,48 @@ public class Map {
         double t = 1.2;
         int wTex = Renderer3D.TEX_MIRAGE_PLASTER;
 
-        // Внешние терракотовые стены Mirage с мозаичным фризом
         addWallTex(MIN_X - t, 0.0, MIN_Z - t, MAX_X + t, wallH, MIN_Z, wTex);
         addWallTex(MIN_X - t, 0.0, MAX_Z,     MAX_X + t, wallH, MAX_Z + t, wTex);
         addWallTex(MIN_X - t, 0.0, MIN_Z,     MIN_X,     wallH, MAX_Z, wTex);
         addWallTex(MAX_X,     0.0, MIN_Z,     MAX_X + t, wallH, MAX_Z, wTex);
 
-        // Купола Дворца (Palace) и пальмы на фоне неба
-        addDecor(12.0, wallH, MAX_Z + 0.4, 21.5, wallH + 4.8, MAX_Z + 6.0, wTex, 0xFFE6CC, false);
-        addDecor(14.5, wallH + 4.8, MAX_Z + 1.8, 19.0, wallH + 7.2, MAX_Z + 5.0, Renderer3D.TEX_SOLID, 0x2B82A6, false);
+        // Лазурный сферический купол Дворца (Palace) и пальмы с гладкими стволами!
+        addDecor(12.0, wallH, MAX_Z + 0.4, 21.5, wallH + 4.6, MAX_Z + 6.0, wTex, 0xFFE6CC, false);
+        smoothEllipsoids.add(new SmoothEllipsoidProp(16.8, wallH + 5.2, MAX_Z + 3.2, 2.8, 2.2, 2.8, 14, 7, 0x2B88AE));
         addDecor(-20.0, wallH, MAX_Z + 0.4, -12.0, wallH + 4.4, MAX_Z + 5.2, wTex, 0xFFE2C4, false);
+        smoothEllipsoids.add(new SmoothEllipsoidProp(-16.0, wallH + 4.8, MAX_Z + 2.8, 2.2, 1.7, 2.2, 12, 6, 0xD8A24A));
+
         addPalmTree(-9.5, -13.5);
         addPalmTree(10.2, -13.2);
         addPalmTree(-8.8, 16.5);
 
-        // Центральный комплекс «Окно снайпера» (Window / Connector) на Миду
         addWallTex(-9.8, 0.0, -1.2, -3.4, 4.4, 1.2, wTex);
         addWallTex(3.4,  0.0, -1.2,  9.8, 4.4, 1.2, wTex);
-        // Подоконник и верхняя арка снайперского Окна (через него идет перестрелка на Миду!)
         addConcrete(-3.4, 0.0, -0.8, 3.4, 1.05, 0.8, 0xDFC4A6);
         addConcrete(-3.6, 2.85, -1.0, 3.6, 4.5, 1.0, 0xE8CEB0);
-        // Деревянная ставня в половине окна (можно простреливать Wallbang!)
         boxes.add(new Vec3.Box(-3.3, 1.05, -0.25, -1.3, 2.85, 0.25,
                 Renderer3D.TEX_CRATE_WOOD, 0xFFFFFF, 0.0, true, true));
 
-        // Коробки "Top Mid Boxes" и синяя тележка
         addWoodCrate(5.6, 0.0, 5.2, 1.65, 1.55);
         addWoodCrate(7.3, 0.0, 5.2, 1.55, 1.45);
         addMilitaryCrate(-6.2, 0.0, -7.8, -3.2, 1.25, -6.0);
         addWoodCrate(3.4, 0.0, -10.8, 1.60, 1.45);
 
-        // Колоннада Дворца (Palace Pillars) и Плент A ("Triple Box" + "Ticket Booth")
+        // Гладкая круглая колоннада Дворца (Palace Pillars)!
         for (int i = 0; i < 3; i++) {
             double pz = 5.5 + i * 5.2;
-            addWallTex(12.2, 0.0, pz - 0.65, 13.5, 4.4, pz + 0.65, wTex);
+            addInvisibleCollider(12.2, 0.0, pz - 0.62, 13.5, 4.4, pz + 0.62, true);
+            smoothCylinders.add(new SmoothCylinderProp(12.85, 0.0, pz, 0.62, 0.54, 4.4, 14, wTex, 0xFFE6CE));
         }
         addDecor(12.0, 4.4, 4.5, 24.0, 4.95, 17.0, Renderer3D.TEX_CONCRETE, 0xE4C8A8, true);
 
-        // Знаменитый "Triple Box" и "Firebox" на Пленте A Mirage
         addWoodCrate(18.0, 0.0, 17.0, 1.75, 1.70);
         addWoodCrate(19.8, 0.0, 17.0, 1.75, 1.70);
         addWoodCrate(19.8, 0.0, 15.2, 1.70, 1.65);
         addWoodCrate(18.9, 1.70, 17.0, 1.55, 1.50);
-        // Будка "Ticket Booth" на CT-входе в A
         addConcrete(16.8, 0.0, -8.5, 20.6, 2.9, -5.8, 0x3D7A9E);
         addWoodCrate(15.2, 0.0, -7.2, 1.55, 1.40);
 
-        // Плент B (Апартаменты и Рынок / Market)
         addWallTex(-19.2, 0.0, 4.8, -13.2, 3.8, 6.2, wTex);
         addMilitaryCrate(-20.8, 0.0, 15.0, -17.6, 1.65, 17.0);
         addWoodCrate(-14.5, 0.0, 17.5, 1.70, 1.65);
@@ -278,7 +426,7 @@ public class Map {
     }
 
     // =========================================================================
-    //  КАРТА 3: NUKE (ЯДЕРНЫЙ НАУЧНЫЙ КОМПЛЕКС И РЕАКТОРЫ)
+    //  КАРТА 3: NUKE (КРУГЛЫЙ ЖЁЛТЫЙ РЕАКТОР SILO И ГРАДИРНЯ АЭС)
     // =========================================================================
     private void buildNukeArena() {
         floorTexId = Renderer3D.TEX_NUKE_FLOOR;
@@ -296,12 +444,11 @@ public class Map {
         addWallTex(MIN_X - t, 0.0, MIN_Z,     MIN_X,     wallH, MAX_Z, nTex);
         addWallTex(MAX_X,     0.0, MIN_Z,     MAX_X + t, wallH, MAX_Z, nTex);
 
-        // Градирня атомной станции на горизонте Nuke
-        addDecor(-6.5, wallH, MAX_Z + 1.5, 6.5, wallH + 6.5, MAX_Z + 8.5, Renderer3D.TEX_CONCRETE, 0xB8C2CE, false);
-        addDecor(-5.0, wallH + 6.5, MAX_Z + 2.5, 5.0, wallH + 10.2, MAX_Z + 7.5, Renderer3D.TEX_SOLID, 0xCBD4DF, false);
-        addDecor(-5.2, wallH + 9.4, MAX_Z + 2.3, 5.2, wallH + 10.2, MAX_Z + 7.7, Renderer3D.TEX_SOLID, 0xD94136, false);
+        // Круглая гиперболическая Градирня АЭС на горизонте Nuke!
+        smoothCylinders.add(new SmoothCylinderProp(0.0, wallH, MAX_Z + 5.2, 5.2, 3.5, 6.4, 16, Renderer3D.TEX_CONCRETE, 0xC2CCD8));
+        smoothCylinders.add(new SmoothCylinderProp(0.0, wallH + 6.4, MAX_Z + 5.2, 3.5, 4.1, 3.4, 16, Renderer3D.TEX_CONCRETE, 0xCFD8E4));
+        smoothCylinders.add(new SmoothCylinderProp(0.0, wallH + 9.4, MAX_Z + 5.2, 4.05, 4.18, 0.65, 16, Renderer3D.TEX_SOLID, 0xDC4034));
 
-        // Центральный шлюз безопасности с металлическими створками (простреливаются!)
         addWallTex(-11.2, 0.0, -0.8, -2.6, 4.5, 0.8, nTex);
         addWallTex(2.6,   0.0, -0.8, 11.2, 4.5, 0.8, nTex);
         addConcrete(-2.8, 3.3, -1.0, 2.8, 4.7, 1.0, 0x9AA6B4);
@@ -310,26 +457,25 @@ public class Map {
         boxes.add(new Vec3.Box(0.85, 0.0, -0.25,  2.6,  3.3, 0.25,
                 Renderer3D.TEX_METAL_DOOR, 0xB8D0E8, 0.0, true, true));
 
-        // Потолочные стальные фермы ангара
         for (int z = -14; z <= 14; z += 14) {
             addDecor(-24.0, 5.0, z - 0.35, 24.0, 5.45, z + 0.35, Renderer3D.TEX_SOLID, 0x394452, true);
         }
 
-        // Знаменитые желтые ядерные реакторы "Silo" на Пленте A!
-        boxes.add(new Vec3.Box(17.8, 0.0, 16.5, 21.4, 4.4, 20.1,
-                Renderer3D.TEX_SOLID, 0xE8B828, 0.15, true, true));
-        addDecor(17.65, 2.0, 16.35, 21.55, 2.45, 20.25, Renderer3D.TEX_SOLID, 0x262E38, false);
+        // Знаменитый круглый желтый ядерный реактор "Silo" на Пленте A с купольной крышкой!
+        addInvisibleCollider(17.9, 0.0, 16.6, 21.3, 4.6, 20.0, true);
+        smoothCylinders.add(new SmoothCylinderProp(19.6, 0.0, 18.3, 1.85, 1.85, 4.2, 16, Renderer3D.TEX_SOLID, 0xEEBC2A));
+        smoothCylinders.add(new SmoothCylinderProp(19.6, 2.0, 18.3, 1.92, 1.92, 0.38, 16, Renderer3D.TEX_SOLID, 0x262E38));
+        smoothEllipsoids.add(new SmoothEllipsoidProp(19.6, 4.2, 18.3, 1.85, 0.68, 1.85, 16, 6, 0xF5CA3C));
+
         addMilitaryCrate(13.6, 0.0, 11.5, 16.2, 1.55, 13.4);
         addWoodCrate(15.2, 0.0, 3.2, 1.65, 1.55);
         addBarrel(21.8, 0.0, 13.5, 0x2874B8);
 
-        // Диспетчерская будка "Hut / Control" и контейнеры Юга
         addWallTex(3.2, 0.0, -9.8, 7.6, 3.2, -6.6, nTex);
         addMilitaryCrate(-6.2, 0.0, -11.5, -2.8, 1.45, -9.5);
         addWoodCrate(-3.8, 0.0, -4.2, 1.55, 1.45);
         addMilitaryCrate(14.8, 0.0, -11.2, 18.2, 1.65, -9.0);
 
-        // Плент B: Хранилище радиоактивных бочек и защитный экран
         addWallTex(-18.6, 0.0, 5.8, -12.4, 3.7, 7.2, nTex);
         addMilitaryCrate(-21.0, 0.0, 15.2, -17.8, 1.70, 17.4);
         addBarrel(-14.6, 0.0, 16.8, 0x38B858);
@@ -353,7 +499,7 @@ public class Map {
         botSpawns.add(new Vec3(-3.5,  0.0,    12.2));
 
         patrolWaypoints.add(new Vec3(0.0,   0.0,     4.2));
-        patrolWaypoints.add(new Vec3(0.0,   0.0,    -4.5));
+        patrolWaypoints.add(new Vec3(0.0,   0.0,    -3.2));
         patrolWaypoints.add(new Vec3(-8.5,  0.0,     4.5));
         patrolWaypoints.add(new Vec3(-15.5, 0.0,    -0.5));
         patrolWaypoints.add(new Vec3(-15.5, 0.0,    -7.5));
@@ -368,9 +514,6 @@ public class Map {
         patrolWaypoints.add(new Vec3(-6.5,  0.0,    -7.2));
     }
 
-    /**
-     * Проверяет, можно ли прострелить данное препятствие навылет (деревянный ящик или дверь).
-     */
     public boolean isBoxPenetrable(Vec3.Box box) {
         if (box == null) return false;
         return box.textureId == Renderer3D.TEX_CRATE_WOOD
@@ -492,7 +635,7 @@ public class Map {
                 Vec3.Box b = boxes.get(i);
                 if (b.castsShadow && b.minY <= 0.02 && (b.maxX - b.minX) < 10.0 && (b.maxZ - b.minZ) < 10.0) {
                     renderer.drawBlobShadow(
-                        (b.minX + b.maxX) * 0.5, 0.0, (b.minZ + b.minZ + (b.maxZ - b.minZ)) * 0.5,
+                        (b.minX + b.maxX) * 0.5, 0.0, (b.minZ + b.maxZ) * 0.5,
                         (b.maxX - b.minX) * 0.56, (b.maxZ - b.minZ) * 0.56
                     );
                 }
@@ -503,7 +646,8 @@ public class Map {
             for (int i = 0; i < bots.size(); i++) {
                 Bot bot = bots.get(i);
                 if (bot.getPosition().y <= 0.03) {
-                    double r = bot.isAlive() ? 0.42 : 0.65;
+                    double scale = bot.getModelScale();
+                    double r = (bot.isAlive() ? 0.42 : 0.65) * scale;
                     renderer.drawBlobShadow(bot.getPosition().x, 0.0, bot.getPosition().z, r, r);
                 }
             }
@@ -512,8 +656,34 @@ public class Map {
 
     public void renderStructures(Renderer3D renderer) {
         for (int i = 0; i < boxes.size(); i++) {
-            renderer.drawAxisAlignedBox(boxes.get(i));
+            Vec3.Box b = boxes.get(i);
+            if (b.textureId >= 0) {
+                renderer.drawAxisAlignedBox(b);
+            }
+        }
+        for (int i = 0; i < smoothCylinders.size(); i++) {
+            SmoothCylinderProp c = smoothCylinders.get(i);
+            renderer.drawWorldCylinder(c.cx, c.bottomY, c.cz, c.radBottom, c.radTop, c.height, c.segments, c.texId, c.color);
+        }
+        for (int i = 0; i < smoothEllipsoids.size(); i++) {
+            SmoothEllipsoidProp e = smoothEllipsoids.get(i);
+            renderer.drawWorldEllipsoid(e.cx, e.cy, e.cz, e.rx, e.ry, e.rz, e.segments, e.rings, e.color);
         }
         renderer.drawFloorZoneQuad(14.8, siteAFloorY + 0.004, 13.5, 22.0, 19.8, Renderer3D.TEX_BOMBSITE, 0xFFFFFF);
+    }
+
+    /**
+     * Проверяет, находится ли точка под крышей/навесом арены (чтобы дождь и снег не шли сквозь потолок АЭС Nuke!).
+     */
+    public boolean hasOverheadRoof(double x, double y, double z) {
+        for (int i = 0; i < boxes.size(); i++) {
+            Vec3.Box b = boxes.get(i);
+            if (b.minY >= 2.8 && y < b.maxY
+                    && x >= b.minX && x <= b.maxX
+                    && z >= b.minZ && z <= b.maxZ) {
+                return true;
+            }
+        }
+        return false;
     }
 }

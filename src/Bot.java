@@ -15,6 +15,12 @@ public class Bot {
         COUNTER_TERRORIST
     }
 
+    public enum Archetype {
+        STANDARD,
+        SNIPER,
+        JUGGERNAUT
+    }
+
     public enum State {
         PATROL,
         ENGAGE,
@@ -64,11 +70,13 @@ public class Bot {
 
     private final String name;
     private final Team team;
+    private Archetype archetype = Archetype.STANDARD;
     private final Random rng;
 
     private final Vec3 position = new Vec3();
     private double velocityY = 0.0;
     private double yaw = 0.0;
+    private int maxHealth = 100;
     private int health = 100;
     private boolean alive = true;
 
@@ -117,13 +125,31 @@ public class Bot {
         respawn(spawnPos, initialWaypoint);
     }
 
+    public void setArchetype(Archetype arch) {
+        this.archetype = (arch != null) ? arch : Archetype.STANDARD;
+        if (this.archetype == Archetype.JUGGERNAUT) {
+            this.maxHealth = 460;
+        } else if (this.archetype == Archetype.SNIPER) {
+            this.maxHealth = 95;
+        } else {
+            this.maxHealth = 100;
+        }
+        this.health = this.maxHealth;
+    }
+
+    public Archetype getArchetype() { return archetype; }
+    public int getMaxHealth() { return maxHealth; }
+    public double getModelScale() {
+        return archetype == Archetype.JUGGERNAUT ? 1.26 : 1.0;
+    }
+
     public void respawn(Vec3 spawnPos, int initialWaypoint) {
         this.position.set(spawnPos);
         this.lastProgressPos.set(spawnPos);
         this.holdAnchorPos.set(spawnPos);
         this.velocityY = 0.0;
         this.yaw = (team == Team.COUNTER_TERRORIST ? 0.0 : Math.PI) + (rng.nextDouble() - 0.5) * 0.5;
-        this.health = 100;
+        this.health = this.maxHealth;
         this.alive = true;
         this.state = State.PATROL;
         this.radioOrder = RadioOrder.PATROL_FREE;
@@ -322,10 +348,18 @@ public class Bot {
                     shotEvent = fireAtTarget(map, player, targetIsPlayer, targetBot, targetAimPos, difficulty);
                     burstRemaining--;
                     if (burstRemaining <= 0) {
-                        burstRemaining = 2 + rng.nextInt(3);
-                        fireCooldown = 0.60 + rng.nextDouble() * 0.34;
+                        if (archetype == Archetype.JUGGERNAUT) {
+                            burstRemaining = 6 + rng.nextInt(5);
+                            fireCooldown = 0.42 + rng.nextDouble() * 0.25;
+                        } else if (archetype == Archetype.SNIPER) {
+                            burstRemaining = 1;
+                            fireCooldown = 1.05 + rng.nextDouble() * 0.35;
+                        } else {
+                            burstRemaining = 2 + rng.nextInt(3);
+                            fireCooldown = 0.60 + rng.nextDouble() * 0.34;
+                        }
                     } else {
-                        fireCooldown = 0.16 + rng.nextDouble() * 0.05;
+                        fireCooldown = (archetype == Archetype.JUGGERNAUT ? 0.11 : 0.16) + rng.nextDouble() * 0.04;
                     }
                 }
             }
@@ -605,14 +639,15 @@ public class Bot {
     public HitResult intersectShotRay(Vec3 origin, Vec3 dir, double maxDist) {
         if (!alive) return null;
 
+        double s = getModelScale();
         Vec3.Box headBox = new Vec3.Box(
-            position.x - 0.21, position.y + 1.38, position.z - 0.21,
-            position.x + 0.21, position.y + 1.82, position.z + 0.21,
+            position.x - 0.22 * s, position.y + 1.38 * s, position.z - 0.22 * s,
+            position.x + 0.22 * s, position.y + 1.84 * s, position.z + 0.22 * s,
             0, 0, 0, true
         );
         Vec3.Box bodyBox = new Vec3.Box(
-            position.x - 0.33, position.y + 0.02, position.z - 0.33,
-            position.x + 0.33, position.y + 1.40, position.z + 0.33,
+            position.x - 0.34 * s, position.y + 0.02, position.z - 0.34 * s,
+            position.x + 0.34 * s, position.y + 1.40 * s, position.z + 0.34 * s,
             0, 0, 0, true
         );
 
@@ -654,17 +689,19 @@ public class Bot {
     public void render(Renderer3D r) {
         boolean flashing = hitFlashTimer > 0.0 && alive;
         boolean ct = (team == Team.COUNTER_TERRORIST);
+        boolean jug = (archetype == Archetype.JUGGERNAUT);
+        boolean sniper = (archetype == Archetype.SNIPER);
+        double s = getModelScale();
 
-        int pantsColor = flashing ? 0xFF5555 : (ct ? 0x22334C : 0x3D4652);
-        int bootsColor = flashing ? 0xFF4444 : 0x1A1E24;
-        int shirtColor = flashing ? 0xFF7070 : (ct ? 0x2C5A8F : 0xB88B58);
-        int vestColor  = flashing ? 0xFF3B3B : (ct ? 0x18283C : 0x2D3529);
+        int pantsColor = flashing ? 0xFF5555 : (jug ? 0x1F242C : (ct ? 0x223650 : 0x3D4652));
+        int bootsColor = flashing ? 0xFF4444 : 0x181C22;
+        int shirtColor = flashing ? 0xFF7070 : (jug ? 0x2D3540 : (ct ? 0x2C5E96 : (sniper ? 0x6E3834 : 0xBA8D5A)));
+        int vestColor  = flashing ? 0xFF3B3B : (jug ? 0x161A20 : (ct ? 0x18283C : 0x2D3529));
         int packColor  = flashing ? 0xFF4A4A : (ct ? 0x20344E : 0x4C3D2D);
-        int faceColor  = flashing ? 0xFF9090 : (ct ? 0x56DCFF : 0xD2A079); // У спецназа CT голубой визор шлема!
-        int headColor  = flashing ? 0xFF4848 : (ct ? 0x1F3D63 : 0x292423);
-        int bandColor  = flashing ? 0xFFAAAA : (ct ? 0x3A8AD8 : 0xA82822);
-        int gunColor   = 0x24282E;
-        int gunAccent  = ct ? 0x365C82 : 0x8B4A22;
+        int visorColor = flashing ? 0xFF9090 : (jug ? 0xFF3628 : (ct ? 0x5CE0FF : (sniper ? 0xFF543E : 0xD2A079)));
+        int helmetCol  = flashing ? 0xFF4848 : (jug ? 0x222832 : (ct ? 0x21426B : (sniper ? 0xA82428 : 0x2C2624)));
+        int gunColor   = 0x22262E;
+        int gunAccent  = jug ? 0x44603C : (ct ? 0x365C82 : 0x8B4A22);
 
         if (!alive) {
             double fallAngle = deathAnimProgress * (Math.PI * 0.48);
@@ -672,13 +709,14 @@ public class Bot {
             double cosF = Math.cos(fallAngle);
             double baseY = position.y + 0.16 * sinF;
 
-            drawPartFallen(r, 0.0, 0.42, -0.14, 0.18, 0.72, 0.19, fallAngle, sinF, cosF, baseY, pantsColor);
-            drawPartFallen(r, 0.0, 0.42,  0.14, 0.18, 0.72, 0.19, fallAngle, sinF, cosF, baseY, pantsColor);
-            drawPartFallen(r, 0.0, 1.04,  0.00, 0.30, 0.62, 0.46, fallAngle, sinF, cosF, baseY, vestColor);
-            drawPartFallen(r, 0.0, 1.54,  0.00, 0.30, 0.32, 0.30, fallAngle, sinF, cosF, baseY, headColor);
-            double gx = position.x + Math.cos(yaw) * 0.45;
-            double gz = position.z - Math.sin(yaw) * 0.45;
-            r.drawOrientedWorldBox(gx, position.y + 0.06, gz, 0.08, 0.10, 0.68, yaw + 0.5, 0.0, Renderer3D.TEX_SOLID, gunColor);
+            drawPartFallen(r, 0.0, 0.42 * s, -0.14 * s, 0.18 * s, 0.72 * s, 0.19 * s, fallAngle, sinF, cosF, baseY, pantsColor);
+            drawPartFallen(r, 0.0, 0.42 * s,  0.14 * s, 0.18 * s, 0.72 * s, 0.19 * s, fallAngle, sinF, cosF, baseY, pantsColor);
+            drawPartFallen(r, 0.0, 1.04 * s,  0.00,     0.30 * s, 0.62 * s, 0.46 * s, fallAngle, sinF, cosF, baseY, vestColor);
+            r.drawWorldEllipsoid(position.x - Math.sin(yaw) * 1.48 * s * sinF, baseY + Math.max(0.14, 1.54 * s * cosF),
+                    position.z - Math.cos(yaw) * 1.48 * s * sinF, 0.19 * s, 0.19 * s, 0.19 * s, 10, 5, helmetCol);
+            double gx = position.x + Math.cos(yaw) * 0.45 * s;
+            double gz = position.z - Math.sin(yaw) * 0.45 * s;
+            r.drawOrientedWorldCylinder(gx, position.y + 0.06, gz, 0.045, 0.68, yaw + 0.5, 0.0, 8, gunColor);
             return;
         }
 
@@ -687,43 +725,66 @@ public class Bot {
         double cosY = Math.cos(yaw);
         double rightX = cosY;
         double rightZ = -sinY;
-
         double bx = position.x, by = position.y, bz = position.z;
 
-        r.drawOrientedWorldBox(bx - rightX * 0.14, by + 0.38, bz - rightZ * 0.14, 0.18, 0.74, 0.20, yaw, legSwing, Renderer3D.TEX_SOLID, pantsColor);
-        r.drawOrientedWorldBox(bx + rightX * 0.14, by + 0.38, bz + rightZ * 0.14, 0.18, 0.74, 0.20, yaw, -legSwing, Renderer3D.TEX_SOLID, pantsColor);
-        r.drawOrientedWorldBox(bx - rightX * 0.14, by + 0.08, bz - rightZ * 0.14, 0.19, 0.16, 0.26, yaw, legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
-        r.drawOrientedWorldBox(bx + rightX * 0.14, by + 0.08, bz + rightZ * 0.14, 0.19, 0.16, 0.26, yaw, -legSwing * 0.5, Renderer3D.TEX_SOLID, bootsColor);
+        // Гладкие цилиндрические ноги и закруглённые ботинки
+        r.drawOrientedWorldCylinder(bx - rightX * 0.14 * s, by + 0.42 * s, bz - rightZ * 0.14 * s,
+                0.095 * s, 0.72 * s, yaw, Math.PI * 0.5 + legSwing, 8, pantsColor);
+        r.drawOrientedWorldCylinder(bx + rightX * 0.14 * s, by + 0.42 * s, bz + rightZ * 0.14 * s,
+                0.095 * s, 0.72 * s, yaw, Math.PI * 0.5 - legSwing, 8, pantsColor);
+        r.drawWorldEllipsoid(bx - rightX * 0.14 * s, by + 0.08 * s, bz - rightZ * 0.14 * s, 0.10 * s, 0.08 * s, 0.14 * s, 8, 4, bootsColor);
+        r.drawWorldEllipsoid(bx + rightX * 0.14 * s, by + 0.08 * s, bz + rightZ * 0.14 * s, 0.10 * s, 0.08 * s, 0.14 * s, 8, 4, bootsColor);
 
-        r.drawOrientedWorldBox(bx, by + 1.06, bz, 0.46, 0.64, 0.28, yaw, 0.0, Renderer3D.TEX_SOLID, shirtColor);
-        r.drawOrientedWorldBox(bx, by + 1.08, bz, 0.48, 0.48, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, vestColor);
-        r.drawOrientedWorldBox(bx - sinY * 0.20, by + 1.10, bz - cosY * 0.20, 0.32, 0.38, 0.15, yaw, 0.0, Renderer3D.TEX_SOLID, packColor);
+        // Торс, бронежилет и круглые наплечники (у Джаггернаута — массивная титановая броня!)
+        r.drawOrientedWorldBox(bx, by + 1.06 * s, bz, 0.44 * s, 0.62 * s, 0.27 * s, yaw, 0.0, Renderer3D.TEX_SOLID, shirtColor);
+        r.drawOrientedWorldBox(bx, by + 1.08 * s, bz, 0.47 * s, 0.48 * s, 0.31 * s, yaw, 0.0, Renderer3D.TEX_SOLID, vestColor);
+        r.drawWorldEllipsoid(bx - rightX * 0.28 * s, by + 1.30 * s, bz - rightZ * 0.28 * s,
+                (jug ? 0.18 : 0.12) * s, (jug ? 0.16 : 0.11) * s, (jug ? 0.18 : 0.12) * s, 9, 5, jug ? vestColor : shirtColor);
+        r.drawWorldEllipsoid(bx + rightX * 0.28 * s, by + 1.30 * s, bz + rightZ * 0.28 * s,
+                (jug ? 0.18 : 0.12) * s, (jug ? 0.16 : 0.11) * s, (jug ? 0.18 : 0.12) * s, 9, 5, jug ? vestColor : shirtColor);
+
+        r.drawOrientedWorldBox(bx - sinY * 0.20 * s, by + 1.10 * s, bz - cosY * 0.20 * s, 0.30 * s, 0.38 * s, 0.14 * s, yaw, 0.0, Renderer3D.TEX_SOLID, packColor);
         if (carryingC4) {
-            r.drawOrientedWorldBox(bx - sinY * 0.28, by + 1.12, bz - cosY * 0.28, 0.24, 0.18, 0.10, yaw, 0.0, Renderer3D.TEX_SOLID, 0xC2A35E);
-            r.drawOrientedWorldBox(bx - sinY * 0.33, by + 1.16, bz - cosY * 0.33, 0.06, 0.06, 0.04, yaw, 0.0, Renderer3D.TEX_SOLID, 0xFF3322);
+            r.drawOrientedWorldBox(bx - sinY * 0.28 * s, by + 1.12 * s, bz - cosY * 0.28 * s, 0.24, 0.18, 0.10, yaw, 0.0, Renderer3D.TEX_SOLID, 0xC2A35E);
+            r.drawTranslucentSphereSprite(bx - sinY * 0.34 * s, by + 1.16 * s, bz - cosY * 0.34 * s, 0.06, 0xFF3322, 0.90);
         }
 
+        // Гладкие цилиндрические руки
         if (blindTimer > 0.15) {
-            r.drawOrientedWorldBox(bx - rightX * 0.18 + sinY * 0.22, by + 1.54, bz - rightZ * 0.18 + cosY * 0.22,
-                    0.34, 0.14, 0.18, yaw, 0.25, Renderer3D.TEX_SOLID, shirtColor);
+            r.drawOrientedWorldCylinder(bx - rightX * 0.18 * s + sinY * 0.22 * s, by + 1.54 * s, bz - rightZ * 0.18 * s + cosY * 0.22 * s,
+                    0.075 * s, 0.36 * s, yaw + 1.2, 0.20, 8, shirtColor);
         } else {
-            r.drawOrientedWorldBox(bx - rightX * 0.29 + sinY * 0.14, by + 1.16, bz - rightZ * 0.29 + cosY * 0.14, 0.15, 0.22, 0.42, yaw + 0.18, 0.0, Renderer3D.TEX_SOLID, shirtColor);
+            r.drawOrientedWorldCylinder(bx - rightX * 0.27 * s + sinY * 0.15 * s, by + 1.15 * s, bz - rightZ * 0.27 * s + cosY * 0.15 * s,
+                    0.075 * s, 0.44 * s, yaw + 0.18, 0.10, 8, shirtColor);
         }
-        r.drawOrientedWorldBox(bx + rightX * 0.27 + sinY * 0.15, by + 1.14, bz + rightZ * 0.27 + cosY * 0.15, 0.15, 0.22, 0.44, yaw - 0.12, 0.0, Renderer3D.TEX_SOLID, shirtColor);
+        r.drawOrientedWorldCylinder(bx + rightX * 0.26 * s + sinY * 0.16 * s, by + 1.14 * s, bz + rightZ * 0.26 * s + cosY * 0.16 * s,
+                0.075 * s, 0.45 * s, yaw - 0.12, 0.10, 8, shirtColor);
 
-        r.drawOrientedWorldBox(bx, by + 1.57, bz, 0.31, 0.34, 0.31, yaw, 0.0, Renderer3D.TEX_SOLID, headColor);
-        r.drawOrientedWorldBox(bx + sinY * 0.14, by + 1.58, bz + cosY * 0.14, 0.24, 0.10, 0.06, yaw, 0.0, Renderer3D.TEX_SOLID, faceColor);
-        r.drawOrientedWorldBox(bx, by + 1.67, bz, 0.33, 0.08, 0.33, yaw, 0.0, Renderer3D.TEX_SOLID, bandColor);
+        // ГЛАДКАЯ КРУГЛАЯ ГОЛОВА И ТАКТИЧЕСКИЙ ШЛЕМ С ГУРО-ЗАТЕНЕНИЕМ (НИКАКИХ КУБИЧЕСКИХ ГОЛОВ!)
+        r.drawWorldEllipsoid(bx, by + 1.56 * s, bz, 0.175 * s, 0.195 * s, 0.175 * s, 12, 6, helmetCol);
+        r.drawWorldEllipsoid(bx, by + 1.62 * s, bz, 0.195 * s, 0.145 * s, 0.195 * s, 12, 5, helmetCol);
+        r.drawOrientedWorldBox(bx + sinY * 0.155 * s, by + 1.57 * s, bz + cosY * 0.155 * s,
+                0.23 * s, 0.085 * s, 0.06 * s, yaw, 0.0, Renderer3D.TEX_SOLID, visorColor);
 
-        double gunCenterX = bx + rightX * 0.15 + sinY * 0.36;
-        double gunCenterY = by + 1.15;
-        double gunCenterZ = bz + rightZ * 0.15 + cosY * 0.36;
-        r.drawOrientedWorldBox(gunCenterX, gunCenterY, gunCenterZ, 0.07, 0.11, 0.68, yaw, 0.0, Renderer3D.TEX_SOLID, gunColor);
-        r.drawOrientedWorldBox(gunCenterX - sinY * 0.16, gunCenterY - 0.02, gunCenterZ - cosY * 0.16, 0.08, 0.10, 0.24, yaw, 0.0, Renderer3D.TEX_SOLID, gunAccent);
+        // Оружие в руках с круглым стволом
+        double gunCenterX = bx + rightX * 0.15 * s + sinY * 0.36 * s;
+        double gunCenterY = by + 1.15 * s;
+        double gunCenterZ = bz + rightZ * 0.15 * s + cosY * 0.36 * s;
+        r.drawOrientedWorldBox(gunCenterX - sinY * 0.10 * s, gunCenterY, gunCenterZ - cosY * 0.10 * s,
+                0.07 * s, 0.12 * s, 0.36 * s, yaw, 0.0, Renderer3D.TEX_SOLID, gunAccent);
+        r.drawOrientedWorldCylinder(gunCenterX + sinY * 0.22 * s, gunCenterY + 0.02 * s, gunCenterZ + cosY * 0.22 * s,
+                (jug ? 0.045 : 0.028) * s, (jug ? 0.62 : 0.48) * s, yaw, 0.0, 8, gunColor);
+
+        // Лазерный целеуказатель элитного снайпера!
+        if (sniper && state == State.ENGAGE) {
+            Vec3 muz = getMuzzleWorldPosition();
+            Vec3 laserEnd = muz.add(new Vec3(sinY * 8.0, -0.05, cosY * 8.0));
+            r.draw3DLine(muz, laserEnd, 0xFF2E38, 1);
+        }
 
         if (muzzleFlashTimer > 0.0) {
             Vec3 muz = getMuzzleWorldPosition();
-            r.drawOrientedWorldBox(muz.x, muz.y, muz.z, 0.24, 0.24, 0.24, yaw, 0.4, Renderer3D.TEX_SOLID, ct ? 0x70E8FF : 0xFFCA3A);
+            r.drawTranslucentSphereSprite(muz.x, muz.y, muz.z, 0.18 * s, ct ? 0x70E8FF : 0xFFCA3A, 0.92);
         }
     }
 
@@ -764,7 +825,7 @@ public class Bot {
     public int getKills() { return kills; }
     public int getDeaths() { return deaths; }
     public State getState() { return state; }
-    public boolean shouldShowHealthBar() { return alive && (health < 100 || healthBarTimer > 0.0 || blindTimer > 0.1); }
+    public boolean shouldShowHealthBar() { return alive && (archetype == Archetype.JUGGERNAUT || health < maxHealth || healthBarTimer > 0.0 || blindTimer > 0.1); }
     public boolean isFiringRecently() { return muzzleFlashTimer > 0.0; }
     public boolean isBlinded() { return alive && blindTimer > 0.15; }
     public boolean isCarryingC4() { return alive && carryingC4; }
