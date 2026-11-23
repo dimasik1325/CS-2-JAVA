@@ -1,5 +1,5 @@
 /*
- * CS-2 JAVA 9.0 — Native Windows 10/11 x64 Launcher (cs2_launcher.c)
+ * CS-2 JAVA 10.0 — Native Windows 10/11 x64 Launcher (cs2_launcher.c)
  *
  * Features:
  *  - Pure Win32 Wide-Unicode (UTF-16) GUI executable (zero black console window,
@@ -110,7 +110,7 @@ static bool extract_jar_if_needed(const wchar_t *exe_dir, const wchar_t *app_dir
     }
 
     ensure_dir_tree_w(app_dir);
-    _snwprintf(out_jar, cap, L"%s\\CS-2-JAVA-9.0.jar", app_dir);
+    _snwprintf(out_jar, cap, L"%s\\CS-2-JAVA-10.0.jar", app_dir);
     out_jar[cap - 1] = L'\0';
 
     if (file_exists_w(out_jar) && get_file_size_w(out_jar) == (uint64_t)jar_len) {
@@ -385,9 +385,9 @@ static bool auto_download_portable_jre21(const wchar_t *app_dir) {
     _snwprintf(ps_cmd, 2048,
         L"powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command \""
         L"$ErrorActionPreference='Stop'; "
-        L"$Host.UI.RawUI.WindowTitle='CS-2 JAVA 9.0 — Загрузка портативной среды OpenJDK 21 (~45 МБ)...'; "
+        L"$Host.UI.RawUI.WindowTitle='CS-2 JAVA 10.0 — Загрузка портативной среды OpenJDK 21 (~45 МБ)...'; "
         L"Write-Host '================================================================' -ForegroundColor Cyan; "
-        L"Write-Host '  CS-2 JAVA 9.0 : Первичная докачка портативной Java 21 (x64)' -ForegroundColor Green; "
+        L"Write-Host '  CS-2 JAVA 10.0 : Первичная докачка портативной Java 21 (x64)' -ForegroundColor Green; "
         L"Write-Host '================================================================' -ForegroundColor Cyan; "
         L"$dest='%s'; $zip=Join-Path $dest 'temurin21-jre.zip'; "
         L"$url='https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse?project=jdk'; "
@@ -404,7 +404,7 @@ static bool auto_download_portable_jre21(const wchar_t *app_dir) {
         L"  Expand-Archive -Path $zip -DestinationPath $dest -Force "
         L"}; "
         L"Remove-Item $zip -Force -ErrorAction SilentlyContinue; "
-        L"Write-Host 'Готово! Запуск CS-2 JAVA 9.0...' -ForegroundColor Green\"",
+        L"Write-Host 'Готово! Запуск CS-2 JAVA 10.0...' -ForegroundColor Green\"",
         jre_dir);
     ps_cmd[2047] = L'\0';
 
@@ -433,7 +433,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
     wchar_t exe_path[MAX_WPATH];
     DWORD mLen = GetModuleFileNameW(NULL, exe_path, MAX_WPATH);
     if (mLen == 0 || mLen >= MAX_WPATH) {
-        MessageBoxW(NULL, L"Не удалось определить путь к CS-2-JAVA.exe.", L"CS-2 JAVA 9.0", MB_ICONERROR | MB_OK);
+        MessageBoxW(NULL, L"Не удалось определить путь к CS-2-JAVA.exe.", L"CS-2 JAVA 10.0", MB_ICONERROR | MB_OK);
         return 1;
     }
 
@@ -450,8 +450,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
     wchar_t jar_path[MAX_WPATH];
     if (!extract_jar_if_needed(exe_dir, app_dir, jar_path, MAX_WPATH)) {
-        MessageBoxW(NULL, L"Ошибка подготовки игрового архива CS-2-JAVA-9.0.jar.\nПроверьте свободное место на диске.",
-                    L"CS-2 JAVA 9.0", MB_ICONERROR | MB_OK);
+        MessageBoxW(NULL, L"Ошибка подготовки игрового архива CS-2-JAVA-10.0.jar.\nПроверьте свободное место на диске.",
+                    L"CS-2 JAVA 10.0", MB_ICONERROR | MB_OK);
         return 1;
     }
 
@@ -461,10 +461,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
             NULL,
             L"На этом компьютере пока не найдена среда Java 11+ (64-bit).\n\n"
             L"Скачать компактную портативную среду OpenJDK 21 (~45 МБ) автоматически "
-            L"(без прав администратора и без установки в систему) и сразу запустить CS-2 JAVA 9.0?\n\n"
+            L"(без прав администратора и без установки в систему) и сразу запустить CS-2 JAVA 10.0?\n\n"
             L"• «Да» — скачать портативную Java 21 автоматически и запустить игру\n"
             L"• «Нет» — открыть официальную страницу загрузки Temurin JDK 21 в браузере",
-            L"CS-2 JAVA 9.0 — Первый запуск на Windows 10/11",
+            L"CS-2 JAVA 10.0 — Первый запуск на Windows 10/11",
             MB_YESNOCANCEL | MB_ICONQUESTION
         );
 
@@ -475,7 +475,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
                     NULL,
                     L"Не удалось автоматически скачать портативную Java 21 (проверьте подключение к интернету).\n\n"
                     L"Сейчас откроется страница загрузки Eclipse Adoptium Temurin 21.",
-                    L"CS-2 JAVA 9.0",
+                    L"CS-2 JAVA 10.0",
                     MB_ICONWARNING | MB_OK
                 );
                 ShellExecuteW(NULL, L"open", L"https://adoptium.net/temurin/releases/?version=21&os=windows&arch=x64", NULL, NULL, SW_SHOWNORMAL);
@@ -519,7 +519,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
             L"Не удалось запустить процесс javaw.exe (код %lu):\n%s",
             (unsigned long)GetLastError(), javaw_path);
         err_msg[MAX_WPATH + 255] = L'\0';
-        MessageBoxW(NULL, err_msg, L"CS-2 JAVA 9.0 — Ошибка запуска", MB_ICONERROR | MB_OK);
+        MessageBoxW(NULL, err_msg, L"CS-2 JAVA 10.0 — Ошибка запуска", MB_ICONERROR | MB_OK);
         return 1;
     }
 

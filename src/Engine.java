@@ -16,6 +16,9 @@ import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Robot;
+import java.awt.Shape;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.Toolkit;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
@@ -52,6 +55,8 @@ public class Engine extends JPanel implements Runnable {
     private static final double ROUND_TIME_SECONDS = 100.0;
 
     public enum AppScreen {
+        SPLASH,
+        CASE_OPENING,
         MAIN_MENU,
         SKIN_ARMORY,
         SETTINGS,
@@ -212,6 +217,16 @@ public class Engine extends JPanel implements Runnable {
 
     // Экраны меню и состояния матча
     private volatile AppScreen currentScreen = AppScreen.MAIN_MENU;
+    // ===== 9.5: заставка «Игра сделана Алкашом», кейсы, эффекты интерфейса, достижения =====
+    private SplashIntro splashIntro;
+    private CaseOpening caseOpening;
+    private final UiFx uiFx = new UiFx();
+    private double menuIntroTimer = 99.0;
+    private double uiDt = 1.0 / 60.0;
+    private long lastUiRenderNanos = 0L;
+    private Rectangle lastHoveredUiRect = null;
+    private Shape heroTitleShape = null;
+    private int heroTitleSize = -1;
     private boolean settingsOpenedFromGame = false;
     private int settingsTab = 0; // 0 = Графика, 1 = Геймплей и мышь, 2 = Аудио
     private volatile boolean paused = false;
@@ -316,12 +331,16 @@ public class Engine extends JPanel implements Runnable {
             initInputListeners();
         }
 
+        this.splashIntro = new SplashIntro(soundSystem);
+        this.caseOpening = new CaseOpening(createCaseHost());
+
         // Подготавливаем фоновую сцену для живой камеры Главного меню
         startNewMatch();
         if (headlessMode) {
             this.currentScreen = AppScreen.IN_GAME;
         } else {
-            this.currentScreen = AppScreen.MAIN_MENU;
+            this.currentScreen = settings.showIntroSplash ? AppScreen.SPLASH : AppScreen.MAIN_MENU;
+            this.menuIntroTimer = 0.0;
             // Заранее рендерим стартовый кадр, чтобы окно открылось мгновенно без чёрного экрана
             // и все кнопки меню реагировали с первой же миллисекунды!
             renderOffscreenSwap(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
@@ -538,6 +557,8 @@ public class Engine extends JPanel implements Runnable {
         for (int i = list.size() - 1; i >= 0; i--) {
             UiClickable item = list.get(i);
             if (item.rect.contains(uiX, uiY)) {
+                final int rx = uiX, ry = uiY;
+                enqueueInputTask(() -> uiFx.addRipple(rx, ry));
                 this.clickFlashRect = item.rect;
                 this.clickFlashTimer = 0.12;
                 soundSystem.playUiClick();
@@ -551,6 +572,20 @@ public class Engine extends JPanel implements Runnable {
     private void handleKeyPress(int code) {
         if (code == KeyEvent.VK_F11) {
             toggleFullscreenMode();
+            return;
+        }
+
+        if (currentScreen == AppScreen.SPLASH) {
+            splashIntro.skip();
+            return;
+        }
+
+        if (currentScreen == AppScreen.CASE_OPENING) {
+            if (code == KeyEvent.VK_ESCAPE || code == KeyEvent.VK_BACK_SPACE) {
+                caseOpening.onEscape();
+            } else if ((code == KeyEvent.VK_SPACE || code == KeyEvent.VK_ENTER) && !caseOpening.isBusy()) {
+                caseOpening.tryOpen();
+            }
             return;
         }
 
@@ -1369,7 +1404,20 @@ public class Engine extends JPanel implements Runnable {
                     clickFlashTimer = Math.max(0.0, clickFlashTimer - dt);
                 }
 
-                if (currentScreen == AppScreen.IN_GAME) {
+                uiFx.update(dt, getWidth() > 0 ? getWidth() : DEFAULT_WINDOW_WIDTH,
+                        getHeight() > 0 ? getHeight() : DEFAULT_WINDOW_HEIGHT,
+                        settings.menuParticles && (currentScreen == AppScreen.MAIN_MENU || currentScreen == AppScreen.CASE_OPENING));
+                menuIntroTimer += dt;
+                if (currentScreen == AppScreen.SPLASH) {
+                    splashIntro.update(dt);
+                    if (splashIntro.isFinished()) {
+                        currentScreen = AppScreen.MAIN_MENU;
+                        menuIntroTimer = 0.0;
+                    }
+                } else if (currentScreen == AppScreen.CASE_OPENING) {
+                    caseOpening.update(dt);
+                    updateMenuBackgroundScene(dt);
+                } else if (currentScreen == AppScreen.IN_GAME) {
                     if (!paused) {
                         updateGame(dt);
                     }
@@ -1964,7 +2012,9 @@ public class Engine extends JPanel implements Runnable {
             soundSystem.playLevelUp();
             streakBannerText = "★ ПОВЫШЕНИЕ ЗВАНИЯ CS2: " + settings.getRankTitle() + "! ★";
             streakBannerTimer = 3.6;
+            unlockAchievement("rank_up");
         }
+        checkCareerAchievements();
 
         maybeDropBotWeapon(victim);
         if (rng.nextDouble() < 0.30) {
@@ -2044,6 +2094,7 @@ public class Engine extends JPanel implements Runnable {
         int targetWins = settings.roundsToWin;
         if (playerRoundWins >= targetWins) {
             settings.addCareerXp(220, false, false, true);
+            checkCareerAchievements();
             matchState = MatchState.MATCH_VICTORY;
             setMouseCaptured(false);
         } else if (botRoundWins >= targetWins) {
@@ -2856,6 +2907,7 @@ public class Engine extends JPanel implements Runnable {
             player.addCameraShake(1.0);
             player.recordKill(true, 2000);
             settings.addCareerXp(260, true, true, false);
+            checkCareerAchievements();
             addKillFeed("ВЫ", weaponName, "БОЕВОЙ ВЕРТОЛЁТ", true, true);
             streakBannerText = "★ УДАРНЫЙ ВЕРТОЛЁТ БОССА СБИТ! +$2000 И АВИАСБРОС СНАБЖЕНИЯ! ★";
             streakBannerTimer = 4.5;
@@ -2972,6 +3024,20 @@ public class Engine extends JPanel implements Runnable {
     public void renderCompleteFrame(Graphics2D g, int outW, int outH) {
         buildingUiClickables.clear();
         settings.syncDerivedFlags();
+        long nowNanos = System.nanoTime();
+        if (lastUiRenderNanos != 0L) {
+            uiDt = Math.max(0.001, Math.min(0.1, (nowNanos - lastUiRenderNanos) / 1_000_000_000.0));
+        }
+        lastUiRenderNanos = nowNanos;
+        uiFx.beginFrame();
+
+        // 9.5: Кинематографическая заставка «ИГРА СДЕЛАНА АЛКАШОМ» (без 3D-рендера — мгновенный старт)
+        if (currentScreen == AppScreen.SPLASH) {
+            splashIntro.render(g, outW, outH);
+            uiRegisterClickable(new Rectangle(0, 0, outW, outH), splashIntro::skip);
+            this.publishedUiSnapshot = new UiSnapshot(new ArrayList<>(buildingUiClickables), outW, outH);
+            return;
+        }
 
         double zoomFactor = (currentScreen == AppScreen.IN_GAME && player.isAlive())
                 ? player.getCurrentWeapon().getEffectiveFovFactor()
@@ -3191,7 +3257,11 @@ public class Engine extends JPanel implements Runnable {
 
         // Отрисовка текущего экрана Panorama Glass UI 8.0
         if (currentScreen == AppScreen.MAIN_MENU) {
+            if (settings.menuParticles) uiFx.drawEmbers(g);
             drawMainMenuScreen(g, outW, outH);
+        } else if (currentScreen == AppScreen.CASE_OPENING) {
+            caseOpening.render(g, outW, outH);
+            if (settings.menuParticles) uiFx.drawEmbers(g);
         } else if (currentScreen == AppScreen.SKIN_ARMORY) {
             drawSkinArmoryScreen(g, outW, outH);
         } else if (currentScreen == AppScreen.SETTINGS) {
@@ -3209,6 +3279,26 @@ public class Engine extends JPanel implements Runnable {
             g.fillRoundRect(flash.x, flash.y, flash.width, flash.height, 10, 10);
             g.setColor(new Color(255, 255, 255, Math.min(220, alpha + 70)));
             g.drawRoundRect(flash.x, flash.y, flash.width, flash.height, 10, 10);
+        }
+
+        // 9.5: волны от кликов, всплывающие достижения, белый «выход» из заставки и звук наведения
+        if (isCursorFreeScreen()) uiFx.drawRipples(g);
+        uiFx.drawToasts(g, outW, outH);
+        if (currentScreen == AppScreen.MAIN_MENU && menuIntroTimer < 0.8) {
+            double wa = 1.0 - menuIntroTimer / 0.8;
+            g.setColor(new Color(255, 255, 255, (int) (255 * wa * wa)));
+            g.fillRect(0, 0, outW, outH);
+        }
+        if (isCursorFreeScreen()) {
+            Rectangle hov = null;
+            for (int i = buildingUiClickables.size() - 1; i >= 0; i--) {
+                if (buildingUiClickables.get(i).rect.contains(mouseClientX, mouseClientY)) {
+                    hov = buildingUiClickables.get(i).rect;
+                    break;
+                }
+            }
+            if (hov != null && !hov.equals(lastHoveredUiRect)) soundSystem.playUiHover();
+            lastHoveredUiRect = hov;
         }
 
         this.publishedUiSnapshot = new UiSnapshot(new ArrayList<>(buildingUiClickables), outW, outH);
@@ -3604,108 +3694,311 @@ public class Engine extends JPanel implements Runnable {
     // =========================================================================
     //  1. ГЛАВНОЕ МЕНЮ COUNTER-STRIKE 2 (SOURCE 2 FROSTED PANORAMA UI 8.0)
     // =========================================================================
-    private void drawMainMenuScreen(Graphics2D g, int outW, int outH) {
-        // 1. ВЕРХНЯЯ КОМАНДНАЯ ШАПКА PANORAMA 8.0 (настоящее матовое стекло поверх 3D-мира!)
-        int navH = 66;
-        drawFrostedGlassPanel(g, 0, 0, outW, navH, 0x090E18, 206,
-                new Color(255, 255, 255, 28), new Color(252, 196, 68, 215));
-        g.setColor(new Color(252, 192, 64, 180));
-        g.fillRect(0, navH - 2, outW, 2);
+    private static double easeOutCubic(double x) {
+        x = Math.max(0.0, Math.min(1.0, x));
+        return 1.0 - Math.pow(1.0 - x, 3.0);
+    }
 
-        // Скошенный киберспортивный щит-логотип CS2 слева
-        Polygon crest = new Polygon(
-                new int[]{18, 74, 65, 18},
-                new int[]{10, 10, 56, 56}, 4);
-        g.setPaint(new GradientPaint(18, 10, new Color(255, 214, 84), 65, 56, new Color(224, 128, 20)));
+    private static final String MENU_NEWS_TICKER =
+            "◆ ОБНОВЛЕНИЕ 10.0 «ALKASH EDITION»: кинематографическая заставка, кейсы с ножами ★, контракты обмена и 13 достижений   "
+            + "◆ Совет: контр-стрейф перед выстрелом — первая пуля летит точно в цель   "
+            + "◆ AK-47 убивает в голову с одного выстрела даже в шлеме — целься выше!   "
+            + "◆ Дерево и ящики простреливаются насквозь, бетон — почти никогда   "
+            + "◆ +1 ключ от кейса за каждые 5 фрагов и +2 за победу в матче   "
+            + "◆ [E] — подобрать оружие, [B] — магазин по категориям, [F] — осмотр оружия   "
+            + "◆ Игра сделана Алкашом. Без регистрации и SMS.   ";
+
+    /** Контур большого заголовка «CS-2 JAVA» для градиента, свечения и блика (кэшируется по размеру). */
+    private Shape getHeroTitleShape(int size) {
+        if (heroTitleShape == null || heroTitleSize != size) {
+            Font f = new Font("SansSerif", Font.BOLD, size);
+            java.awt.font.FontRenderContext frc = new java.awt.font.FontRenderContext(null, true, true);
+            heroTitleShape = f.createGlyphVector(frc, "CS-2 JAVA").getOutline();
+            heroTitleSize = size;
+        }
+        return heroTitleShape;
+    }
+
+    private void drawMainMenuScreen(Graphics2D g, int outW, int outH) {
+        double intro = easeOutCubic(menuIntroTimer / 0.95);
+        double introNav = easeOutCubic((menuIntroTimer - 0.05) / 0.7);
+        double introLeft = easeOutCubic((menuIntroTimer - 0.15) / 0.85);
+        double introDeck = easeOutCubic((menuIntroTimer - 0.10) / 0.9);
+        double tAnim = uiFx.getTime();
+        AffineTransform baseTx = g.getTransform();
+
+        // 0. Кинематографическое затемнение сверху/снизу для читаемости поверх 3D-сцены
+        g.setPaint(new GradientPaint(0, 0, new Color(4, 6, 12, 170), 0, 220, new Color(4, 6, 12, 0)));
+        g.fillRect(0, 0, outW, 220);
+        g.setPaint(new GradientPaint(0, outH - 260, new Color(4, 6, 12, 0), 0, outH, new Color(4, 6, 12, 190)));
+        g.fillRect(0, outH - 260, outW, 260);
+        g.setPaint(new GradientPaint(0, 0, new Color(4, 6, 12, 150), 460, 0, new Color(4, 6, 12, 0)));
+        g.fillRect(0, 0, 460, outH);
+
+        // ===================== 1. ВЕРХНЯЯ ПАНЕЛЬ =====================
+        g.translate(0, -(1.0 - introNav) * 90);
+        int navH = 66;
+        drawFrostedGlassPanel(g, 0, 0, outW, navH, 0x070B14, 214,
+                new Color(255, 255, 255, 22), null);
+        g.setPaint(new GradientPaint(0, navH - 2, new Color(252, 170, 40, 60), outW / 2f, navH - 2, new Color(255, 214, 100, 220), true));
+        g.fillRect(0, navH - 2, outW, 2);
+        uiFx.drawRunningEdge(g, 0, navH - 2, outW, new Color(255, 248, 210), 0.22);
+
+        // Щит-логотип с пробегающим бликом
+        Polygon crest = new Polygon(new int[]{18, 74, 65, 18}, new int[]{10, 10, 56, 56}, 4);
+        g.setPaint(new GradientPaint(18, 10, new Color(255, 218, 92), 65, 56, new Color(226, 120, 18)));
         g.fillPolygon(crest);
+        UiFx.drawShine(g, crest, new Rectangle(18, 10, 56, 46), ((tAnim * 0.5) % 1.6) / 1.2, 0.9);
+        g.setColor(new Color(120, 56, 0));
+        g.drawPolygon(crest);
         g.setColor(new Color(14, 18, 26));
         g.setFont(uiFont("SansSerif", Font.BOLD, 21));
         g.drawString("CS2", 22, 40);
 
         g.setColor(Color.WHITE);
         g.setFont(uiFont("SansSerif", Font.BOLD, 21));
-        g.drawString("CS-2 JAVA 9.0", 82, 33);
-        g.setColor(new Color(102, 222, 255));
+        g.drawString("CS-2 JAVA 10.0", 82, 33);
+        g.setPaint(new GradientPaint(83, 0, new Color(255, 206, 90), 220, 0, new Color(102, 222, 255)));
         g.setFont(uiFont("SansSerif", Font.BOLD, 10));
-        g.drawString("SOURCE 2 • 68×68 М", 83, 50);
+        g.drawString("ALKASH EDITION • SOURCE 2", 83, 50);
 
-        // Центральные вкладки навигации Panorama UI 8.0
-        int tabsStartX = 270;
-        int tabGap = 6;
-        String[] navLabels = {"▶ ИГРАТЬ", "3D СКИНЫ", "ГРАФИКА", "УПРАВЛЕНИЕ", "АУДИО", "АРСЕНАЛ", "F11 ЭКРАН", "ВЫХОД"};
+        // Скошенные вкладки навигации с плавной анимацией наведения
+        int tabsStartX = 262;
+        int tabGap = 4;
+        String[] navLabels = {"▶ ИГРАТЬ", "◈ КЕЙСЫ", "3D СКИНЫ", "ГРАФИКА", "УПРАВЛЕНИЕ", "АУДИО", "АРСЕНАЛ", "ВЫХОД"};
         Runnable[] navActions = {
             this::launchMatchFromMenu,
+            this::openCaseScreen,
             () -> currentScreen = AppScreen.SKIN_ARMORY,
             () -> openSettingsScreen(false, 0),
             () -> openSettingsScreen(false, 1),
             () -> openSettingsScreen(false, 2),
             () -> currentScreen = AppScreen.ARSENAL_GUIDE,
-            this::toggleFullscreenMode,
             this::shutdownAndExit
         };
-        int availNavW = Math.max(430, outW - tabsStartX - 278);
-        int navBtnW = Math.min(104, (availNavW - (navLabels.length - 1) * tabGap) / navLabels.length);
+        int availNavW = Math.max(430, outW - tabsStartX - 284);
+        int navBtnW = Math.min(108, (availNavW - (navLabels.length - 1) * tabGap) / navLabels.length);
+        int skew = 7;
         for (int i = 0; i < navLabels.length; i++) {
             int tx = tabsStartX + i * (navBtnW + tabGap);
             Rectangle tr = new Rectangle(tx, 13, navBtnW, 40);
             boolean hov = tr.contains(mouseClientX, mouseClientY);
+            double ha = uiFx.hoverAnim(tr, hov, uiDt);
             boolean primary = (i == 0);
+            boolean cases = (i == 1);
             boolean danger = (i == navLabels.length - 1);
-            Color bg = primary ? (hov ? new Color(255, 192, 56) : new Color(238, 158, 30))
-                    : (danger ? (hov ? new Color(184, 54, 62) : new Color(118, 34, 42, 210))
-                    : (hov ? new Color(46, 68, 102, 236) : new Color(20, 30, 46, 185)));
-            g.setColor(bg);
-            g.fillRoundRect(tr.x, tr.y, tr.width, tr.height, 8, 8);
-            g.setColor(primary ? new Color(255, 242, 185, 210) : new Color(255, 255, 255, hov ? 95 : 32));
-            g.drawRoundRect(tr.x, tr.y, tr.width, tr.height, 8, 8);
-            if (primary || hov) {
-                g.setColor(primary ? new Color(255, 246, 192) : new Color(96, 220, 255));
-                g.fillRect(tr.x + 8, tr.y + tr.height - 3, tr.width - 16, 3);
+            Polygon tab = new Polygon(
+                    new int[]{tr.x + skew, tr.x + tr.width, tr.x + tr.width - skew, tr.x},
+                    new int[]{tr.y, tr.y, tr.y + tr.height, tr.y + tr.height}, 4);
+            Color bgA, bgB;
+            if (primary) {
+                bgA = blendColor(new Color(244, 168, 34), new Color(255, 206, 80), ha);
+                bgB = blendColor(new Color(214, 112, 16), new Color(246, 150, 30), ha);
+            } else if (cases) {
+                bgA = blendColor(new Color(96, 42, 150, 220), new Color(150, 70, 220, 240), ha);
+                bgB = blendColor(new Color(56, 22, 96, 220), new Color(96, 40, 160, 240), ha);
+            } else if (danger) {
+                bgA = blendColor(new Color(118, 34, 42, 210), new Color(196, 58, 66), ha);
+                bgB = blendColor(new Color(76, 20, 28, 210), new Color(140, 36, 44), ha);
+            } else {
+                bgA = blendColor(new Color(26, 38, 58, 200), new Color(52, 78, 116, 240), ha);
+                bgB = blendColor(new Color(14, 22, 36, 200), new Color(30, 48, 76, 240), ha);
             }
-            drawCenteredText(g, navLabels[i], tr.x + tr.width / 2, tr.y + 25,
+            if (ha > 0.02 || primary) {
+                double pulse = primary ? 0.45 + 0.35 * Math.sin(tAnim * 3.2) : 0.0;
+                Color glowC = primary ? new Color(255, 180, 50) : (cases ? new Color(190, 110, 255) : (danger ? new Color(255, 80, 90) : new Color(90, 200, 255)));
+                g.setColor(new Color(glowC.getRed(), glowC.getGreen(), glowC.getBlue(), (int) (70 * Math.max(ha, pulse))));
+                g.fillRoundRect(tr.x - 3, tr.y - 3, tr.width + 6, tr.height + 6, 12, 12);
+            }
+            g.setPaint(new GradientPaint(tr.x, tr.y, bgA, tr.x, tr.y + tr.height, bgB));
+            g.fillPolygon(tab);
+            if (primary || ha > 0.05) UiFx.drawShine(g, tab, tr, ((tAnim * 0.7 + i * 0.13) % 1.8) / 1.3, primary ? 0.7 : ha * 0.8);
+            g.setColor(primary ? new Color(255, 242, 185, 220) : new Color(255, 255, 255, (int) (32 + 70 * ha)));
+            g.drawPolygon(tab);
+            int ulW = (int) ((tr.width - 20) * (primary ? 1.0 : ha));
+            if (ulW > 1) {
+                g.setColor(primary ? new Color(255, 248, 200) : new Color(110, 226, 255));
+                g.fillRect(tr.x + tr.width / 2 - ulW / 2, tr.y + tr.height - 3, ulW, 3);
+            }
+            drawCenteredText(g, navLabels[i], tr.x + tr.width / 2, tr.y + 25 - (int) Math.round(ha),
                     uiFont("SansSerif", Font.BOLD, 11),
                     primary ? new Color(14, 16, 22) : Color.WHITE);
-            uiRegisterClickable(tr, navActions[i]);
+            if (cases && settings.caseKeys > 0) {
+                String kc = settings.caseKeys > 99 ? "99+" : String.valueOf(settings.caseKeys);
+                g.setFont(uiFont("SansSerif", Font.BOLD, 10));
+                int bw = Math.max(18, g.getFontMetrics().stringWidth(kc) + 10);
+                int bx = tr.x + tr.width - bw + 4, by = tr.y - 6;
+                double bp = 1.0 + 0.08 * Math.sin(tAnim * 6.0);
+                g.setColor(new Color(236, 52, 64));
+                g.fillRoundRect(bx, by, (int) (bw * bp), 17, 17, 17);
+                g.setColor(Color.WHITE);
+                g.drawString(kc, bx + ((int) (bw * bp) - g.getFontMetrics().stringWidth(kc)) / 2, by + 13);
+            }
+            uiRegisterClickable(new Rectangle(tr.x, tr.y + (int) (-(1.0 - introNav) * 90), tr.width, tr.height), navActions[i]);
         }
 
-        // Карточка Профиля и Воинского Звания CS2 справа в шапке
-        int profW = 254, profX = outW - profW - 14, profY = 9;
-        g.setColor(new Color(14, 22, 34, 228));
+        // Карточка профиля и звания
+        int profW = 262, profX = outW - profW - 14, profY = 9;
+        g.setPaint(new GradientPaint(profX, profY, new Color(18, 28, 44, 235), profX + profW, profY + 48, new Color(10, 16, 26, 235)));
         g.fillRoundRect(profX, profY, profW, 48, 10, 10);
         Color rankCol = settings.getRankColor();
         g.setColor(new Color(rankCol.getRed(), rankCol.getGreen(), rankCol.getBlue(), 200));
         g.drawRoundRect(profX, profY, profW, 48, 10, 10);
-
         int sx = profX + 22, sy = profY + 24;
         Polygon shield = new Polygon(
                 new int[]{sx, sx + 13, sx + 10, sx, sx - 10, sx - 13},
                 new int[]{sy - 15, sy - 9, sy + 7, sy + 15, sy + 7, sy - 9}, 6);
+        g.setColor(new Color(rankCol.getRed(), rankCol.getGreen(), rankCol.getBlue(), 60));
+        g.fillOval(sx - 20, sy - 20, 40, 40);
         g.setColor(rankCol);
         g.fillPolygon(shield);
+        UiFx.drawShine(g, shield, new Rectangle(sx - 13, sy - 15, 26, 30), ((tAnim * 0.4) % 1.5) / 1.1, 0.8);
         g.setColor(Color.WHITE);
         g.drawPolygon(shield);
-
         g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(Color.WHITE);
         g.drawString(settings.getRankTitle(), profX + 42, profY + 20);
         g.setFont(uiFont("SansSerif", Font.PLAIN, 10));
         g.setColor(new Color(180, 198, 220));
-        g.drawString("XP: " + settings.careerXp + " • Фрагов: " + settings.careerKills, profX + 42, profY + 34);
-
+        g.drawString("XP " + settings.careerXp + " • Фрагов " + settings.careerKills + " • ◈ " + settings.caseKeys, profX + 42, profY + 34);
         int xpBarX = profX + 42, xpBarW = profW - 54;
         g.setColor(new Color(30, 42, 58));
         g.fillRoundRect(xpBarX, profY + 39, xpBarW, 5, 4, 4);
-        g.setColor(rankCol);
-        g.fillRoundRect(xpBarX, profY + 39, (int) (xpBarW * settings.getRankProgress()), 5, 4, 4);
+        int xpFill = (int) (xpBarW * settings.getRankProgress());
+        g.setPaint(new GradientPaint(xpBarX, 0, rankCol.darker(), xpBarX + Math.max(1, xpFill), 0, rankCol));
+        g.fillRoundRect(xpBarX, profY + 39, xpFill, 5, 4, 4);
+        if (xpFill > 6) {
+            int shx = xpBarX + (int) (((tAnim * 0.6) % 1.0) * xpFill);
+            g.setColor(new Color(255, 255, 255, 170));
+            g.fillRect(shx, profY + 39, 3, 5);
+        }
+        g.setTransform(baseTx);
 
-        // 2. МАТОВО-СТЕКЛЯННАЯ ВИТРИНА 3D-ОПЕРАТИВНИКА СПЕЦНАЗА SAS CT + ВЕКТОРНЫЙ СИЛУЭТ ПУШКИ!
+        // ===================== 2. ЛЕВАЯ КОЛОНКА: ГЕРОЙ-ЗАГОЛОВОК + ДОСТИЖЕНИЯ + ОПЕРАТИВНИК =====================
+        g.translate(-(1.0 - introLeft) * 480, 0);
+        int heroX = 28, heroY = navH + 30;
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
+        String heroTag = "◆ ALKASH EDITION  •  СЕЗОН 10  •  " + settings.mapTheme.codeName;
+        g.setColor(new Color(110, 220, 255));
+        g.drawString(heroTag, heroX, heroY);
+        g.setColor(new Color(110, 220, 255, 120));
+        g.fillRect(heroX, heroY + 6, 64 + (int) (40 * (0.5 + 0.5 * Math.sin(tAnim * 1.7))), 2);
+
+        Shape title = getHeroTitleShape(60);
+        java.awt.geom.Rectangle2D tb = title.getBounds2D();
+        AffineTransform beforeTitle = g.getTransform();
+        g.translate(heroX - tb.getMinX(), heroY + 14 - tb.getMinY());
+        double glowPulse = 0.6 + 0.4 * Math.sin(tAnim * 2.2);
+        for (int k = 0; k < 8; k++) {
+            double a = k * Math.PI / 4;
+            g.translate(Math.cos(a) * 4, Math.sin(a) * 4);
+            g.setColor(new Color(255, 150, 30, (int) (22 * glowPulse)));
+            g.fill(title);
+            g.translate(-Math.cos(a) * 4, -Math.sin(a) * 4);
+        }
+        g.translate(0, 5);
+        g.setColor(new Color(40, 16, 0, 200));
+        g.fill(title);
+        g.translate(0, -5);
+        g.setPaint(new GradientPaint(0, (float) tb.getMinY(), new Color(255, 244, 190), 0, (float) tb.getMaxY(), new Color(232, 120, 18)));
+        g.fill(title);
+        Shape clipBefore = g.getClip();
+        g.clip(title);
+        g.setColor(new Color(255, 255, 255, 40));
+        g.fill(new java.awt.geom.Rectangle2D.Double(tb.getMinX(), tb.getMinY(), tb.getWidth(), tb.getHeight() * 0.45));
+        g.setClip(clipBefore);
+        UiFx.drawShine(g, title, tb.getBounds(), ((tAnim * 0.45) % 1.7) / 1.3, 1.0);
+        g.setStroke(new BasicStroke(1.6f));
+        g.setColor(new Color(90, 40, 0));
+        g.draw(title);
+        g.setStroke(new BasicStroke(1f));
+        g.setTransform(beforeTitle);
+
+        int afterTitleY = heroY + 14 + (int) tb.getHeight() + 22;
+        g.setFont(uiFont("SansSerif", Font.BOLD, 14));
+        g.setColor(new Color(255, 255, 255, 220));
+        g.drawString("Игра сделана Алкашом", heroX + 2, afterTitleY);
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
+        g.setColor(new Color(176, 196, 220));
+        g.drawString("26 стволов  •  реализм CS2  •  кейсы  •  4 карты 68×68 м", heroX + 2, afterTitleY + 19);
+
+        // Чипы статистики
+        int hsPct = settings.careerKills > 0 ? (int) Math.round(100.0 * settings.careerHeadshots / settings.careerKills) : 0;
+        String[] chipVals = {String.valueOf(settings.careerKills), hsPct + "%", String.valueOf(settings.careerWins), String.valueOf(settings.caseKeys)};
+        String[] chipLbls = {"ФРАГИ", "В ГОЛОВУ", "ПОБЕДЫ", "КЛЮЧИ"};
+        Color[] chipCols = {new Color(255, 120, 90), new Color(255, 206, 86), new Color(110, 226, 150), new Color(190, 120, 255)};
+        int chipX = heroX, chipY = afterTitleY + 32, chipW = 84, chipH = 44;
+        for (int i = 0; i < 4; i++) {
+            int cx0 = chipX + i * (chipW + 8);
+            g.setColor(new Color(10, 16, 26, 200));
+            g.fillRoundRect(cx0, chipY, chipW, chipH, 10, 10);
+            g.setColor(new Color(chipCols[i].getRed(), chipCols[i].getGreen(), chipCols[i].getBlue(), 160));
+            g.drawRoundRect(cx0, chipY, chipW, chipH, 10, 10);
+            g.fillRect(cx0 + 10, chipY + chipH - 3, chipW - 20, 2);
+            g.setFont(uiFont("SansSerif", Font.BOLD, 18));
+            g.setColor(Color.WHITE);
+            g.drawString(chipVals[i], cx0 + 10, chipY + 22);
+            g.setFont(uiFont("SansSerif", Font.BOLD, 9));
+            g.setColor(chipCols[i]);
+            g.drawString(chipLbls[i], cx0 + 10, chipY + 36);
+        }
+        // Живая панорама — строка статуса
+        g.setFont(uiFont("SansSerif", Font.BOLD, 10));
+        double blink = 0.5 + 0.5 * Math.sin(tAnim * 5.0);
+        g.setColor(new Color(255, 60, 70, (int) (120 + 135 * blink)));
+        g.fillOval(heroX, chipY + chipH + 13, 8, 8);
+        g.setColor(new Color(214, 226, 242));
+        g.drawString("LIVE 3D  •  " + settings.mapTheme.layoutBadge, heroX + 14, chipY + chipH + 21);
+
+        // Панель достижений
         int opCardX = 22;
         int opCardW = 378;
         int opCardH = 122;
         int opCardY = outH - opCardH - 40;
+        int achH = 96, achY = opCardY - achH - 12;
+        drawFrostedGlassPanel(g, opCardX, achY, opCardW, achH, 0x0A0E18, 200,
+                new Color(255, 200, 80, 90), new Color(255, 200, 80, 210));
+        UiFx.drawCornerBrackets(g, opCardX - 3, achY - 3, opCardW + 5, achH + 5, 10, new Color(255, 206, 90, 200), 1.6f);
+        int achTotal = UiFx.ACHIEVEMENTS.length;
+        int achGot = 0;
+        for (String[] a : UiFx.ACHIEVEMENTS) if (settings.hasAchievement(a[0])) achGot++;
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
+        g.setColor(new Color(255, 210, 100));
+        String achHdr = "★ ДОСТИЖЕНИЯ  " + achGot + " / " + achTotal;
+        g.drawString(achHdr, opCardX + 14, achY + 20);
+        int apX = opCardX + 14 + g.getFontMetrics().stringWidth(achHdr) + 14, apW = opCardX + opCardW - 16 - apX;
+        g.setColor(new Color(30, 38, 52));
+        g.fillRoundRect(apX, achY + 13, apW, 6, 6, 6);
+        g.setPaint(new GradientPaint(apX, 0, new Color(255, 160, 40), apX + apW, 0, new Color(255, 230, 120)));
+        g.fillRoundRect(apX, achY + 13, (int) (apW * achGot / (double) achTotal), 6, 6, 6);
+        String[] hoveredAch = null;
+        double medalStep = (opCardW - 28) / (double) achTotal;
+        for (int i = 0; i < achTotal; i++) {
+            String[] a = UiFx.ACHIEVEMENTS[i];
+            boolean got = settings.hasAchievement(a[0]);
+            double mcx = opCardX + 14 + medalStep * (i + 0.5);
+            double mcy = achY + 52;
+            Rectangle mr = new Rectangle((int) (mcx - medalStep / 2), (int) (mcy - 20), (int) medalStep, 36);
+            boolean mh = new Rectangle(mr.x + (int) (-(1.0 - introLeft) * 480), mr.y, mr.width, mr.height).contains(mouseClientX, mouseClientY);
+            double mha = uiFx.hoverAnim(mr, mh, uiDt);
+            double rad = 9.5 + 2.5 * mha;
+            UiFx.drawMedal(g, mcx, mcy + 4, rad, got, got ? 0.35 + 0.35 * Math.sin(tAnim * 2.5 + i) + mha * 0.5 : 0);
+            if (mh) hoveredAch = a;
+        }
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 11));
+        if (hoveredAch != null) {
+            boolean got = settings.hasAchievement(hoveredAch[0]);
+            g.setColor(got ? new Color(255, 220, 130) : new Color(170, 182, 200));
+            g.drawString((got ? "✔ " : "○ ") + hoveredAch[1] + " — " + hoveredAch[2], opCardX + 14, achY + achH - 10);
+        } else {
+            g.setColor(new Color(150, 164, 186));
+            g.drawString("Наведите на медаль  •  достижение = +1 ключ от кейса", opCardX + 14, achY + achH - 10);
+        }
+
+        // Карточка оперативника
         drawFrostedGlassPanel(g, opCardX, opCardY, opCardW, opCardH, 0x0A121E, 198,
                 new Color(88, 206, 255, 145), new Color(76, 204, 255, 220));
-
+        UiFx.drawCornerBrackets(g, opCardX - 3, opCardY - 3, opCardW + 5, opCardH + 5, 10, new Color(96, 214, 255, 200), 1.6f);
         Weapon showcaseW = armoryShowcaseWeapons[armoryWeaponIdx];
         g.setFont(uiFont("SansSerif", Font.BOLD, 10));
         g.setColor(new Color(98, 218, 255));
@@ -3716,40 +4009,42 @@ public class Engine extends JPanel implements Runnable {
         g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(252, 206, 92));
         g.drawString("СКИН: " + settings.weaponSkin.label.toUpperCase(), opCardX + 14, opCardY + 59);
-
-        // Чёткий векторный силуэт выбранного оружия справа в карточке оперативника!
         g.setColor(new Color(14, 22, 34, 190));
         g.fillRoundRect(opCardX + opCardW - 114, opCardY + 12, 100, 50, 8, 8);
         g.setColor(new Color(92, 208, 255, 85));
         g.drawRoundRect(opCardX + opCardW - 114, opCardY + 12, 100, 50, 8, 8);
-        drawWeaponSilhouette(g, showcaseW.getType(), opCardX + opCardW - 110, opCardY + 15, 92, 44,
-                new Color(226, 236, 248), new Color(255, 196, 72));
-
-        addMenuButton(g, new Rectangle(opCardX + 14, opCardY + 72, 170, 38),
-                "⟳ СМЕНИТЬ ОРУЖИЕ", new Color(34, 58, 88), false,
+        Color skinBody = settings.weaponSkin.primary == 0 ? new Color(226, 236, 248) : new Color(settings.weaponSkin.primary);
+        Color skinAcc = settings.weaponSkin.accent == 0 ? new Color(255, 196, 72) : new Color(settings.weaponSkin.accent);
+        drawWeaponSilhouette(g, showcaseW.getType(), opCardX + opCardW - 110, opCardY + 15, 92, 44, skinBody, skinAcc);
+        int leftShift = (int) (-(1.0 - introLeft) * 480);
+        Rectangle swapR = new Rectangle(opCardX + 14, opCardY + 72, 170, 38);
+        Rectangle caseR = new Rectangle(opCardX + 194, opCardY + 72, 170, 38);
+        addMenuButton(g, swapR, "⟳ СМЕНИТЬ ОРУЖИЕ", new Color(34, 58, 88), false,
                 () -> armoryWeaponIdx = (armoryWeaponIdx + 1) % armoryShowcaseWeapons.length);
-        addMenuButton(g, new Rectangle(opCardX + 194, opCardY + 72, 170, 38),
-                "★ 3D СКИНЫ (" + GameSettings.WeaponSkin.values().length + ")", new Color(124, 52, 168), false,
-                () -> currentScreen = AppScreen.SKIN_ARMORY);
+        addMenuButton(g, caseR, "◈ КЕЙСЫ (" + settings.caseKeys + ")", new Color(124, 52, 168), false, this::openCaseScreen);
+        if (leftShift != 0) {
+            // во время выезда панели кликабельные зоны совпадают с видимыми кнопками
+            buildingUiClickables.remove(buildingUiClickables.size() - 1);
+            buildingUiClickables.remove(buildingUiClickables.size() - 1);
+        }
+        g.setTransform(baseTx);
 
-        // Живой бейдж текущей точки обзора 68×68м карты слева сверху под шапкой!
-        drawFrostedGlassPanel(g, 22, navH + 14, 348, 44, 0x09101B, 185,
-                new Color(255, 255, 255, 42), new Color(252, 196, 68, 190));
-        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
-        g.setColor(new Color(252, 206, 86));
-        g.drawString("◉ ЖИВАЯ 3D-ПАНОРАМА • " + settings.mapTheme.codeName + " (68×68 М)", 34, navH + 32);
-        g.setFont(uiFont("SansSerif", Font.PLAIN, 11));
-        g.setColor(new Color(204, 220, 238));
-        g.drawString(settings.mapTheme.layoutBadge, 34, navH + 49);
-
-        // 3. ПРАВАЯ КОМАНДНАЯ ПАНЕЛЬ ЗАПУСКА СПЕЦОПЕРАЦИИ (МАТОВОЕ СТЕКЛО + 4 АРХИТЕКТУРНЫЕ КАРТЫ!)
+        // ===================== 3. ПРАВАЯ ПАНЕЛЬ ЗАПУСКА =====================
         int deckW = Math.min(564, outW - 422);
         int deckH = Math.min(554, outH - navH - 44);
         int deckX = outW - deckW - 20;
         int deckY = navH + 12;
+        int deckShift = (int) ((1.0 - introDeck) * (deckW + 60));
+        if (deckShift > 2) {
+            // Пока панель выезжает — рисуем её, но клики игнорируем
+            g.translate(deckShift, 0);
+        }
+        int clickMark = buildingUiClickables.size();
 
         drawFrostedGlassPanel(g, deckX, deckY, deckW, deckH, 0x0A101C, 212,
                 new Color(255, 255, 255, 58), new Color(252, 196, 68, 225));
+        uiFx.drawRunningEdge(g, deckX, deckY + 1, deckW, new Color(255, 250, 220), 0.35);
+        UiFx.drawCornerBrackets(g, deckX - 4, deckY - 4, deckW + 7, deckH + 7, 14, new Color(255, 206, 90, 210), 2f);
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 14));
         g.setColor(new Color(255, 210, 88));
@@ -3878,34 +4173,114 @@ public class Engine extends JPanel implements Runnable {
         });
         rowY += stepH + 8;
 
-        // ГЛАВНАЯ КНОПКА ЗАПУСКА СПЕЦОПЕРАЦИИ С ЗОЛОТЫМ СВЕЧЕНИЕМ CS2!
+        // ГЛАВНАЯ КНОПКА ЗАПУСКА — пульсирующее золотое свечение, блик и бегущие шевроны
         int ctaH = Math.max(44, deckY + deckH - rowY - 12);
         Rectangle playRect = new Rectangle(deckX + 18, rowY, deckW - 36, Math.min(54, ctaH));
         boolean playHov = playRect.contains(mouseClientX, mouseClientY);
+        double pha = uiFx.hoverAnim(playRect, playHov, uiDt);
+        double pulse = 0.5 + 0.5 * Math.sin(tAnim * 3.0);
+        for (int k = 3; k >= 1; k--) {
+            int gr = (int) (k * 4 + pulse * 3 + pha * 4);
+            g.setColor(new Color(255, 170, 40, (int) ((18 + 14 * pha) * (4 - k) * (0.6 + 0.4 * pulse))));
+            g.fillRoundRect(playRect.x - gr, playRect.y - gr, playRect.width + gr * 2, playRect.height + gr * 2, 14 + gr * 2, 14 + gr * 2);
+        }
+        RoundRectangle2D playShape = new RoundRectangle2D.Double(playRect.x, playRect.y, playRect.width, playRect.height, 12, 12);
         g.setPaint(new GradientPaint(playRect.x, playRect.y,
-                playHov ? new Color(255, 214, 84) : new Color(248, 178, 42),
+                blendColor(new Color(250, 182, 44), new Color(255, 218, 92), pha),
                 playRect.x + playRect.width, playRect.y + playRect.height,
-                playHov ? new Color(248, 142, 26) : new Color(218, 108, 18)));
-        g.fillRoundRect(playRect.x, playRect.y, playRect.width, playRect.height, 12, 12);
+                blendColor(new Color(220, 106, 16), new Color(250, 146, 28), pha)));
+        g.fill(playShape);
+        g.setPaint(new GradientPaint(0, playRect.y, new Color(255, 255, 255, 70), 0, playRect.y + playRect.height * 0.5f, new Color(255, 255, 255, 0)));
+        g.fillRoundRect(playRect.x + 1, playRect.y + 1, playRect.width - 2, playRect.height / 2, 11, 11);
+        UiFx.drawShine(g, playShape, playRect, ((tAnim * 0.55) % 1.6) / 1.2, 0.85 + 0.15 * pha);
         g.setColor(new Color(255, 248, 206));
-        g.drawRoundRect(playRect.x, playRect.y, playRect.width, playRect.height, 12, 12);
+        g.draw(playShape);
+        // бегущие шевроны справа
+        Shape pc = g.getClip();
+        g.clip(playShape);
+        for (int k = 0; k < 3; k++) {
+            double ph = ((tAnim * 1.2 + k / 3.0) % 1.0);
+            int chx = playRect.x + playRect.width - 66 + (int) (ph * 46);
+            int chy = playRect.y + playRect.height / 2;
+            int al = (int) (200 * Math.sin(ph * Math.PI));
+            g.setColor(new Color(40, 18, 0, al));
+            g.fillPolygon(new int[]{chx, chx + 9, chx + 19, chx + 10}, new int[]{chy - 11, chy - 11, chy, chy}, 4);
+            g.fillPolygon(new int[]{chx + 10, chx + 19, chx + 9, chx}, new int[]{chy, chy, chy + 11, chy + 11}, 4);
+        }
+        g.setClip(pc);
         drawCenteredText(g, "▶   НАЧАТЬ СПЕЦОПЕРАЦИЮ  •  " + settings.mapTheme.codeName,
-                playRect.x + playRect.width / 2, playRect.y + playRect.height / 2 + 6,
-                uiFont("SansSerif", Font.BOLD, 17), new Color(14, 16, 22));
+                playRect.x + playRect.width / 2 - 30, playRect.y + playRect.height / 2 + 6 - (int) Math.round(pha),
+                uiFont("SansSerif", Font.BOLD, 16), new Color(14, 16, 22));
         uiRegisterClickable(playRect, this::launchMatchFromMenu);
 
-        // 4. НИЖНЯЯ СТРОКА ТЕЛЕМЕТРИИ ДВИЖКА 8.0
-        drawFrostedGlassPanel(g, 0, outH - 28, outW, 28, 0x080C14, 214, null, new Color(255, 255, 255, 26));
+        // Последний дроп из кейса (или приглашение открыть первый кейс)
+        int dropY = playRect.y + playRect.height + 10;
+        int dropH = deckY + deckH - dropY - 12;
+        if (dropH >= 40) {
+            dropH = Math.min(60, dropH);
+            Rectangle dropR = new Rectangle(deckX + 18, dropY, deckW - 36, dropH);
+            boolean dh = dropR.contains(mouseClientX, mouseClientY);
+            double dha = uiFx.hoverAnim(dropR, dh, uiDt);
+            List<CaseOpening.Drop> inv = CaseOpening.parseInventory(settings);
+            CaseOpening.Drop last = inv.isEmpty() ? null : inv.get(inv.size() - 1);
+            int rc = last == null ? 0xBE78FF : CaseOpening.RARITY_RGB[last.item().rarity];
+            Color rcc = new Color(rc);
+            g.setPaint(new GradientPaint(dropR.x, 0, new Color(rcc.getRed() / 4, rcc.getGreen() / 4, rcc.getBlue() / 4, 220),
+                    dropR.x + dropR.width, 0, new Color(14, 18, 28, 220)));
+            g.fillRoundRect(dropR.x, dropR.y, dropR.width, dropR.height, 10, 10);
+            g.setColor(new Color(rcc.getRed(), rcc.getGreen(), rcc.getBlue(), (int) (110 + 120 * dha)));
+            g.drawRoundRect(dropR.x, dropR.y, dropR.width, dropR.height, 10, 10);
+            g.fillRect(dropR.x + 1, dropR.y + 6, 3, dropR.height - 12);
+            if (dha > 0.05) UiFx.drawShine(g, new RoundRectangle2D.Double(dropR.x, dropR.y, dropR.width, dropR.height, 10, 10),
+                    dropR, (tAnim * 0.8) % 1.5, dha * 0.6);
+            g.setFont(uiFont("SansSerif", Font.BOLD, 10));
+            g.setColor(rcc);
+            int ty = dropR.y + dropR.height / 2;
+            if (last != null) {
+                CaseOpening.Item it = last.item();
+                Color body = it.skin.primary == 0 ? new Color(0xB8C0CC) : new Color(it.skin.primary);
+                Color acc = it.skin.accent == 0 ? new Color(0xFFB040) : new Color(it.skin.accent);
+                drawWeaponSilhouette(g, it.type, dropR.x + 14, ty - 22, 92, 44, body, acc);
+                g.setFont(uiFont("SansSerif", Font.BOLD, 10));
+                g.setColor(rcc);
+                g.drawString("ПОСЛЕДНИЙ ДРОП • " + CaseOpening.RARITY_NAMES[it.rarity].toUpperCase(), dropR.x + 120, ty - 4);
+                g.setFont(uiFont("SansSerif", Font.BOLD, 14));
+                g.setColor(Color.WHITE);
+                g.drawString(fitTextToWidth(g, (last.statTrak ? "StatTrak™ " : "") + it.weaponName() + " | " + it.skinName,
+                        dropR.width - 280), dropR.x + 120, ty + 14);
+            } else {
+                g.drawString("КЕЙС «АЛКАШ» 2026 • 18 ПРЕДМЕТОВ • НОЖИ ★", dropR.x + 16, ty - 4);
+                g.setFont(uiFont("SansSerif", Font.BOLD, 14));
+                g.setColor(Color.WHITE);
+                g.drawString("Откройте свой первый кейс — у вас " + settings.caseKeys + " ключей!", dropR.x + 16, ty + 14);
+            }
+            g.setFont(uiFont("SansSerif", Font.BOLD, 12));
+            g.setColor(new Color(255, 214, 120));
+            String go = "К КЕЙСАМ ▸";
+            g.drawString(go, dropR.x + dropR.width - g.getFontMetrics().stringWidth(go) - 16 + (int) (4 * dha), ty + 5);
+            uiRegisterClickable(dropR, this::openCaseScreen);
+        }
+
+        if (deckShift > 2) {
+            while (buildingUiClickables.size() > clickMark) buildingUiClickables.remove(buildingUiClickables.size() - 1);
+        }
+        g.setTransform(baseTx);
+
+        // ===================== 4. НИЖНЯЯ СТРОКА: ТЕЛЕМЕТРИЯ + БЕГУЩАЯ СТРОКА НОВОСТЕЙ =====================
+        drawFrostedGlassPanel(g, 0, outH - 28, outW, 28, 0x080C14, 220, null, new Color(255, 255, 255, 26));
         g.setFont(uiFont("SansSerif", Font.BOLD, 11));
         g.setColor(new Color(118, 236, 164));
-        String perfInfo = String.format("● %d FPS (%.1f мс | 1%%: %d)  •  3D: %dx%d  •  %s  •  Потоков: %d  •  Арена: 68×68 м",
-                currentFps, lastFrameMs, onePercentLowFps, renderer.getWidth(), renderer.getHeight(),
-                settings.qualityPreset.name(), renderer.getWorkerThreads());
-        g.drawString(perfInfo, 22, outH - 10);
-
-        String hotkeysHint = "[Alt] Рывок  •  [B] Арсенал  •  [U] Авиаудар  •  [J] Авто-Турель  •  [K] Босс-Вертолёт";
-        g.setColor(new Color(214, 226, 242));
-        g.drawString(hotkeysHint, outW - g.getFontMetrics().stringWidth(hotkeysHint) - 22, outH - 10);
+        String perfInfo = String.format("● %d FPS  •  %dx%d  •  %s", currentFps, renderer.getWidth(), renderer.getHeight(),
+                settings.qualityPreset.name());
+        g.drawString(perfInfo, 18, outH - 10);
+        int perfW = g.getFontMetrics().stringWidth(perfInfo) + 34;
+        g.setColor(new Color(255, 196, 70));
+        g.fillRoundRect(perfW - 6, outH - 22, 62, 16, 6, 6);
+        g.setColor(new Color(16, 14, 8));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 10));
+        g.drawString("НОВОСТИ", perfW, outH - 10);
+        uiFx.drawTicker(g, perfW + 62, outH - 26, outW - perfW - 70, 24, MENU_NEWS_TICKER,
+                uiFont("SansSerif", Font.BOLD, 11), new Color(220, 230, 244));
     }
 
     // =========================================================================
@@ -4036,7 +4411,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 9.0", px + 28, py + 36);
+        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 10.0", px + 28, py + 36);
 
         String engineBadge = String.format("HYPER-TURBO • %d ПОТОКОВ CPU • %d FPS (%.1f мс)",
                 renderer.getWorkerThreads(), currentFps, lastFrameMs);
@@ -4358,14 +4733,28 @@ public class Engine extends JPanel implements Runnable {
                 settings.footstepSounds = !settings.footstepSounds;
                 settings.save();
             });
-            rowY += 50;
+            rowY += 42;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Свист и щелчки пролетающих пуль",
                     settings.bulletWhizSounds ? "Включено" : "Выключено", () -> {
                 settings.bulletWhizSounds = !settings.bulletWhizSounds;
                 settings.save();
             });
-            rowY += 50;
+            rowY += 42;
+
+            drawOptionStepperRow(g, listX, rowY, listW, "Заставка «Игра сделана Алкашом» при запуске",
+                    settings.showIntroSplash ? "Включено" : "Выключено", () -> {
+                settings.showIntroSplash = !settings.showIntroSplash;
+                settings.save();
+            });
+            rowY += 42;
+
+            drawOptionStepperRow(g, listX, rowY, listW, "Искры и угольки в главном меню",
+                    settings.menuParticles ? "Включено" : "Выключено", () -> {
+                settings.menuParticles = !settings.menuParticles;
+                settings.save();
+            });
+            rowY += 42;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Режим HUD-телеметрии FPS и графика времени кадра",
                     settings.telemetryMode.label, () -> {
@@ -4385,6 +4774,14 @@ public class Engine extends JPanel implements Runnable {
                         soundSystem.playWeaponShot(testType);
                         soundTestIdx = (soundTestIdx + 1) % ARMORY_ORDER.length;
                     });
+            if (!settingsOpenedFromGame) {
+                addMenuButton(g, new Rectangle(listX + 432, rowY, Math.max(160, listW - 432), 40), "▶ ПОКАЗАТЬ ЗАСТАВКУ",
+                        new Color(170, 92, 24), false, () -> {
+                            settings.save();
+                            splashIntro = new SplashIntro(soundSystem);
+                            currentScreen = AppScreen.SPLASH;
+                        });
+            }
         }
 
         String backLabel = settingsOpenedFromGame ? "← СОХРАНИТЬ И ВЕРНУТЬСЯ В БОЙ (ESC)" : "← СОХРАНИТЬ И В ГЛАВНОЕ МЕНЮ (ESC)";
@@ -4395,9 +4792,15 @@ public class Engine extends JPanel implements Runnable {
     private void drawCompactSettingCard(Graphics2D g, int x, int y, int w, String title, String valueLabel, Runnable onToggle) {
         Rectangle rect = new Rectangle(x, y, w, 35);
         boolean hovered = rect.contains(mouseClientX, mouseClientY);
-        g.setColor(hovered ? new Color(34, 48, 68, 228) : new Color(21, 29, 43, 212));
+        double ha = uiFx.hoverAnim(rect, hovered, uiDt);
+        g.setColor(blendColor(new Color(21, 29, 43, 212), new Color(38, 54, 78, 235), ha));
         g.fillRoundRect(x, y, w, 35, 8, 8);
-        g.setColor(hovered ? new Color(248, 198, 76, 185) : new Color(255, 255, 255, 34));
+        if (ha > 0.02) {
+            int bh = (int) (23 * ha);
+            g.setColor(new Color(255, 206, 86));
+            g.fillRoundRect(x + 3, y + 17 - bh / 2, 3, bh, 3, 3);
+        }
+        g.setColor(blendColor(new Color(255, 255, 255, 34), new Color(248, 198, 76, 200), ha));
         g.drawRoundRect(x, y, w, 35, 8, 8);
 
         g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
@@ -4531,7 +4934,7 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(245, 194, 72, 175));
         g.drawRoundRect(px, py, pw, ph, 18, 18);
 
-        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 9.0", outW / 2, py + 42,
+        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 10.0", outW / 2, py + 42,
                 uiFont("SansSerif", Font.BOLD, 22), new Color(252, 208, 88));
 
         String[] leftLines = {
@@ -4548,13 +4951,13 @@ public class Engine extends JPanel implements Runnable {
         };
 
         String[] rightLines = {
-            "НОВИНКИ CS-2 JAVA 9.0 (ОРУЖИЕ И РЕАЛИЗМ):",
-            "• 26 стволов: +M4A4, FAMAS, Galil, SG 553, AUG, Scout, P90...",
-            "• Паттерны отдачи CS2, точный 1-й выстрел, контр-стрейф",
-            "• Хитбоксы: голова ×4, живот ×1.25, ноги ×0.75 (без брони)",
-            "• Броня/шлем по формуле CS2, бронепробитие и падение урона",
-            "• Пробитие стен по материалу, кровь, урон от падения",
-            "• Боты с личным оружием, перезарядкой; подбор стволов [E]",
+            "НОВИНКИ CS-2 JAVA 10.0 (ALKASH EDITION):",
+            "• Заставка «Игра сделана Алкашом» с эффектами",
+            "• Кейсы CS2: рулетка, редкости, износ, StatTrak™, ножи ★",
+            "• Контракт обмена: 3 предмета → 1 ключ; инвентарь скинов",
+            "• 13 достижений с медалями и наградой-ключом",
+            "• Новое анимированное меню, неон, частицы, новости",
+            "• 26 стволов, отдача CS2, броня, пробитие стен (9.0)",
             "",
             "СИСТЕМНЫЕ КЛАВИШИ:",
             "• Tab — Счет команд • F5 — Рестарт • F11 — Полный экран"
@@ -4679,7 +5082,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("МАГАЗИН ВООРУЖЕНИЯ CS-2 JAVA 9.0", bx + 26, by + 38);
+        g.drawString("МАГАЗИН ВООРУЖЕНИЯ CS-2 JAVA 10.0", bx + 26, by + 38);
         g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
         g.setColor(new Color(170, 190, 214));
         g.drawString("Реальные ТТХ CS2: урон, скорострельность, бронепробитие, скорость бега • [1-6] категория → [1-7] ствол • [0/Backspace] назад",
@@ -5990,22 +6393,107 @@ public class Engine extends JPanel implements Runnable {
     // =========================================================================
     //  UI-ХЕЛПЕРЫ ГРАДИЕНТНЫХ СТЕКЛЯННЫХ КНОПОК PANORAMA 6.0
     // =========================================================================
+    // ===================== 9.5: ДОСТИЖЕНИЯ =====================
+    private void unlockAchievement(String id) {
+        if (settings.unlockAchievement(id)) {
+            settings.caseKeys = Math.min(999, settings.caseKeys + 1);
+            settings.save();
+            uiFx.pushAchievementToast(id);
+            soundSystem.playAchievement();
+        }
+    }
+
+    private void checkCareerAchievements() {
+        if (settings.careerKills >= 1) unlockAchievement("first_blood");
+        if (settings.careerKills >= 25) unlockAchievement("kills_25");
+        if (settings.careerKills >= 100) unlockAchievement("kills_100");
+        if (settings.careerHeadshots >= 10) unlockAchievement("hs_10");
+        if (settings.careerHeadshots >= 50) unlockAchievement("hs_50");
+        if (settings.careerWins >= 1) unlockAchievement("win_1");
+        if (settings.careerWins >= 10) unlockAchievement("win_10");
+    }
+
+    private CaseOpening.Host createCaseHost() {
+        return new CaseOpening.Host() {
+            @Override public void glassPanel(Graphics2D g, int x, int y, int w, int h, int tint, int alpha, Color border, Color accent) {
+                drawFrostedGlassPanel(g, x, y, w, h, tint, alpha, border, accent);
+            }
+            @Override public void silhouette(Graphics2D g, Weapon.Type t, int x, int y, int w, int h, Color body, Color accent) {
+                drawWeaponSilhouette(g, t, x, y, w, h, body, accent);
+            }
+            @Override public void button(Graphics2D g, Rectangle r, String label, Color base, boolean darkText, Runnable onClick) {
+                addMenuButton(g, r, label, base, darkText, onClick);
+            }
+            @Override public void clickable(Rectangle r, Runnable action) { uiRegisterClickable(r, action); }
+            @Override public int mouseX() { return mouseClientX; }
+            @Override public int mouseY() { return mouseClientY; }
+            @Override public GameSettings settings() { return settings; }
+            @Override public SoundSystem sound() { return soundSystem; }
+            @Override public void equip(Weapon.Type type, GameSettings.WeaponSkin skin) {
+                settings.weaponSkin = skin;
+                setArmoryWeapon(type);
+                settings.save();
+                soundSystem.playBuy();
+                streakBannerText = "ЭКИПИРОВАНО: " + Weapon.nameOf(type) + " | " + skin.label;
+                streakBannerTimer = 2.0;
+            }
+            @Override public void back() { currentScreen = AppScreen.MAIN_MENU; }
+            @Override public void achievement(String id) { unlockAchievement(id); }
+        };
+    }
+
+    public void openCaseScreen() { currentScreen = AppScreen.CASE_OPENING; }
+    public CaseOpening getCaseOpening() { return caseOpening; }
+    public SplashIntro getSplashIntro() { return splashIntro; }
+    public void setMenuIntroTimer(double t) { this.menuIntroTimer = t; }
+    public UiFx getUiFx() { return uiFx; }
+
+    private static Color blendColor(Color a, Color b, double t) {
+        t = Math.max(0.0, Math.min(1.0, t));
+        return new Color(
+                (int) Math.round(a.getRed() + (b.getRed() - a.getRed()) * t),
+                (int) Math.round(a.getGreen() + (b.getGreen() - a.getGreen()) * t),
+                (int) Math.round(a.getBlue() + (b.getBlue() - a.getBlue()) * t),
+                (int) Math.round(a.getAlpha() + (b.getAlpha() - a.getAlpha()) * t));
+    }
+
     private void addMenuButton(Graphics2D g, Rectangle rect, String label, Color baseColor, boolean accentTextDark, Runnable onClick) {
         boolean hovered = rect.contains(mouseClientX, mouseClientY);
-        Color c1 = hovered ? baseColor.brighter() : baseColor;
+        double ha = uiFx.hoverAnim(rect, hovered, uiDt);
+        // 9.5: мягкое неоновое свечение при наведении
+        if (ha > 0.02) {
+            g.setColor(new Color(baseColor.getRed(), baseColor.getGreen(), baseColor.getBlue(), (int) (60 * ha)));
+            g.fillRoundRect(rect.x - 4, rect.y - 4, rect.width + 8, rect.height + 8, 16, 16);
+            g.setColor(new Color(255, 230, 160, (int) (40 * ha)));
+            g.fillRoundRect(rect.x - 2, rect.y - 2, rect.width + 4, rect.height + 4, 13, 13);
+        }
+        Color c1 = blendColor(baseColor, baseColor.brighter(), ha);
         Color c2 = new Color(
-                Math.max(0, c1.getRed() - 22),
-                Math.max(0, c1.getGreen() - 22),
-                Math.max(0, c1.getBlue() - 18),
+                Math.max(0, c1.getRed() - 26),
+                Math.max(0, c1.getGreen() - 26),
+                Math.max(0, c1.getBlue() - 20),
                 c1.getAlpha());
+        RoundRectangle2D rr = new RoundRectangle2D.Double(rect.x, rect.y, rect.width, rect.height, 10, 10);
         g.setPaint(new GradientPaint(rect.x, rect.y, c1, rect.x, rect.y + rect.height, c2));
-        g.fillRoundRect(rect.x, rect.y, rect.width, rect.height, 10, 10);
-        g.setColor(hovered ? new Color(255, 240, 178) : new Color(255, 255, 255, 75));
-        g.drawRoundRect(rect.x, rect.y, rect.width, rect.height, 10, 10);
+        g.fill(rr);
+        // стеклянный блик верхней половины
+        g.setPaint(new GradientPaint(rect.x, rect.y, new Color(255, 255, 255, 46), rect.x, rect.y + rect.height * 0.55f, new Color(255, 255, 255, 0)));
+        g.fillRoundRect(rect.x + 1, rect.y + 1, rect.width - 2, (int) (rect.height * 0.55), 9, 9);
+        // акцентная полоса слева, растёт при наведении
+        int barH = (int) Math.round((rect.height - 12) * (0.35 + 0.65 * ha));
+        g.setColor(new Color(255, 236, 170, (int) (120 + 135 * ha)));
+        g.fillRoundRect(rect.x + 4, rect.y + (rect.height - barH) / 2, 3, barH, 3, 3);
+        // пробегающий блик
+        if (ha > 0.05) {
+            double ph = (uiFx.getTime() * 0.85) % 1.5;
+            UiFx.drawShine(g, rr, rect, ph, ha * 0.9);
+        }
+        g.setColor(blendColor(new Color(255, 255, 255, 70), new Color(255, 240, 178, 255), ha));
+        g.draw(rr);
 
         Color txtCol = (accentTextDark && baseColor.getRed() > 200 && baseColor.getGreen() > 140)
                 ? new Color(16, 18, 22) : Color.WHITE;
-        drawCenteredText(g, label, rect.x + rect.width / 2, rect.y + rect.height / 2 + 5,
+        drawCenteredText(g, label, rect.x + rect.width / 2, rect.y + rect.height / 2 + 5 - (int) Math.round(ha),
                 uiFont("SansSerif", Font.BOLD, 13), txtCol);
         uiRegisterClickable(rect, onClick);
     }
@@ -6013,10 +6501,18 @@ public class Engine extends JPanel implements Runnable {
     private void drawOptionStepperRow(Graphics2D g, int x, int y, int w, String title, String valueLabel, Runnable onToggle) {
         Rectangle fullRect = new Rectangle(x, y, w, 34);
         boolean hovered = fullRect.contains(mouseClientX, mouseClientY);
+        double ha = uiFx.hoverAnim(fullRect, hovered, uiDt);
 
-        g.setColor(hovered ? new Color(34, 46, 64, 220) : new Color(24, 32, 45, 200));
+        g.setColor(blendColor(new Color(24, 32, 45, 200), new Color(40, 54, 76, 230), ha));
         g.fillRoundRect(x, y, w, 34, 8, 8);
-        g.setColor(hovered ? new Color(245, 195, 76, 175) : new Color(255, 255, 255, 32));
+        if (ha > 0.02) {
+            g.setPaint(new GradientPaint(x, 0, new Color(245, 195, 76, (int) (60 * ha)), x + w * 0.6f, 0, new Color(245, 195, 76, 0)));
+            g.fillRoundRect(x, y, w, 34, 8, 8);
+            int bh = (int) (24 * ha);
+            g.setColor(new Color(255, 206, 86));
+            g.fillRoundRect(x + 3, y + 17 - bh / 2, 3, bh, 3, 3);
+        }
+        g.setColor(blendColor(new Color(255, 255, 255, 32), new Color(245, 195, 76, 190), ha));
         g.drawRoundRect(x, y, w, 34, 8, 8);
 
         g.setFont(uiFont("SansSerif", Font.PLAIN, 14));

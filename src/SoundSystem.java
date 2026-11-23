@@ -64,6 +64,17 @@ public class SoundSystem {
     private final byte[] sfxBodyThud;
     private final byte[] sfxShellLoad;
     private final byte[] sfxFallCrunch;
+    // ===== 9.5: заставка, кейсы, достижения, UI =====
+    private final byte[] sfxIntroRiser;
+    private final byte[] sfxIntroImpact;
+    private final byte[] sfxGlassShatter;
+    private final byte[] sfxTypeTick;
+    private final byte[] sfxWhoosh;
+    private final byte[] sfxCaseTick;
+    private final byte[] sfxCaseOpen;
+    private final byte[][] sfxCaseReveal = new byte[5][];
+    private final byte[] sfxAchievement;
+    private final byte[] sfxUiHover;
 
     public SoundSystem(boolean enabled) {
         this.format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
@@ -135,6 +146,16 @@ public class SoundSystem {
         this.sfxBodyThud    = buildGunshot(0.07, 120.0, 60.0, 0.55, 5150L);
         this.sfxShellLoad   = buildToneClick(720.0, 0.05, 0.50);
         this.sfxFallCrunch  = buildGunshot(0.16, 90.0, 40.0, 0.80, 6262L);
+        this.sfxIntroRiser   = buildIntroRiser();
+        this.sfxIntroImpact  = buildIntroImpact();
+        this.sfxGlassShatter = buildGlassShatter();
+        this.sfxTypeTick     = buildToneClick(1850.0, 0.022, 0.32);
+        this.sfxWhoosh       = buildWhoosh();
+        this.sfxCaseTick     = buildToneClick(2400.0, 0.018, 0.42);
+        this.sfxCaseOpen     = buildCaseOpen();
+        for (int r = 0; r < 5; r++) sfxCaseReveal[r] = buildCaseReveal(r);
+        this.sfxAchievement  = buildCaseReveal(2);
+        this.sfxUiHover      = buildToneClick(1320.0, 0.015, 0.14);
 
         if (this.audioAvailable) {
             this.audioPool = Executors.newCachedThreadPool(r -> {
@@ -197,6 +218,146 @@ public class SoundSystem {
     public void playBodyThud() { playAsync(sfxBodyThud, 0.70); }
     public void playShellLoad() { playAsync(sfxShellLoad, 0.75); }
     public void playFallCrunch() { playAsyncPriority(sfxFallCrunch, 0.95); }
+    public void playIntroRiser() { playAsyncPriority(sfxIntroRiser, 0.80); }
+    public void playIntroImpact() { playAsyncPriority(sfxIntroImpact, 1.00); }
+    public void playGlassShatter() { playAsyncPriority(sfxGlassShatter, 0.90); }
+    public void playTypeTick() { playAsync(sfxTypeTick, 0.55); }
+    public void playWhoosh() { playAsyncPriority(sfxWhoosh, 0.75); }
+    public void playCaseTick() { playAsync(sfxCaseTick, 0.60); }
+    public void playCaseOpen() { playAsyncPriority(sfxCaseOpen, 0.90); }
+    public void playCaseReveal(int rarity) { playAsyncPriority(sfxCaseReveal[Math.max(0, Math.min(4, rarity))], 0.95); }
+    public void playAchievement() { playAsyncPriority(sfxAchievement, 0.85); }
+    public void playUiHover() { playAsync(sfxUiHover, 0.50); }
+
+    /** Кинематографический нарастающий гул + свист (2.6 с) для заставки. */
+    private static byte[] buildIntroRiser() {
+        int count = (int) (SAMPLE_RATE * 2.6);
+        double[] buf = new double[count];
+        Random rng = new Random(95001L);
+        double lp = 0.0, bp = 0.0, phA = 0.0, phB = 0.0;
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double noise = rng.nextDouble() * 2.0 - 1.0;
+            double cutoff = 0.04 + 0.55 * t * t;
+            lp += (noise - lp) * cutoff;
+            bp = bp * 0.6 + (noise - lp) * 0.4;
+            phA += 2.0 * Math.PI * (55.0 + 30.0 * t) / SAMPLE_RATE;
+            phB += 2.0 * Math.PI * (82.4 + 140.0 * t * t) / SAMPLE_RATE;
+            double drone = Math.sin(phA) * 0.45 + Math.sin(phB) * 0.25 + Math.sin(phA * 2.003) * 0.12;
+            double env = Math.pow(t, 1.6) * (t > 0.97 ? (1.0 - t) / 0.03 : 1.0);
+            buf[i] = Math.tanh((drone * (0.4 + 0.6 * t) + lp * 0.9 * t + bp * 0.35 * t * t) * 1.3) * env * 0.9;
+        }
+        return toPcmBytes(buf);
+    }
+
+    /** Мощный кинематографический удар «BRAAAM» + саб-дроп (2.2 с). */
+    private static byte[] buildIntroImpact() {
+        int count = (int) (SAMPLE_RATE * 2.2);
+        double[] buf = new double[count];
+        Random rng = new Random(95002L);
+        double lp = 0.0, ph = 0.0, ph2 = 0.0, ph3 = 0.0;
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double sec = i / SAMPLE_RATE;
+            double noise = rng.nextDouble() * 2.0 - 1.0;
+            lp = lp * 0.86 + noise * 0.14;
+            double f = 38.0 + 90.0 * Math.exp(-sec * 9.0);
+            ph += 2.0 * Math.PI * f / SAMPLE_RATE;
+            ph2 += 2.0 * Math.PI * 110.0 / SAMPLE_RATE;
+            ph3 += 2.0 * Math.PI * 164.8 / SAMPLE_RATE;
+            double sub = Math.sin(ph) * Math.exp(-sec * 1.4);
+            double brass = (Math.sin(ph2) + 0.6 * Math.sin(ph2 * 2.0) + 0.5 * Math.sin(ph3) + 0.3 * Math.sin(ph3 * 2.0))
+                    * Math.exp(-sec * 1.1) * Math.min(1.0, sec * 25.0) * 0.32;
+            double crack = lp * Math.exp(-sec * 12.0) * 1.4;
+            buf[i] = Math.tanh((sub * 1.2 + brass + crack) * 1.6) * Math.pow(1.0 - t, 0.6);
+        }
+        return toPcmBytes(buf);
+    }
+
+    /** Звон разбитой бутылки: резкий хруст + россыпь стеклянных звонов. */
+    private static byte[] buildGlassShatter() {
+        int count = (int) (SAMPLE_RATE * 1.1);
+        double[] buf = new double[count];
+        Random rng = new Random(95003L);
+        double hp = 0.0, prev = 0.0;
+        for (int i = 0; i < count; i++) {
+            double sec = i / SAMPLE_RATE;
+            double noise = rng.nextDouble() * 2.0 - 1.0;
+            hp = 0.85 * (hp + noise - prev);
+            prev = noise;
+            buf[i] = hp * Math.exp(-sec * 16.0) * 0.9;
+        }
+        for (int k = 0; k < 26; k++) {
+            double start = 0.01 + Math.pow(rng.nextDouble(), 1.7) * 0.75;
+            double freq = 2600.0 + rng.nextDouble() * 4200.0;
+            double amp = 0.10 + rng.nextDouble() * 0.20;
+            int s0 = (int) (start * SAMPLE_RATE);
+            int len = (int) ((0.05 + rng.nextDouble() * 0.18) * SAMPLE_RATE);
+            for (int j = 0; j < len && s0 + j < count; j++) {
+                double lt = (double) j / len;
+                buf[s0 + j] += Math.sin(2.0 * Math.PI * freq * j / SAMPLE_RATE) * Math.pow(1.0 - lt, 2.4) * amp;
+            }
+        }
+        for (int i = 0; i < count; i++) buf[i] = Math.tanh(buf[i] * 1.2);
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildWhoosh() {
+        int count = (int) (SAMPLE_RATE * 0.55);
+        double[] buf = new double[count];
+        Random rng = new Random(95004L);
+        double lp = 0.0;
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double noise = rng.nextDouble() * 2.0 - 1.0;
+            double cutoff = 0.05 + 0.35 * Math.sin(t * Math.PI);
+            lp += (noise - lp) * cutoff;
+            buf[i] = lp * Math.sin(t * Math.PI) * 1.2;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildCaseOpen() {
+        int count = (int) (SAMPLE_RATE * 0.5);
+        double[] buf = new double[count];
+        Random rng = new Random(95005L);
+        for (int i = 0; i < count; i++) {
+            double sec = i / SAMPLE_RATE;
+            double noise = rng.nextDouble() * 2.0 - 1.0;
+            double clunk = Math.sin(2.0 * Math.PI * 180.0 * sec) * Math.exp(-sec * 22.0) * 0.8;
+            double latch = (sec > 0.12 ? Math.sin(2.0 * Math.PI * 920.0 * (sec - 0.12)) * Math.exp(-(sec - 0.12) * 40.0) * 0.5 : 0.0);
+            buf[i] = Math.tanh(clunk + latch + noise * Math.exp(-sec * 30.0) * 0.4);
+        }
+        return toPcmBytes(buf);
+    }
+
+    /** Арпеджио открытия кейса: чем реже предмет — тем выше, длиннее и ярче. */
+    private static byte[] buildCaseReveal(int rarity) {
+        double[][] chords = {
+            {523.25, 659.25, 783.99},
+            {587.33, 739.99, 880.0, 1174.66},
+            {659.25, 830.61, 987.77, 1318.51},
+            {698.46, 880.0, 1046.5, 1396.91, 1760.0},
+            {783.99, 987.77, 1174.66, 1567.98, 1975.53, 2349.32}
+        };
+        double[] notes = chords[rarity];
+        double dur = 0.55 + rarity * 0.28;
+        int count = (int) (SAMPLE_RATE * dur);
+        double[] buf = new double[count];
+        double step = 0.075;
+        for (int n = 0; n < notes.length; n++) {
+            int s0 = (int) (n * step * SAMPLE_RATE);
+            for (int i = s0; i < count; i++) {
+                double sec = (i - s0) / SAMPLE_RATE;
+                double env = Math.exp(-sec * (3.2 - rarity * 0.4)) * Math.min(1.0, sec * 200.0);
+                double v = Math.sin(2.0 * Math.PI * notes[n] * sec) + 0.25 * Math.sin(2.0 * Math.PI * notes[n] * 2.0 * sec)
+                        + (rarity >= 3 ? 0.18 * Math.sin(2.0 * Math.PI * notes[n] * 3.01 * sec) : 0.0);
+                buf[i] += v * env * 0.22;
+            }
+        }
+        for (int i = 0; i < count; i++) buf[i] = Math.tanh(buf[i] * 1.1);
+        return toPcmBytes(buf);
+    }
 
     private static byte[] makeDistant(byte[] pcm) {
         int n = pcm.length / 2;

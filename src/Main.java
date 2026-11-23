@@ -366,6 +366,47 @@ public class Main {
             saveTestScreenshot(engine, new File(dir, "12_armory_aug_v9.png"));
             engine.setCurrentScreen(Engine.AppScreen.IN_GAME);
 
+            // ===== 9.5: заставка «ИГРА СДЕЛАНА АЛКАШОМ» + новое главное меню + кейсы + достижения =====
+            engine.setCurrentScreen(Engine.AppScreen.SPLASH);
+            double[] splashTimes = {1.45, 2.35, 2.62, 2.95, 4.70, 6.20};
+            for (double st : splashTimes) {
+                engine.getSplashIntro().seekForTest(st, Engine.DEFAULT_WINDOW_WIDTH, Engine.DEFAULT_WINDOW_HEIGHT);
+                saveTestScreenshot(engine, new File(dir, String.format("20_splash_%.2f_v95.png", st).replace(',', '.')));
+            }
+            long tSplash0 = System.nanoTime();
+            for (int i = 0; i < 30; i++) {
+                BufferedImage tmp = new BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
+                Graphics2D tg = tmp.createGraphics();
+                engine.renderCompleteFrame(tg, 1280, 720);
+                tg.dispose();
+            }
+            double splashMs = (System.nanoTime() - tSplash0) / 1e6 / 30.0;
+            System.out.printf("[SELF-TEST 10.0] Splash render: %.1f ms/frame%n", splashMs);
+
+            engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
+            engine.setMenuIntroTimer(99.0);
+            for (int i = 0; i < 90; i++) {
+                engine.getUiFx().update(1.0 / 60.0, 1280, 720, true);
+            }
+            engine.getUiFx().pushAchievementToast("first_blood");
+            engine.getUiFx().update(1.0, 1280, 720, true);
+            saveTestScreenshot(engine, new File(dir, "21_main_menu_v95.png"));
+            engine.setMenuIntroTimer(0.35);
+            saveTestScreenshot(engine, new File(dir, "21_main_menu_intro_v95.png"));
+            engine.setMenuIntroTimer(99.0);
+
+            engine.getSettings().caseKeys = Math.max(engine.getSettings().caseKeys, 3);
+            engine.openCaseScreen();
+            saveTestScreenshot(engine, new File(dir, "22_case_idle_v95.png"));
+            engine.getCaseOpening().halfSpinForTest();
+            saveTestScreenshot(engine, new File(dir, "22_case_spin_v95.png"));
+            for (int i = 0; i < 600; i++) engine.getCaseOpening().update(1.0 / 60.0);
+            saveTestScreenshot(engine, new File(dir, "22_case_reveal_v95.png"));
+            engine.getCaseOpening().onEscape();
+            engine.openSettingsScreen(false, 2);
+            saveTestScreenshot(engine, new File(dir, "23_settings_audio_v95.png"));
+            engine.setCurrentScreen(Engine.AppScreen.IN_GAME);
+
             // Бенчмарк НАТИВНОГО HD 1280x720 с Hyper-Turbo 8.0!
             BufferedImage benchImg = new BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
             Graphics2D bg = benchImg.createGraphics();
@@ -444,7 +485,7 @@ public class Main {
             engine.getSettings().saveSync();
 
             System.out.printf(
-                    "CS-2 JAVA 9.0 REALISM SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
+                    "CS-2 JAVA 10.0 ALKASH EDITION SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
                     benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs),
                     esportsMs, (benchFrames * 1000.0) / Math.max(1L, esportsMs),
                     registeredClicks);

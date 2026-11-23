@@ -14,7 +14,7 @@ import java.util.Properties;
  */
 public class GameSettings {
 
-    public static final int CONFIG_VERSION = 9;
+    public static final int CONFIG_VERSION = 10;
 
     public enum QualityPreset {
         ESPORTS("Киберспорт (Макс. FPS)"),
@@ -379,6 +379,14 @@ public class GameSettings {
     public int careerHeadshots = 0;
     public int careerWins = 0;
 
+    // --- 9.5: КЕЙСЫ, ИНВЕНТАРЬ, ДОСТИЖЕНИЯ И ЗАСТАВКА ---
+    public int caseKeys = 5;                 // ключи от кейсов (+1 за каждые 5 фрагов, +2 за победу)
+    public int casesOpened = 0;
+    public String caseInventory = "";        // "itemIdx:wear1000:st|..." — последние дропы из кейсов
+    public String achievements = "";         // id разблокированных достижений через запятую
+    public boolean showIntroSplash = true;   // заставка «Игра сделана Алкашом» при запуске
+    public boolean menuParticles = true;     // искры и угольки в меню
+
     // --- НАСТРОЙКИ АУДИО ---
     public double masterVolume = 0.85;
     public boolean footstepSounds = true;
@@ -410,11 +418,35 @@ public class GameSettings {
     public boolean addCareerXp(int xpDelta, boolean kill, boolean headshot, boolean matchWin) {
         int oldRank = getRankIndex();
         careerXp = Math.max(0, careerXp + xpDelta);
-        if (kill) careerKills++;
+        if (kill) {
+            careerKills++;
+            if (careerKills % 5 == 0) caseKeys = Math.min(999, caseKeys + 1);
+        }
         if (headshot) careerHeadshots++;
-        if (matchWin) careerWins++;
+        if (matchWin) {
+            careerWins++;
+            caseKeys = Math.min(999, caseKeys + 2);
+        }
         save();
         return getRankIndex() > oldRank;
+    }
+
+    public boolean hasAchievement(String id) {
+        if (achievements == null || achievements.isEmpty()) return false;
+        for (String a : achievements.split(",")) if (a.equals(id)) return true;
+        return false;
+    }
+
+    /** @return true, если достижение получено впервые. */
+    public boolean unlockAchievement(String id) {
+        if (hasAchievement(id)) return false;
+        achievements = (achievements == null || achievements.isEmpty()) ? id : achievements + "," + id;
+        save();
+        return true;
+    }
+
+    public int getAchievementCount() {
+        return (achievements == null || achievements.isEmpty()) ? 0 : achievements.split(",").length;
     }
 
     public void syncDerivedFlags() {
@@ -592,6 +624,12 @@ public class GameSettings {
             careerKills = clampInt(p.getProperty("careerKills"), 0, 999999, careerKills);
             careerHeadshots = clampInt(p.getProperty("careerHeadshots"), 0, 999999, careerHeadshots);
             careerWins = clampInt(p.getProperty("careerWins"), 0, 999999, careerWins);
+            caseKeys = clampInt(p.getProperty("caseKeys"), 0, 999, caseKeys);
+            casesOpened = clampInt(p.getProperty("casesOpened"), 0, 999999, casesOpened);
+            caseInventory = p.getProperty("caseInventory", caseInventory);
+            achievements = p.getProperty("achievements", achievements);
+            showIntroSplash = Boolean.parseBoolean(p.getProperty("showIntroSplash", String.valueOf(showIntroSplash)));
+            menuParticles = Boolean.parseBoolean(p.getProperty("menuParticles", String.valueOf(menuParticles)));
 
             masterVolume = clampDouble(p.getProperty("masterVolume"), 0.0, 1.0, masterVolume);
             footstepSounds = Boolean.parseBoolean(p.getProperty("footstepSounds", String.valueOf(footstepSounds)));
@@ -684,6 +722,12 @@ public class GameSettings {
         p.setProperty("careerKills", String.valueOf(careerKills));
         p.setProperty("careerHeadshots", String.valueOf(careerHeadshots));
         p.setProperty("careerWins", String.valueOf(careerWins));
+        p.setProperty("caseKeys", String.valueOf(caseKeys));
+        p.setProperty("casesOpened", String.valueOf(casesOpened));
+        p.setProperty("caseInventory", caseInventory == null ? "" : caseInventory);
+        p.setProperty("achievements", achievements == null ? "" : achievements);
+        p.setProperty("showIntroSplash", String.valueOf(showIntroSplash));
+        p.setProperty("menuParticles", String.valueOf(menuParticles));
 
         p.setProperty("masterVolume", String.valueOf(masterVolume));
         p.setProperty("footstepSounds", String.valueOf(footstepSounds));
