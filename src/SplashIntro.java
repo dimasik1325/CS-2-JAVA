@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * CS-2 JAVA 10.0 — кинематографическая заставка «ИГРА СДЕЛАНА АЛКАШОМ».
+ * CS-2 JAVA 11.0 — кинематографическая заставка «ИГРА СДЕЛАНА АЛКАШОМ».
  *
  * Хронометраж (сек):
  *   0.0  нарастающий гул, угольки поднимаются из темноты, анаморфный блик-полоса раскрывается от центра
@@ -34,7 +34,9 @@ import java.util.Random;
  *        «АЛКАШОМ» влетает с упругим перелётом
  *   2.6+ вращающиеся золотые лучи, блики по буквам, RGB-глитч срезами, зерно плёнки и сканлайны
  *   3.3  «ПРЕДСТАВЛЯЕТ» раскрывается из золотой линии
- *   4.2  логотип CS-2 JAVA 10.0
+ *   4.2  логотип CS-2 JAVA 11.0
+ *   4.45 золотой 3D AK-47 (GLB-модель) влетает с вращением и встаёт под титром,
+ *        при посадке — искры, кольцо и вспышка от дула; дальше плавно покачивается
  *   5.9  наезд камеры и уход в белое → главное меню
  */
 public final class SplashIntro {
@@ -66,9 +68,21 @@ public final class SplashIntro {
     private byte[] noise;                // плёночное зерно
     private BufferedImage glowImg;
     private int glowW = -1;
+    // ===== 11.0: 3D-логотип — золотой AK-47 из GLB-модели =====
+    private Renderer3D gun3d;
+    private GunModels.Gun gunLogo;
+    private int[] gunGold;
+    private BufferedImage gunImg;
+    private int[] gunPx;
+    private int gunW, gunH;
+    private double[] logoXf = new double[12];
+    private double[] logoMuzzle = new double[3];
+    private boolean logoLanded, logoMuzzleFlash;
+    private double logoFlashT;
     private int cachedW = -1, cachedH = -1;
     private Shape titleShape;           // контур «АЛКАШОМ» в координатах (0,0) = центр
     private Font line1Font, line3Font, logoFont, hintFont, tagFont;
+    private boolean logo3dInited;
 
     /** Частица заставки: уголёк / искра / осколок стекла / пена / дым. */
     private static final class P {
@@ -278,6 +292,7 @@ public final class SplashIntro {
         if (w == cachedW && h == cachedH && frame != null) return;
         cachedW = w;
         cachedH = h;
+        initLogo3d();
         frame = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
         atmo = new BufferedImage(Math.max(16, w / 4), Math.max(9, h / 4), BufferedImage.TYPE_INT_RGB);
         vigScan = new short[w * h];
@@ -411,6 +426,7 @@ public final class SplashIntro {
 
         // 3. Анаморфная полоса-блик (до удара — холодная синяя, после — золотая)
         double streakOpen = easeOutCubic((t - 0.3) / 1.1);
+        Composite ocStreak = g.getComposite();
         if (streakOpen > 0) {
             double sw = w * 0.95 * streakOpen;
             double sy = impactDone ? cy : h * 0.42;
@@ -422,13 +438,36 @@ public final class SplashIntro {
             g.setPaint(new RadialGradientPaint(new Point2D.Double(cx, sy), (float) (90 * s), new float[]{0f, 1f},
                     new Color[]{rgba(0xFFFFFF, 0.55 * pulse), rgba(col, 0)}));
             g.fill(new Ellipse2D.Double(cx - 90 * s, sy - 90 * s, 180 * s, 180 * s));
-            // Призрачные блики линзы
+            // Призрачные блики линзы: круги + гексагоны диафрагмы
             for (int k = 1; k <= 3; k++) {
                 double fx = cx + (cx - w * 0.3) * 0.35 * k * (impactDone ? -1 : 1) * Math.sin(t * 0.4 + k);
                 double fr = (14 + k * 9) * s;
                 g.setColor(rgba(col, 0.10 * pulse));
                 g.fill(new Ellipse2D.Double(fx - fr, sy - fr, fr * 2, fr * 2));
             }
+            for (int k = 1; k <= 3; k++) {
+                double fx = cx + (cx - w * 0.62) * 0.30 * k * (impactDone ? -1 : 1) + 14 * s * Math.sin(t * 0.7 + k * 2.1);
+                double fy2 = sy + (cy - sy) * 0.22 * k * (k % 2 == 0 ? -0.5 : 1.0);
+                double fr = (16 + k * 13) * s * (0.8 + 0.2 * Math.sin(t * 0.9 + k));
+                Polygon hex = new Polygon();
+                for (int q = 0; q < 6; q++) {
+                    double aq = t * 0.5 + q * Math.PI / 3;
+                    hex.addPoint((int) (fx + Math.cos(aq) * fr), (int) (fy2 + Math.sin(aq) * fr));
+                }
+                g.setColor(rgba(col, 0.085 * pulse));
+                g.fill(hex);
+            }
+            // Крестовая звезда блика
+            double starA = 0.5 * pulse * streakOpen;
+            double stL = w * 0.22 * streakOpen;
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, (float) starA));
+            g.setPaint(new GradientPaint((float) (cx - stL), 0, rgba(col, 0), (float) cx, 0, rgba(col, 0.9f), true));
+            g.fill(new Rectangle2D.Double(cx - stL, sy - 0.8 * s, stL * 2, 1.6 * s));
+            g.setPaint(new GradientPaint(0, (float) (sy - stL * 0.55), rgba(col, 0), 0, (float) sy, rgba(col, 0.8f), true));
+            g.fill(new Rectangle2D.Double(cx - 0.8 * s, sy - stL * 0.55, 1.6 * s, stL * 0.55));
+            g.setPaint(new GradientPaint(0, (float) sy, rgba(col, 0.8f), 0, (float) (sy + stL * 0.55), rgba(col, 0), true));
+            g.fill(new Rectangle2D.Double(cx - 0.8 * s, sy, 1.6 * s, stL * 0.55));
+            g.setComposite(ocStreak);
         }
 
         // 4. Дым удара (под текстом)
@@ -472,6 +511,9 @@ public final class SplashIntro {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
+        // ===== 11.0: золотой 3D AK-47 под титром (GLB-модель, фон кеится) =====
+        renderLogo3d(g, w, h, s, cx, cy);
+        drawLogoMuzzleFx(g, w, h, s);
         // Тонкая анаморфная нить поверх (чёткая)
         if (streakOpen > 0) {
             double sw = w * 0.95 * streakOpen;
@@ -623,7 +665,7 @@ public final class SplashIntro {
             double ly = h * 0.83;
             g.setFont(logoFont);
             java.awt.FontMetrics fm = g.getFontMetrics();
-            String logo = "CS-2 JAVA 10.0";
+            String logo = "CS-2 JAVA 11.0";
             int tw = fm.stringWidth(logo);
             double crestW = 46 * s, crestH = 34 * s;
             double totalW = crestW + 12 * s + tw;
@@ -641,7 +683,7 @@ public final class SplashIntro {
             g.setColor(rgba(0xFFFFFF, a));
             g.drawString(logo, (float) (x0 + crestW + 12 * s), (float) (ly + fm.getAscent() * 0.36));
             g.setFont(tagFont);
-            String tag = "ALKASH EDITION  •  26 СТВОЛОВ  •  КЕЙСЫ  •  ДОСТИЖЕНИЯ";
+            String tag = "ALKASH EDITION  •  GLB-МОДЕЛИ  •  26 СТВОЛОВ  •  КЕЙСЫ  •  ДОСТИЖЕНИЯ";
             int tagW = g.getFontMetrics().stringWidth(tag);
             g.setColor(rgba(0x8FD8FF, a * 0.9));
             g.drawString(tag, (float) (cx - tagW / 2.0), (float) (ly + 30 * s));
@@ -756,28 +798,179 @@ public final class SplashIntro {
         }
     }
 
+    // ===================== 11.0: 3D-ЛОГОТИП (GLB AK-47) =====================
+
+    private void initLogo3d() {
+        if (logo3dInited) return;
+        logo3dInited = true;
+        try {
+            gunLogo = GunModels.get(Weapon.Type.AK47);
+        } catch (Throwable t) {
+            gunLogo = null;
+        }
+        if (gunLogo == null) return;
+        int gw = Math.max(160, cachedW / 2), gh = Math.max(90, cachedH / 2);
+        gunW = gw; gunH = gh;
+        gun3d = new Renderer3D(gw, gh, 23.0);
+        gunImg = gun3d.getFrameImage();
+        gunPx = ((java.awt.image.DataBufferInt) gunImg.getRaster().getDataBuffer()).getData();
+        gunGold = gunLogo.colors(GameSettings.WeaponSkin.GOLD_FADE, null);
+    }
+
+    private static void mul33(double[] a, double[] b, double[] out) {
+        for (int r = 0; r < 3; r++) {
+            out[r * 3]     = a[r * 3] * b[0] + a[r * 3 + 1] * b[3] + a[r * 3 + 2] * b[6];
+            out[r * 3 + 1] = a[r * 3] * b[1] + a[r * 3 + 1] * b[4] + a[r * 3 + 2] * b[7];
+            out[r * 3 + 2] = a[r * 3] * b[2] + a[r * 3 + 1] * b[5] + a[r * 3 + 2] * b[8];
+        }
+    }
+
+    /** Рендер золотого AK-47 в отдельный буфер и композит в кадр с кеем фона. */
+    private void renderLogo3d(Graphics2D g, int w, int h, double s, double cx, double cy) {
+        if (gunLogo == null || t < 4.45) return;
+        double p = clamp01((t - 4.45) / 0.85);
+        double c1 = 1.70158, c3 = c1 + 1.0;
+        double e = 1.0 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); // easeOutBack
+        double yaw = -(1.0 - e) * 3.6 - 0.62 - 0.10 * Math.sin(t * 0.85);
+        double pitch = -0.26 + 0.05 * Math.sin(t * 1.05) + (1.0 - e) * 0.9;
+        double roll = (1.0 - e) * 1.5;
+        double gs = gunLogo.spec.scale * 1.22;
+
+        double[] rz = MeshModel.axisAngle(0, 0, 1, roll);
+        double[] rx = MeshModel.axisAngle(1, 0, 0, pitch);
+        double[] ry = MeshModel.axisAngle(0, 1, 0, yaw);
+        double[] tmp = new double[9], rot = new double[9];
+        mul33(rx, rz, tmp);
+        mul33(ry, tmp, rot);
+        double xw = (1.0 - e) * 1.5, yw = (1.0 - e) * -0.55;
+        for (int r = 0; r < 3; r++) {
+            logoXf[r * 4] = rot[r * 3] * gs; logoXf[r * 4 + 1] = rot[r * 3 + 1] * gs; logoXf[r * 4 + 2] = rot[r * 3 + 2] * gs;
+        }
+        logoXf[3] = xw; logoXf[7] = yw; logoXf[11] = -2.3;
+
+        java.util.Arrays.fill(gunPx, 0);
+        gun3d.beginFrame();
+        gun3d.setCamera(0, 0.0, 0.0, Math.PI, 0.0);
+        gun3d.drawMesh(gunLogo.model, 0, gunLogo.pose.skin, logoXf, gunGold, false, null, 1.4);
+        gun3d.flushRasterQueue();
+
+        // мировая позиция дула для вспышки
+        double[] m = gunLogo.muzzle;
+        double mz = m[2] + CharacterRig.extraMuzzle(gunLogo);
+        logoMuzzle[0] = logoXf[0] * m[0] + logoXf[1] * m[1] + logoXf[2] * mz + logoXf[3];
+        logoMuzzle[1] = logoXf[4] * m[0] + logoXf[5] * m[1] + logoXf[6] * mz + logoXf[7];
+        logoMuzzle[2] = logoXf[8] * m[0] + logoXf[9] * m[1] + logoXf[10] * mz + logoXf[11];
+
+        if (!logoLanded && p >= 1.0) {
+            logoLanded = true;
+            logoFlashT = t;
+            logoMuzzleFlash = true;
+            sound.playWhoosh();
+            shake = Math.max(shake, 5.0);
+            double ly = h * 0.605;
+            for (int i = 0; i < 34; i++) {
+                double lx = cx + (rng.nextDouble() - 0.5) * w * 0.42;
+                spawnSpark(lx, ly + (rng.nextDouble() - 0.5) * h * 0.06, 210, 0.5, 0xFFD978);
+            }
+            rings.add(new double[]{cx, ly, 0.0, w * 0.9, 3.0});
+        }
+
+        // композит: билинейный апскейл ×2 с мягким кеем чёрного фона
+        final int dw = (int) (w * 0.46), dh = Math.max(2, (int) (w * 0.46 * gunH / (double) gunW));
+        final int dx0 = (int) (cx - dw / 2.0), dy0 = (int) (h * 0.605 - dh / 2.0);
+        final double fadeIn = clamp01((t - 4.45) / 0.3);
+        final int n = w * h;
+        final int bands = 16;
+        final int fw = w, fh = h;
+        final int[] framePx = ((java.awt.image.DataBufferInt) frame.getRaster().getDataBuffer()).getData();
+        java.util.stream.IntStream.range(0, bands).parallel().forEach(bnd -> {
+            int yFrom = fh * bnd / bands, yTo = fh * (bnd + 1) / bands;
+            int yy0 = Math.max(yFrom, dy0), yy1 = Math.min(yTo, dy0 + dh);
+            for (int y = yy0; y < yy1; y++) {
+                double fy = (y - dy0) * gunH / (double) dh - 0.5;
+                if (fy < 0) fy = 0;
+                int iy = (int) fy;
+                if (iy > gunH - 2) iy = gunH - 2;
+                int wy = (int) ((fy - iy) * 256);
+                int r0 = iy * gunW, r1 = r0 + gunW;
+                for (int x = Math.max(0, dx0); x < Math.min(fw, dx0 + dw); x++) {
+                    double fx = (x - dx0) * gunW / (double) dw - 0.5;
+                    if (fx < 0) fx = 0;
+                    int ix = (int) fx;
+                    if (ix > gunW - 2) ix = gunW - 2;
+                    int wx = (int) ((fx - ix) * 256);
+                    int a00 = gunPx[r0 + ix], a10 = gunPx[r0 + ix + 1], a01 = gunPx[r1 + ix], a11 = gunPx[r1 + ix + 1];
+                    int w00 = (256 - wx) * (256 - wy) >> 8, w10 = wx * (256 - wy) >> 8, w01 = (256 - wx) * wy >> 8, w11 = wx * wy >> 8;
+                    int sr = ((a00 >> 16 & 255) * w00 + (a10 >> 16 & 255) * w10 + (a01 >> 16 & 255) * w01 + (a11 >> 16 & 255) * w11) >> 8;
+                    int sg = ((a00 >> 8 & 255) * w00 + (a10 >> 8 & 255) * w10 + (a01 >> 8 & 255) * w01 + (a11 >> 8 & 255) * w11) >> 8;
+                    int sb = ((a00 & 255) * w00 + (a10 & 255) * w10 + (a01 & 255) * w01 + (a11 & 255) * w11) >> 8;
+                    int lum = sr > sg ? (sr > sb ? sr : sb) : (sg > sb ? sg : sb);
+                    int alpha = (int) (clamp01((lum - 12) / 46.0) * 255 * fadeIn);
+                    if (alpha <= 0) continue;
+                    int di = y * fw + x;
+                    int dc = framePx[di];
+                    int dr = dc >> 16 & 255, dg = dc >> 8 & 255, db = dc & 255;
+                    int nr = dr + ((sr - dr) * alpha >> 8);
+                    int ng = dg + ((sg - dg) * alpha >> 8);
+                    int nb = db + ((sb - db) * alpha >> 8);
+                    framePx[di] = (nr << 16) | (ng << 8) | nb;
+                }
+            }
+        });
+    }
+
+    /** Вспышка и свечение у дула 3D-логотипа (рисуется в полноэкранном проходе). */
+    private void drawLogoMuzzleFx(Graphics2D g, int w, int h, double s) {
+        if (!logoMuzzleFlash || gunLogo == null) return;
+        double age = t - logoFlashT;
+        if (age > 0.4) { logoMuzzleFlash = false; return; }
+        // экранная позиция дула: та же проекция, что в Renderer3D (половинное разрешение → ×2)
+        double[] pr = new double[2];
+        gun3d.projectPoint(logoMuzzle[0], logoMuzzle[1], logoMuzzle[2], pr);
+        double ex = pr[0] * w, ey = pr[1] * h;
+        double a = Math.exp(-age * 9.0);
+        float fr = (float) ((26 + 60 * a) * s);
+        g.setPaint(new RadialGradientPaint(new Point2D.Double(ex, ey), fr, new float[]{0f, 1f},
+                new Color[]{rgba(0xFFE9A8, 0.85 * a), rgba(0xFF8A20, 0)}));
+        g.fill(new Ellipse2D.Double(ex - fr, ey - fr, fr * 2, fr * 2));
+    }
+
     /** Один проход по пикселям: виньетка × сканлайны + плёночное зерно (меняется 24 раза в секунду). */
     private void applyFilmPass() {
         final int[] px = ((DataBufferInt) frame.getRaster().getDataBuffer()).getData();
         final int n = px.length;
         final int off = (((int) (t * 24.0)) * 1543) & 8191;
+        // 11.0: полноэкранная хроматическая аберрация (после удара затухает, в моменты глитча — усиливается)
+        double postImpact = t - IMPACT_T;
+        final int ab = (impactDone && postImpact < 2.2)
+                ? (int) Math.round(3.2 * Math.exp(-postImpact * 2.0) + (isGlitchMoment() ? 3 : 0)) : 0;
         final int bands = 16;
         java.util.stream.IntStream.range(0, bands).parallel().forEach(bnd -> {
             int from = (int) ((long) n * bnd / bands), to = (int) ((long) n * (bnd + 1) / bands);
-            filmRange(px, from, to, off);
+            filmRange(px, from, to, off, ab, n);
         });
     }
 
-    private void filmRange(int[] px, int from, int to, int off) {
+    private void filmRange(int[] px, int from, int to, int off, int ab, int n) {
         short[] vs = vigScan;
         byte[] nz = noise;
         for (int i = from; i < to; i++) {
             int c = px[i];
             int f = vs[i];
             int gn = nz[i + off];
-            int r = ((((c >> 16) & 255) * f) >> 8) + gn;
+            int r, b;
+            if (ab > 0) {
+                int ir = i + ab < n ? i + ab : n - 1;
+                int ib = i - ab >= 0 ? i - ab : 0;
+                int cr = px[ir], cb = px[ib];
+                r = (((cr >> 16) & 255) * f) >> 8;
+                b = ((cb & 255) * f) >> 8;
+                r += gn; b += gn;
+            } else {
+                r = ((((c >> 16) & 255) * f) >> 8) + gn;
+                b = (((c & 255) * f) >> 8) + gn;
+            }
             int gg = ((((c >> 8) & 255) * f) >> 8) + gn;
-            int b = (((c & 255) * f) >> 8) + gn;
             r = r < 0 ? 0 : (r > 255 ? 255 : r);
             gg = gg < 0 ? 0 : (gg > 255 ? 255 : gg);
             b = b < 0 ? 0 : (b > 255 ? 255 : b);

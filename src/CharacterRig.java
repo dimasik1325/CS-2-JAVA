@@ -1,0 +1,525 @@
+/**
+ * CS-2 JAVA 11.0 — живые 3D-бойцы из GLB-моделей Quaternius (CC0) со скелетной анимацией.
+ *
+ * Процедурная анимация: шаг/бег с работой коленей и стоп, покачивание таза, поворот корпуса,
+ * наклон за прицелом, отдача, вздрагивание от попаданий, ослепление флешкой, перезарядка
+ * и «рэгдолл»-падение при смерти. Руки ставятся на рукоять и цевьё настоящей GLB-модели оружия
+ * аналитическим IK, пальцы сжимаются в хват.
+ */
+public final class CharacterRig {
+
+    public enum Variant {
+        CT_SWAT("char_swat"), T_SWAT("char_swat"), CT_SOLDIER("char_soldier"), T_PUNK("char_punk"), JUGGERNAUT("char_swat");
+        public final String file;
+        Variant(String f) { file = f; }
+    }
+
+    /** Параметры кадра анимации. */
+    public static final class Params {
+        public double time;          // глобальное время, с
+        public double walkPhase;     // фаза шага (рад)
+        public double moveSpeed;     // 0 — стоит, 1 — бег
+        public double aimPitch;      // наклон прицеливания (рад, + вверх)
+        public double aimBlend = 1;  // 0 — оружие опущено (патруль), 1 — у плеча
+        public double recoil;        // 0..1
+        public double flinch;        // 0..1 — реакция на попадание
+        public double blind;         // 0..1 — ослеплён
+        public double reload;        // 0..1 — фаза перезарядки, <0 — нет
+        public double death = -1;    // <0 жив, 0..1 падение
+        public int deathStyle;       // 0 — назад, 1 — вперёд, 2 — на бок
+        public boolean flash;        // подсветка попадания
+    }
+
+    private static final int[] EMPTY = new int[0];
+
+    public final Variant variant;
+    public final MeshModel model;
+    public final MeshModel.Pose pose;
+    private final int jRoot, jHips, jAbd, jTorso, jChest, jNeck, jHead;
+    private final int jShL, jUaL, jLaL, jHandL, jShR, jUaR, jLaR, jHandR;
+    private final int jUlL, jLlL, jFootL, jUlR, jLlR, jFootR;
+    private final int[] fingersL, fingersR, thumbsL, thumbsR;
+    private final int[] baseColors;
+    private final int[] colors;
+    private final double[] tmp = new double[3];
+    private final double[] tmp2 = new double[3];
+    private final double[] bone = new double[12];
+    private final double[] xf = new double[12];
+    private final double[] gunXf = new double[12];
+    private int[] gunColors = new int[16];
+
+    /** Последняя мировая позиция дула (после render). */
+    public final double[] muzzleWorld = new double[3];
+    public boolean muzzleValid = false;
+
+    public static CharacterRig create(Variant v) {
+        MeshModel m = MeshModel.get(v.file);
+        return m == null ? null : new CharacterRig(v, m);
+    }
+
+    private CharacterRig(Variant v, MeshModel m) {
+        variant = v;
+        model = m;
+        pose = new MeshModel.Pose(m);
+        jRoot = m.joint("Root"); jHips = m.joint("Hips"); jAbd = m.joint("Abdomen"); jTorso = m.joint("Torso");
+        jChest = m.joint("Chest"); jNeck = m.joint("Neck"); jHead = m.joint("Head");
+        jShL = m.joint("Shoulder.L"); jUaL = m.joint("UpperArm.L"); jLaL = m.joint("LowerArm.L"); jHandL = m.joint("Hand.L");
+        jShR = m.joint("Shoulder.R"); jUaR = m.joint("UpperArm.R"); jLaR = m.joint("LowerArm.R"); jHandR = m.joint("Hand.R");
+        jUlL = m.joint("UpperLeg.L"); jLlL = m.joint("LowerLeg.L"); jFootL = m.joint("Foot.L");
+        jUlR = m.joint("UpperLeg.R"); jLlR = m.joint("LowerLeg.R"); jFootR = m.joint("Foot.R");
+        fingersL = collect(m, ".L", false); fingersR = collect(m, ".R", false);
+        thumbsL = collect(m, ".L", true); thumbsR = collect(m, ".R", true);
+        baseColors = new int[m.matColors.length];
+        for (int i = 0; i < baseColors.length; i++) baseColors[i] = teamColor(v, m.matNames[i], m.matColors[i]);
+        colors = baseColors.clone();
+    }
+
+    private static int[] collect(MeshModel m, String side, boolean thumb) {
+        int[] out = new int[16];
+        int c = 0;
+        for (int j = 0; j < m.jointCount(); j++) {
+            String n = m.jointNames[j];
+            if (!n.endsWith(side) || n.endsWith("_end")) continue;
+            boolean isThumb = n.startsWith("Thumb");
+            boolean isFinger = n.startsWith("Index") || n.startsWith("Middle") || n.startsWith("Ring") || n.startsWith("Pinky");
+            if ((thumb && isThumb) || (!thumb && isFinger)) out[c++] = j;
+        }
+        return java.util.Arrays.copyOf(out, c);
+    }
+
+    static int teamColor(Variant v, String mat, int rgb) {
+        String n = mat.toLowerCase();
+        switch (v) {
+            case CT_SWAT:
+                if (n.equals("swat")) return 0x46566C;
+                if (n.contains("black")) return 0x2A2D33;
+                if (n.contains("visor")) return 0x18222E;
+                break;
+            case T_SWAT:
+                if (n.equals("swat")) return 0x86724F;
+                if (n.contains("black")) return 0x3E3B2B;
+                if (n.contains("visor")) return 0x121212;
+                break;
+            case JUGGERNAUT:
+                if (n.equals("swat")) return 0x2C3138;
+                if (n.contains("black")) return 0x1A1D22;
+                if (n.contains("visor")) return 0xD8301E;
+                break;
+            case CT_SOLDIER:
+                if (n.equals("swat")) return 0x46566C;
+                if (n.equals("black")) return 0x26292E;
+                if (n.equals("grey")) return 0x3C424A;
+                if (n.contains("hair")) return 0x4A3422;
+                if (n.equals("brown")) return 0x3A2C22;
+                break;
+            case T_PUNK:
+                if (n.equals("white")) return 0xB8B2A8;
+                if (n.contains("lightblue")) return 0x3E5872;
+                if (n.equals("black")) return 0x24262A;
+                break;
+            default:
+                break;
+        }
+        // поднимаем слишком тёмные PBR-цвета
+        int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+        int mx = Math.max(r, Math.max(g, b));
+        if (mx < 40) { r += 22; g += 22; b += 22; }
+        return (r << 16) | (g << 8) | b;
+    }
+
+    // ===================== ПОЗА =====================
+
+    /**
+     * Строит позу и возвращает матрицу оружия (модель персонажа -> модель оружия, 3x4, с учётом масштаба ствола)
+     * в gunXf (если gun != null).
+     */
+    public void buildPose(Params p, GunModels.Gun gun) {
+        pose.reset();
+        boolean dead = p.death >= 0;
+        double spd = Math.max(0, Math.min(1.2, p.moveSpeed));
+        double ph = p.walkPhase;
+        double breathe = Math.sin(p.time * 1.9) * 0.012;
+
+        // ---- Ноги: шаг/бег ----
+        if (!dead) {
+            double amp = 0.52 * spd;
+            for (int side = 0; side < 2; side++) {
+                double lp = ph + (side == 0 ? 0 : Math.PI);
+                double swing = Math.sin(lp) * amp;           // + вперёд
+                double knee = (0.10 + Math.max(0, Math.cos(lp)) * 0.85) * spd + 0.06;
+                int ul = side == 0 ? jUlL : jUlR, ll = side == 0 ? jLlL : jLlR, ft = side == 0 ? jFootL : jFootR;
+                pose.rotateX(ul, -swing - 0.04);
+                pose.rotateX(ll, knee);
+                pose.rotateX(ft, -knee * 0.35 + Math.max(0, -Math.sin(lp)) * 0.25 * spd);
+            }
+            // таз: подпрыгивание и покачивание
+            double bob = -Math.abs(Math.sin(ph)) * 0.035 * spd - 0.02 * spd;
+            pose.translate(jHips, 0, bob, 0);
+            pose.rotateY(jHips, Math.sin(ph) * 0.10 * spd);
+            pose.rotateY(jAbd, -Math.sin(ph) * 0.08 * spd);
+        }
+
+        // ---- Корпус: стойка стрелка ----
+        double aim = Math.max(0, Math.min(1, p.aimBlend));
+        double pitch = p.aimPitch * aim;
+        pose.rotateX(jAbd, 0.05 + 0.08 * spd + breathe);
+        pose.rotateY(jTorso, 0.30 * aim + 0.12);   // корпус развёрнут правым плечом назад
+        pose.rotateX(jTorso, -pitch * 0.35 - p.recoil * 0.06);
+        pose.rotateX(jChest, -pitch * 0.35 + p.flinch * 0.35);
+        pose.rotateZ(jChest, p.flinch * 0.12);
+        pose.rotateY(jNeck, -0.30 * aim - 0.10);   // голова смотрит вперёд по линии прицела
+        pose.rotateX(jHead, -pitch * 0.3 + p.blind * 0.5);
+
+        // ---- Смерть: процедурный рэгдолл ----
+        if (dead) {
+            applyDeath(p);
+        }
+        pose.compute();
+
+        if (gun == null || dead) {
+            // руки вдоль тела (или раскинуты при смерти)
+            if (!dead) {
+                pose.rotateZ(jUaR, -1.25); pose.rotateZ(jUaL, 1.25);
+                pose.rotateX(jLaR, -0.25); pose.rotateX(jLaL, -0.25);
+                pose.compute();
+            }
+            return;
+        }
+
+        // ---- Оружие у плеча ----
+        boolean pistol = gun.isPistolSized() && gun.spec.file.contains("pistol");
+        double gs = gun.spec.scale;
+        // точка удержания в системе груди (поза покоя), опущенный ствол при патруле
+        double hx, hy, hz;
+        if (pistol) { hx = 0.04; hy = 1.33; hz = 0.42; }
+        else { hx = 0.06; hy = 1.33; hz = 0.22; }
+        double lowered = (1 - aim) * 0.55;
+        double down = -lowered;
+        if (p.blind > 0.2) down = -0.9;
+        pose.transformPoint(jChest, hx, hy - lowered * 0.12, hz, tmp);
+        pose.boneMatrix(jChest, bone);
+        // ориентация оружия: поворот груди * компенсация разворота корпуса * наклон вниз/отдача
+        double[] base = new double[]{bone[0], bone[1], bone[2], bone[4], bone[5], bone[6], bone[8], bone[9], bone[10]};
+        double[] yawFix = MeshModel.axisAngle(0, 1, 0, -(0.30 * aim + 0.12) + (pistol ? 0.0 : -0.04));
+        double[] pitchR = MeshModel.axisAngle(1, 0, 0, -down - p.recoil * 0.10 + p.flinch * -0.2);
+        double[] g = mul(base, mul(yawFix, pitchR));
+        for (int r = 0; r < 3; r++) {
+            gunXf[r * 4] = g[r * 3] * gs; gunXf[r * 4 + 1] = g[r * 3 + 1] * gs; gunXf[r * 4 + 2] = g[r * 3 + 2] * gs;
+        }
+        gunXf[3] = tmp[0]; gunXf[7] = tmp[1]; gunXf[11] = tmp[2];
+
+        armsToGun(p, gun, pistol);
+    }
+
+    /** IK рук к рукояти и цевью оружия, матрица которого уже лежит в gunXf (координаты модели персонажа). */
+    void armsToGun(Params p, GunModels.Gun gun, boolean pistol) {
+        // запястье правой руки — за рукоятью (ниже и позади спуска)
+        gunPoint(0.012, -0.060, -0.075, tmp);
+        pose.solveTwoBoneIK(jUaR, jLaR, jHandR, tmp[0], tmp[1], tmp[2], 0.7, -1.0, -0.35);
+        double[] fg = gun.foregrip;
+        double reload = p.reload;
+        if (reload >= 0 && gun.jMag >= 0) {
+            // левая рука уходит к магазину и обратно
+            double w = Math.sin(Math.min(1, reload) * Math.PI);
+            gunPoint(-0.03 - 0.12 * w, gun.magPivot[1] - 0.06 - 0.18 * w, gun.magPivot[2] - 0.05, tmp);
+        } else if (pistol) {
+            gunPoint(-0.035, -0.075, -0.07, tmp);
+        } else {
+            gunPoint(fg[0] - 0.030, fg[1] - 0.040, fg[2] - 0.055, tmp);
+        }
+        pose.solveTwoBoneIK(jUaL, jLaL, jHandL, tmp[0], tmp[1], tmp[2], -0.8, -1.0, -0.4);
+        // кисти: ладонь правой к рукояти, левая снизу под цевьём (обхват снизу-сбоку)
+        pose.rotateX(jHandR, -1.35);
+        pose.rotateX(jHandL, pistol ? -1.55 : -2.4);
+        pose.rotateZ(jHandL, pistol ? 0.9 : 0.25);
+        // хват: пальцы сжаты
+        curl(fingersR, -1, 0.85);
+        curl(fingersL, 1, pistol ? 1.0 : 0.6);
+        curl(thumbsR, -1, 0.35);
+        curl(thumbsL, 1, 0.35);
+        pose.compute();
+    }
+
+    private void curl(int[] joints, int sign, double ang) {
+        for (int j : joints) pose.rotateZ(j, sign * ang);
+    }
+
+    private void gunPoint(double x, double y, double z, double[] out) {
+        out[0] = gunXf[0] * x + gunXf[1] * y + gunXf[2] * z + gunXf[3];
+        out[1] = gunXf[4] * x + gunXf[5] * y + gunXf[6] * z + gunXf[7];
+        out[2] = gunXf[8] * x + gunXf[9] * y + gunXf[10] * z + gunXf[11];
+        if (fpArmScale > 0.0) {
+            // цели IK заданы в системе масштабированных рук: предварительно компенсируем
+            out[0] = out[0] / fpArmScale;
+            out[1] = (out[1] - FP_PIVOT_Y) / fpArmScale + FP_PIVOT_Y;
+            out[2] = out[2] / fpArmScale;
+        }
+    }
+
+    private void applyDeath(Params p) {
+        double t = Math.max(0, Math.min(1, p.death));
+        // ease-in падение с отскоком
+        double e = t < 0.82 ? (t / 0.82) * (t / 0.82) : 1 + Math.sin((t - 0.82) / 0.18 * Math.PI) * 0.04;
+        double knees = Math.min(1, t * 2.2) * (1 - 0.75 * e);
+        pose.rotateX(jUlL, -0.55 * knees); pose.rotateX(jUlR, -0.35 * knees);
+        pose.rotateX(jLlL, 0.9 * knees); pose.rotateX(jLlR, 0.6 * knees);
+        // руки: из положения «у оружия» безвольно раскидываются
+        double armDown = 1.15 - 0.75 * e;
+        pose.rotateZ(jUaR, -armDown); pose.rotateZ(jUaL, armDown);
+        pose.rotateX(jUaR, -0.9 * (1 - e) - 0.2 * e); pose.rotateX(jUaL, -0.7 * (1 - e) + 0.3 * e);
+        pose.rotateX(jLaR, -0.6 * (1 - e)); pose.rotateX(jLaL, -0.5 * (1 - e));
+        pose.rotateX(jHead, (p.deathStyle == 1 ? 0.4 : -0.5) * e);
+        pose.rotateZ(jNeck, 0.3 * e);
+        double ang = Math.PI * 0.5 * e;
+        double lift = 0.13 * e;
+        switch (p.deathStyle) {
+            case 1: // вперёд, лицом вниз
+                pose.rotate(jRoot, 1, 0, 0, ang);
+                pose.translate(jRoot, 0, lift, -0.25 * e);
+                break;
+            case 2: // на бок
+                pose.rotate(jRoot, 0, 0, 1, ang);
+                pose.translate(jRoot, 0.2 * e, lift, 0);
+                pose.rotateX(jChest, 0.3 * e);
+                break;
+            default: // назад, на спину
+                pose.rotate(jRoot, 1, 0, 0, -ang);
+                pose.translate(jRoot, 0, lift, 0.25 * e);
+                pose.rotateX(jChest, -0.25 * e);
+                break;
+        }
+    }
+
+    private static double[] mul(double[] a, double[] b) {
+        double[] r = new double[9];
+        for (int i = 0; i < 3; i++)
+            for (int k = 0; k < 3; k++)
+                r[i * 3 + k] = a[i * 3] * b[k] + a[i * 3 + 1] * b[3 + k] + a[i * 3 + 2] * b[6 + k];
+        return r;
+    }
+
+    // ===================== ОТРИСОВКА =====================
+
+    /**
+     * Рисует бойца в мире. Модель смотрит вдоль (sin yaw, 0, cos yaw), правая рука — (cos yaw, 0, -sin yaw).
+     * @return false, если боец вне экрана
+     */
+    public boolean render(Renderer3D r, double wx, double wy, double wz, double yaw, double scale,
+                          Params p, GunModels.Gun gun, GameSettings.WeaponSkin skin, int lodBias) {
+        muzzleValid = false;
+        double rad = 1.3 * scale;
+        if (!r.isMeshVisible(wx, wy + 0.9 * scale, wz, rad)) return false;
+        double dist = r.distanceToCamera(wx, wy + 1.0, wz);
+        int lod = dist < 6 ? 0 : (dist < 16 ? 1 : 2);
+        lod = Math.min(model.lods.length - 1, lod + lodBias);
+        buildPose(p, p.death >= 0 ? null : gun);
+
+        double cy = Math.cos(yaw), sy = Math.sin(yaw);
+        // столбцы: X -> (cos,0,-sin), Y -> (0,1,0), Z -> (sin,0,cos)
+        xf[0] = cy * scale; xf[1] = 0; xf[2] = sy * scale; xf[3] = wx;
+        xf[4] = 0; xf[5] = scale; xf[6] = 0; xf[7] = wy;
+        xf[8] = -sy * scale; xf[9] = 0; xf[10] = cy * scale; xf[11] = wz;
+
+        int[] cols = colors;
+        for (int i = 0; i < cols.length; i++) cols[i] = p.flash ? Renderer3D.lerpColor(baseColors[i], 0xFF3030, 0.55) : baseColors[i];
+        r.drawMesh(model, lod, pose.skin, xf, cols, false, null, 1.0);
+
+        if (gun != null && p.death < 0) {
+            double[] w = compose(xf, gunXf);
+            gunColors = gun.colors(skin, gunColors);
+            animateGun(gun, p);
+            r.drawMesh(gun.model, lod == 0 ? 0 : 1, gun.pose.skin, w, gunColors, false, null, 1.05);
+            drawAttachments(r, gun, w, false, skin);
+            double[] m = gun.muzzle;
+            muzzleWorld[0] = w[0] * m[0] + w[1] * m[1] + w[2] * (m[2] + extraMuzzle(gun)) + w[3];
+            muzzleWorld[1] = w[4] * m[0] + w[5] * m[1] + w[6] * (m[2] + extraMuzzle(gun)) + w[7];
+            muzzleWorld[2] = w[8] * m[0] + w[9] * m[1] + w[10] * (m[2] + extraMuzzle(gun)) + w[11];
+            muzzleValid = true;
+        }
+        return true;
+    }
+
+    static double extraMuzzle(GunModels.Gun gun) {
+        return gun.spec.suppressor ? (gun.isPistolSized() ? 0.13 : 0.17) : 0.0;
+    }
+
+    /** Движение затвора/помпы/магазина GLB-оружия. */
+    static void animateGun(GunModels.Gun gun, Params p) {
+        MeshModel.Pose gp = gun.pose;
+        gp.reset();
+        double kick = Math.max(0, Math.min(1, p.recoil));
+        if (gun.jSlide >= 0) gp.translate(gun.jSlide, 0, 0, -0.022 * kick);
+        if (gun.jBolt >= 0) gp.translate(gun.jBolt, 0, 0, -0.035 * kick);
+        if (gun.jPump >= 0) gp.translate(gun.jPump, 0, 0, -0.06 * kick);
+        if (p.reload >= 0 && gun.jMag >= 0) {
+            double w = Math.sin(Math.min(1, p.reload) * Math.PI);
+            gp.translate(gun.jMag, 0, -0.16 * w, -0.02 * w);
+        }
+        gp.compute();
+    }
+
+    private static final int[] SUPP_COL = {0x1E2227};
+    private static final int[] SCOPE_COL = {0x22272E};
+    private static final int[] LENS_COL = {0x3C8AC8};
+    private static final int[] DRUM_COL = {0x3D4A36};
+
+    /** Глушитель, оптика, короб пулемёта — по точкам крепления модели. */
+    static void drawAttachments(Renderer3D r, GunModels.Gun gun, double[] w, boolean viewSpace, GameSettings.WeaponSkin skin) {
+        MeshModel cyl = MeshModel.get("__cyl");
+        MeshModel box = MeshModel.get("__box");
+        if (cyl == null || box == null) return;
+        double[] m = gun.muzzle;
+        if (gun.spec.suppressor) {
+            boolean pistol = gun.isPistolSized();
+            double rad = pistol ? 0.016 : 0.021, len = pistol ? 0.13 : 0.17;
+            r.drawMesh(cyl, 0, null, compose(w, partXf(m[0], m[1], m[2] - 0.004, rad, rad, len)), SUPP_COL, viewSpace, null, 1.0);
+        }
+        if (gun.spec.scope) {
+            double[] s = gun.scopeMount;
+            boolean sniper = gun.spec.file.contains("sniper");
+            double len = sniper ? 0.30 : 0.17, rad = sniper ? 0.024 : 0.019;
+            double y = s[1] + rad + 0.022;
+            r.drawMesh(cyl, 0, null, compose(w, partXf(s[0], y, s[2] - len * 0.45, rad, rad, len)), SCOPE_COL, viewSpace, null, 1.0);
+            r.drawMesh(cyl, 0, null, compose(w, partXf(s[0], y, s[2] - len * 0.45 - 0.012, rad * 1.25, rad * 1.25, 0.04)), SCOPE_COL, viewSpace, null, 1.0);
+            r.drawMesh(cyl, 0, null, compose(w, partXf(s[0], y, s[2] + len * 0.55 - 0.03, rad * 1.3, rad * 1.3, 0.04)), SCOPE_COL, viewSpace, null, 1.0);
+            r.drawMesh(cyl, 0, null, compose(w, partXf(s[0], y, s[2] + len * 0.55 + 0.0105, rad * 1.05, rad * 1.05, 0.002)), LENS_COL, viewSpace, null, 1.4);
+            r.drawMesh(box, 0, null, compose(w, boxXf(s[0], s[1] + 0.012, s[2] - len * 0.15, 0.016, 0.026, 0.02)), SCOPE_COL, viewSpace, null, 1.0);
+            r.drawMesh(box, 0, null, compose(w, boxXf(s[0], s[1] + 0.012, s[2] + len * 0.3, 0.016, 0.026, 0.02)), SCOPE_COL, viewSpace, null, 1.0);
+        }
+        if (gun.spec.drum && gun.jMag >= 0) {
+            double[] mp = gun.magPivot;
+            r.drawMesh(box, 0, null, compose(w, boxXf(mp[0] - 0.03, mp[1] - 0.07, mp[2] + 0.01, 0.075, 0.11, 0.12)), DRUM_COL, viewSpace, null, 1.0);
+        }
+    }
+
+    /** Цилиндр вдоль +Z: начало (x,y,z), радиусы rx, ry, длина len. */
+    static double[] partXf(double x, double y, double z, double rx, double ry, double len) {
+        return new double[]{rx, 0, 0, x, 0, ry, 0, y, 0, 0, len, z};
+    }
+
+    static double[] boxXf(double x, double y, double z, double sx, double sy, double sz) {
+        return new double[]{sx, 0, 0, x, 0, sy, 0, y, 0, 0, sz, z};
+    }
+
+    /** a ∘ b для аффинных 3x4. */
+    static double[] compose(double[] a, double[] b) {
+        double[] r = new double[12];
+        for (int row = 0; row < 3; row++) {
+            double a0 = a[row * 4], a1 = a[row * 4 + 1], a2 = a[row * 4 + 2], a3 = a[row * 4 + 3];
+            r[row * 4]     = a0 * b[0] + a1 * b[4] + a2 * b[8];
+            r[row * 4 + 1] = a0 * b[1] + a1 * b[5] + a2 * b[9];
+            r[row * 4 + 2] = a0 * b[2] + a1 * b[6] + a2 * b[10];
+            r[row * 4 + 3] = a0 * b[3] + a1 * b[7] + a2 * b[11] + a3;
+        }
+        return r;
+    }
+
+    public double[] lastGunTransform() { return gunXf; }
+
+    // ===================== ВИД ОТ ПЕРВОГО ЛИЦА =====================
+
+    private int[] armTris;
+    private MeshModel armMesh;   // подмножество: скиннинг только вершин рук
+    private static final double EYE_Y = 1.64, EYE_Z = 0.02;
+    /** Трюк FPS-ригов: руки длиннее пропорций тела (масштаб относительно точки у груди). */
+    private static final double FP_ARM_SCALE = 1.4, FP_PIVOT_Y = 0.90;
+    private double fpArmScale = 0.0;
+
+    /**
+     * Руки бойца (из той же GLB-модели) + оружие в пространстве камеры.
+     * @param gunView матрица оружия в пространстве камеры (x вправо, y вверх, z вперёд), с масштабом
+     */
+    public void renderFirstPerson(Renderer3D r, GunModels.Gun gun, double[] gunView, Params p,
+                                  GameSettings.WeaponSkin skin, boolean drawArms) {
+        buildFirstPersonPose(gun, gunView, p, skin, drawArms);
+        if (drawArms) {
+            // руки длиннее пропорций: масштаб относительно (0, FP_PIVOT_Y, 0) минус положение глаз
+            double sc = FP_ARM_SCALE, ty = FP_PIVOT_Y * (1 - sc) - EYE_Y;
+            double[] armXf = {sc, 0, 0, 0, 0, sc, 0, ty, 0, 0, sc, -EYE_Z};
+            r.drawMesh(armMesh, 0, pose.skin, armXf, colors, true, null, 1.08);
+        }
+        r.drawMesh(gun.model, 0, gun.pose.skin, gunView, gunColors, true, null, 1.12);
+        drawAttachments(r, gun, gunView, true, skin);
+    }
+
+    /** Отладка: та же поза FP, но в мировых координатах персонажа (камера смотрит со стороны). */
+    public void debugFirstPersonWorld(Renderer3D r, GunModels.Gun gun, double[] gunView, Params p,
+                                      GameSettings.WeaponSkin skin) {
+        buildFirstPersonPose(gun, gunView, p, skin, true);
+        double sc = FP_ARM_SCALE, ty = FP_PIVOT_Y * (1 - sc);
+        double[] armXf = {sc, 0, 0, 0, 0, sc, 0, ty, 0, 0, sc, 0};
+        r.drawMesh(armMesh, 0, pose.skin, armXf, colors, false, null, 1.08);
+        r.drawMesh(gun.model, 0, gun.pose.skin, gunXf, gunColors, false, null, 1.12);
+        drawAttachments(r, gun, gunXf, false, skin);
+    }
+
+    /** Отладка: печатает пивоты суставов текущей позы. */
+    public void debugJoints() {
+        double[] bm = new double[12];
+        int[] js = {jTorso, jChest, jShR, jUaR, jLaR, jHandR, jShL, jUaL, jLaL, jHandL};
+        String[] nm = {"Torso", "Chest", "ShR", "UaR", "LaR", "HandR", "ShL", "UaL", "LaL", "HandL"};
+        for (int i = 0; i < js.length; i++) {
+            pose.boneMatrix(js[i], bm);
+            System.out.printf("%s: %.3f %.3f %.3f%n", nm[i], bm[3], bm[7], bm[11]);
+        }
+    }
+
+    /** Отладка: печатает цели IK и позиции суставов рук для FP-позы. */
+    public void debugArms2() { MeshModel.DEBUG_IK = true; }
+    public void debugArms(GunModels.Gun gun, double[] gunView, Params p, GameSettings.WeaponSkin skin) {
+        buildFirstPersonPose(gun, gunView, p, skin, true);
+        double[] o = new double[3];
+        String[] names = {"UaR", "LaR", "HandR", "UaL", "LaL", "HandL"};
+        int[] js = {jUaR, jLaR, jHandR, jUaL, jLaL, jHandL};
+        double[] bm = new double[12];
+        for (int i = 0; i < js.length; i++) {
+            pose.boneMatrix(js[i], bm);
+            System.out.printf("%s: %.3f %.3f %.3f%n", names[i], bm[3], bm[7], bm[11]);
+        }
+        gunPoint(0.012, -0.060, -0.075, o);
+        System.out.printf("gripT: %.3f %.3f %.3f%n", o[0], o[1], o[2]);
+        double[] fg = gun.foregrip;
+        gunPoint(fg[0] - 0.030, fg[1] - 0.040, fg[2] - 0.055, o);
+        System.out.printf("foreT: %.3f %.3f %.3f%n", o[0], o[1], o[2]);
+        System.out.printf("gunO: %.3f %.3f %.3f scale %.2f%n", gunView[3], gunView[7], gunView[11], gun.spec.scale);
+    }
+
+    private void buildFirstPersonPose(GunModels.Gun gun, double[] gunView, Params p,
+                                      GameSettings.WeaponSkin skin, boolean drawArms) {
+        animateGun(gun, p);
+        gunColors = gun.colors(skin, gunColors);
+        if (drawArms) { fpArmScale = FP_ARM_SCALE; }
+        if (fpArmScale > 0.0) {
+            if (armTris == null) {
+                armTris = model.trianglesOfJoints(0, j -> {
+                    String n = model.jointNames[j];
+                    return n.contains("Arm") || n.startsWith("Hand") || n.startsWith("Index") || n.startsWith("Middle")
+                            || n.startsWith("Ring") || n.startsWith("Pinky") || n.startsWith("Thumb");
+                });
+                armMesh = model.extractSubset(0, armTris);
+            }
+            // стойка стрелка: плечи развёрнуты, корпус чуть наклонён
+            pose.reset();
+            pose.rotateX(jAbd, 0.06);
+            pose.rotateY(jTorso, 0.22);
+            // плечи заметно ниже глаз и чуть вперёд — руки входят в кадр снизу, без «плит» у краёв
+            pose.translate(jShR, 0.03, -0.20, 0.05);
+            pose.translate(jShL, -0.03, -0.20, 0.05);
+            pose.compute();
+            // матрица оружия в координатах модели: модель = вид + глаз
+            System.arraycopy(gunView, 0, gunXf, 0, 12);
+            gunXf[7] += EYE_Y;
+            gunXf[11] += EYE_Z;
+            boolean pistol = gun.spec.file.contains("pistol");
+            armsToGun(p, gun, pistol);
+            fpArmScale = 0.0;
+        }
+    }
+
+    /** Точка оружия (координаты модели оружия) -> пространство камеры по матрице gunView. */
+    public static void gunViewPoint(double[] gunView, double x, double y, double z, double[] out) {
+        out[0] = gunView[0] * x + gunView[1] * y + gunView[2] * z + gunView[3];
+        out[1] = gunView[4] * x + gunView[5] * y + gunView[6] * z + gunView[7];
+        out[2] = gunView[8] * x + gunView[9] * y + gunView[10] * z + gunView[11];
+    }
+}

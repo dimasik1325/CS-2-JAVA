@@ -3700,7 +3700,8 @@ public class Engine extends JPanel implements Runnable {
     }
 
     private static final String MENU_NEWS_TICKER =
-            "◆ ОБНОВЛЕНИЕ 10.0 «ALKASH EDITION»: кинематографическая заставка, кейсы с ножами ★, контракты обмена и 13 достижений   "
+            "◆ ОБНОВЛЕНИЕ 11.0 «GLB ENGINE»: GLB-модели бойцов и оружия, руки от 1-го лица, золотой AK в заставке   "
+            + "◆ ОБНОВЛЕНИЕ 10.0 «ALKASH EDITION»: кинематографическая заставка, кейсы с ножами ★, контракты обмена и 13 достижений   "
             + "◆ Совет: контр-стрейф перед выстрелом — первая пуля летит точно в цель   "
             + "◆ AK-47 убивает в голову с одного выстрела даже в шлеме — целься выше!   "
             + "◆ Дерево и ящики простреливаются насквозь, бетон — почти никогда   "
@@ -3757,7 +3758,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setColor(Color.WHITE);
         g.setFont(uiFont("SansSerif", Font.BOLD, 21));
-        g.drawString("CS-2 JAVA 10.0", 82, 33);
+        g.drawString("CS-2 JAVA 11.0", 82, 33);
         g.setPaint(new GradientPaint(83, 0, new Color(255, 206, 90), 220, 0, new Color(102, 222, 255)));
         g.setFont(uiFont("SansSerif", Font.BOLD, 10));
         g.drawString("ALKASH EDITION • SOURCE 2", 83, 50);
@@ -3878,7 +3879,7 @@ public class Engine extends JPanel implements Runnable {
         g.translate(-(1.0 - introLeft) * 480, 0);
         int heroX = 28, heroY = navH + 30;
         g.setFont(uiFont("SansSerif", Font.BOLD, 11));
-        String heroTag = "◆ ALKASH EDITION  •  СЕЗОН 10  •  " + settings.mapTheme.codeName;
+        String heroTag = "◆ ALKASH EDITION  •  СЕЗОН 11  •  " + settings.mapTheme.codeName;
         g.setColor(new Color(110, 220, 255));
         g.drawString(heroTag, heroX, heroY);
         g.setColor(new Color(110, 220, 255, 120));
@@ -4411,7 +4412,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 10.0", px + 28, py + 36);
+        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 11.0", px + 28, py + 36);
 
         String engineBadge = String.format("HYPER-TURBO • %d ПОТОКОВ CPU • %d FPS (%.1f мс)",
                 renderer.getWorkerThreads(), currentFps, lastFrameMs);
@@ -4934,7 +4935,7 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(245, 194, 72, 175));
         g.drawRoundRect(px, py, pw, ph, 18, 18);
 
-        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 10.0", outW / 2, py + 42,
+        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 11.0", outW / 2, py + 42,
                 uiFont("SansSerif", Font.BOLD, 22), new Color(252, 208, 88));
 
         String[] leftLines = {
@@ -4951,16 +4952,16 @@ public class Engine extends JPanel implements Runnable {
         };
 
         String[] rightLines = {
-            "НОВИНКИ CS-2 JAVA 10.0 (ALKASH EDITION):",
-            "• Заставка «Игра сделана Алкашом» с эффектами",
+            "НОВИНКИ CS-2 JAVA 11.0 (GLB ENGINE):",
+            "• GLB-модели бойцов: 5 вариантов, рэгдолл-смерти, LOD",
+            "• GLB-модели 23 стволов с анимацией затвора и магазина",
+            "• Вид от 1-го лица: руки в перчатках на оружии",
+            "• Золотой AK-47 в заставке (3D-логотип)",
             "• Кейсы CS2: рулетка, редкости, износ, StatTrak™, ножи ★",
-            "• Контракт обмена: 3 предмета → 1 ключ; инвентарь скинов",
-            "• 13 достижений с медалями и наградой-ключом",
-            "• Новое анимированное меню, неон, частицы, новости",
             "• 26 стволов, отдача CS2, броня, пробитие стен (9.0)",
             "",
             "СИСТЕМНЫЕ КЛАВИШИ:",
-            "• Tab — Счет команд • F5 — Рестарт • F11 — Полный экран"
+            "• Tab — Счет команд • F5 — Рестарт • F11 — Полный экран • B — магазин"
         };
 
         int ly = py + 86;
@@ -5082,7 +5083,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("МАГАЗИН ВООРУЖЕНИЯ CS-2 JAVA 10.0", bx + 26, by + 38);
+        g.drawString("МАГАЗИН ВООРУЖЕНИЯ CS-2 JAVA 11.0", bx + 26, by + 38);
         g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
         g.setColor(new Color(170, 190, 214));
         g.drawString("Реальные ТТХ CS2: урон, скорострельность, бронепробитие, скорость бега • [1-6] категория → [1-7] ствол • [0/Backspace] назад",

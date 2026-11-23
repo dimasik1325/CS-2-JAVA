@@ -117,6 +117,16 @@ public class Bot {
     private double strafeSwitchTimer = 1.4;
 
     private double walkPhase = 0.0;
+    // 11.0: GLB-модель бойца со скелетной анимацией
+    public static volatile boolean useGlbModels = true;
+    private CharacterRig rig;
+    private CharacterRig.Variant rigVariant;
+    private double animSpeed = 0.0;
+    private double reloadDurationAnim = 2.5;
+    private final CharacterRig.Params rigParams = new CharacterRig.Params();
+    private double lastAnimTime = 0.0;
+    private final Vec3 cachedMuzzle = new Vec3();
+    private boolean cachedMuzzleValid = false;
     private double hitFlashTimer = 0.0;
     private double muzzleFlashTimer = 0.0;
     private double healthBarTimer = 0.0;
@@ -429,6 +439,7 @@ public class Bot {
                     botMag--;
                     if (botMag <= 0) {
                         botReloadTimer = proto.getBaseReloadDuration() * (proto.isShellByShellReload() ? 4.0 : 1.0);
+                        reloadDurationAnim = Math.max(0.3, botReloadTimer);
                         burstRemaining = 0;
                     }
                     double interval = proto.getFireInterval();
@@ -573,6 +584,8 @@ public class Bot {
         if (speedSq > 0.25 && (movedX || movedZ)) {
             walkPhase += dt * Math.sqrt(speedSq) * 2.1;
         }
+        double targetAnim = (speedSq > 0.25 && (movedX || movedZ)) ? Math.min(1.0, Math.sqrt(speedSq) / 4.6) : 0.0;
+        animSpeed += (targetAnim - animSpeed) * Math.min(1.0, dt * 8.0);
 
         stuckTimer += dt;
         if (stuckTimer >= 1.1) {
@@ -872,7 +885,67 @@ public class Bot {
         return false;
     }
 
+    private CharacterRig.Variant pickVariant() {
+        if (archetype == Archetype.JUGGERNAUT) return CharacterRig.Variant.JUGGERNAUT;
+        int h = Math.abs(name.hashCode());
+        if (team == Team.COUNTER_TERRORIST) return (h % 3 == 1) ? CharacterRig.Variant.CT_SOLDIER : CharacterRig.Variant.CT_SWAT;
+        return (h % 4 == 2) ? CharacterRig.Variant.T_PUNK : CharacterRig.Variant.T_SWAT;
+    }
+
+    /** 11.0: отрисовка настоящей GLB-модели с процедурной скелетной анимацией. */
+    private boolean renderGlb(Renderer3D r) {
+        cachedMuzzleValid = false;
+        CharacterRig.Variant v = pickVariant();
+        if (rig == null || rigVariant != v) {
+            rig = CharacterRig.create(v);
+            rigVariant = v;
+            if (rig == null) return false;
+        }
+        CharacterRig.Params p = rigParams;
+        p.time = (System.nanoTime() % 1_000_000_000_000L) / 1e9 + Math.abs(name.hashCode() % 100);
+        p.walkPhase = walkPhase * 1.6;
+        p.moveSpeed = alive ? (blindTimer > 0.15 ? 0.45 : animSpeed) : 0;
+        p.aimBlend = (state == State.ENGAGE || muzzleFlashTimer > 0.0) ? 1.0 : (state == State.SEARCH ? 0.7 : 0.25);
+        p.aimPitch = 0.0;
+        p.recoil = muzzleFlashTimer > 0.0 ? Math.min(1.0, muzzleFlashTimer / 0.075) : 0.0;
+        p.flinch = hitFlashTimer > 0.0 ? Math.sin(Math.min(1.0, hitFlashTimer / 0.16) * Math.PI) : 0.0;
+        p.blind = blindTimer > 0.15 ? 1.0 : 0.0;
+        p.reload = botReloadTimer > 0.0 ? 1.0 - botReloadTimer / reloadDurationAnim : -1.0;
+        p.death = alive ? -1.0 : deathAnimProgress;
+        p.deathStyle = Math.abs(name.hashCode() / 7) % 3;
+        p.flash = hitFlashTimer > 0.0 && alive;
+        GunModels.Gun gun = GunModels.get(weaponType);
+        if (gun == null && alive) return false; // нож/РПГ/Zeus — старая модель
+        double s = getModelScale();
+        boolean visible = rig.render(r, position.x, position.y, position.z, yaw, s, p, gun,
+                GameSettings.WeaponSkin.STANDARD, r.meshLodBias());
+        if (!visible) return true;
+        if (rig.muzzleValid) {
+            cachedMuzzle.set(rig.muzzleWorld[0], rig.muzzleWorld[1], rig.muzzleWorld[2]);
+            cachedMuzzleValid = true;
+        }
+        if (!alive) return true;
+        boolean ct = (team == Team.COUNTER_TERRORIST);
+        boolean suppressed = (weaponType == Weapon.Type.M4A1S || weaponType == Weapon.Type.USP_S);
+        if (carryingC4) {
+            double sinY = Math.sin(yaw), cosY = Math.cos(yaw);
+            r.drawOrientedWorldBox(position.x - sinY * 0.22 * s, position.y + 1.13 * s, position.z - cosY * 0.22 * s, 0.22, 0.16, 0.09, yaw, 0.0, Renderer3D.TEX_SOLID, 0xC2A35E);
+            r.drawTranslucentSphereSprite(position.x - sinY * 0.28 * s, position.y + 1.17 * s, position.z - cosY * 0.28 * s, 0.055, 0xFF3322, 0.90);
+        }
+        if (Weapon.classOf(weaponType) == Weapon.WeaponClass.SNIPER && state == State.ENGAGE) {
+            Vec3 muz = getMuzzleWorldPosition();
+            double sinY = Math.sin(yaw), cosY = Math.cos(yaw);
+            r.draw3DLine(muz, muz.add(new Vec3(sinY * 9.5, -0.05, cosY * 9.5)), 0xFF2E38, 1);
+        }
+        if (muzzleFlashTimer > 0.0) {
+            Vec3 muz = getMuzzleWorldPosition();
+            r.drawTranslucentSphereSprite(muz.x, muz.y, muz.z, (suppressed ? 0.07 : 0.19) * s, ct ? 0x88ECFF : 0xFFCA3A, 0.92);
+        }
+        return true;
+    }
+
     public void render(Renderer3D r) {
+        if (useGlbModels && renderGlb(r)) return;
         double s = getModelScale();
         if (!r.isSphereVisible(position.x, position.y + 0.92 * s, position.z, 1.62 * s)) {
             return;
@@ -1157,6 +1230,9 @@ public class Bot {
     public Vec3 getPosition() { return position; }
     public Vec3 getEyePosition() { return new Vec3(position.x, position.y + EYE_HEIGHT, position.z); }
     public Vec3 getMuzzleWorldPosition() {
+        if (useGlbModels && cachedMuzzleValid && alive && rig != null) {
+            return new Vec3(cachedMuzzle.x, cachedMuzzle.y, cachedMuzzle.z);
+        }
         double sinY = Math.sin(yaw), cosY = Math.cos(yaw);
         return new Vec3(position.x + cosY * 0.15 + sinY * 0.72, position.y + 1.16, position.z - sinY * 0.15 + cosY * 0.72);
     }

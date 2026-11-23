@@ -381,7 +381,7 @@ public class Main {
                 tg.dispose();
             }
             double splashMs = (System.nanoTime() - tSplash0) / 1e6 / 30.0;
-            System.out.printf("[SELF-TEST 10.0] Splash render: %.1f ms/frame%n", splashMs);
+            System.out.printf("[SELF-TEST 11.0] Splash render: %.1f ms/frame%n", splashMs);
 
             engine.setCurrentScreen(Engine.AppScreen.MAIN_MENU);
             engine.setMenuIntroTimer(99.0);
@@ -485,7 +485,7 @@ public class Main {
             engine.getSettings().saveSync();
 
             System.out.printf(
-                    "CS-2 JAVA 10.0 ALKASH EDITION SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
+                    "CS-2 JAVA 11.0 ALKASH EDITION SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
                     benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs),
                     esportsMs, (benchFrames * 1000.0) / Math.max(1L, esportsMs),
                     registeredClicks);

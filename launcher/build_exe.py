@@ -127,12 +127,12 @@ def build_version_info_bytes():
     )
     strings = [
         ("CompanyName", "CS-2 JAVA Studio"),
-        ("FileDescription", "CS-2 JAVA 10.0 — Alkash Edition Tactical 3D Shooter"),
+        ("FileDescription", "CS-2 JAVA 11.0 — Alkash Edition Tactical 3D Shooter"),
         ("FileVersion", "10.0.0.0"),
         ("InternalName", "CS-2-JAVA"),
         ("LegalCopyright", "Copyright (C) 2026 CS-2 JAVA Open Engine"),
         ("OriginalFilename", "CS-2-JAVA.exe"),
-        ("ProductName", "CS-2 JAVA 10.0 (Windows 10/11 x64)"),
+        ("ProductName", "CS-2 JAVA 11.0 (Windows 10/11 x64)"),
         ("ProductVersion", "10.0.0.0"),
     ]
     str_nodes = [
@@ -195,7 +195,7 @@ def build_ico_and_res(icon_dir, jar_path, out_ico_path, out_res_path):
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">'
         '<assemblyIdentity version="10.0.0.0" processorArchitecture="amd64" name="CS2Java.HyperTurbo.Game" type="win32"/>'
-        '<description>CS-2 JAVA 10.0 Tactical 3D Shooter</description>'
+        '<description>CS-2 JAVA 11.0 Tactical 3D Shooter</description>'
         '<dependency><dependentAssembly>'
         '<assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" '
         'processorArchitecture="amd64" publicKeyToken="6595b64144ccf1df" language="*"/>'
@@ -258,11 +258,17 @@ def main():
 
     jar_path = os.path.join(ROOT, "CS-2-JAVA.jar")
     with zipfile.ZipFile(jar_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as jf:
-        manifest = "Manifest-Version: 1.0\r\nMain-Class: Main\r\nCreated-By: CS-2 JAVA 10.0 Panorama\r\n\r\n"
+        manifest = "Manifest-Version: 1.0\r\nMain-Class: Main\r\nCreated-By: CS-2 JAVA 11.0 Panorama\r\n\r\n"
         jf.writestr("META-INF/MANIFEST.MF", manifest)
         for fn in sorted(os.listdir(bin_dir)):
             if fn.endswith(".class"):
                 jf.write(os.path.join(bin_dir, fn), arcname=fn)
+        # GLB-модели (.cmdl) внутрь jar — загрузчик читает /models/X.cmdl
+        models_dir = os.path.join(ROOT, "res", "models")
+        if os.path.isdir(models_dir):
+            for fn in sorted(os.listdir(models_dir)):
+                if fn.endswith(".cmdl"):
+                    jf.write(os.path.join(models_dir, fn), arcname=f"models/{fn}")
 
     icon_dir = os.path.join(BUILD_TMP, "icons")
     os.makedirs(icon_dir, exist_ok=True)
@@ -292,6 +298,19 @@ def main():
                 zf.write(os.path.join(ROOT, "src", fn), arcname=f"CS-2-JAVA/src/{fn}")
         zf.write(os.path.join(ROOT, "launcher", "cs2_launcher.c"), arcname="CS-2-JAVA/launcher/cs2_launcher.c")
         zf.write(ico_path, arcname="CS-2-JAVA/launcher/cs2.ico")
+        # GLB-модели и компилятор ассетов
+        models_dir = os.path.join(ROOT, "res", "models")
+        if os.path.isdir(models_dir):
+            for fn in sorted(os.listdir(models_dir)):
+                if fn.endswith(".cmdl"):
+                    zf.write(os.path.join(models_dir, fn), arcname=f"CS-2-JAVA/res/models/{fn}")
+        if os.path.isdir(os.path.join(ROOT, "tools")):
+            for fn in sorted(os.listdir(os.path.join(ROOT, "tools"))):
+                zf.write(os.path.join(ROOT, "tools", fn), arcname=f"CS-2-JAVA/tools/{fn}")
+        if os.path.isdir(os.path.join(ROOT, "assets", "glb")):
+            for fn in sorted(os.listdir(os.path.join(ROOT, "assets", "glb"))):
+                if fn.endswith(".glb"):
+                    zf.write(os.path.join(ROOT, "assets", "glb", fn), arcname=f"CS-2-JAVA/assets/glb/{fn}")
 
     print(f"SUCCESS! CS-2-JAVA.exe = {os.path.getsize(exe_path):,} bytes")
     print(f"SUCCESS! CS-2-JAVA.jar = {os.path.getsize(jar_path):,} bytes")

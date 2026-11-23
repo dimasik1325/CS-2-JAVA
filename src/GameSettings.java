@@ -14,7 +14,7 @@ import java.util.Properties;
  */
 public class GameSettings {
 
-    public static final int CONFIG_VERSION = 10;
+    public static final int CONFIG_VERSION = 11;
 
     public enum QualityPreset {
         ESPORTS("Киберспорт (Макс. FPS)"),

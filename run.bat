@@ -1,12 +1,12 @@
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
-title CS-2 JAVA 7.0 — Hyper-Turbo Multi-Core & Pro Graphics Studio
+title CS-2 JAVA 11.0 — Hyper-Turbo Multi-Core & Pro Graphics Studio
 
 cd /d "%~dp0"
 
 echo ================================================================
-echo   CS-2 JAVA 7.0 : Hyper-Turbo Engine • 24 Graphics Settings
+echo   CS-2 JAVA 11.0 : GLB-Модели • Вьюмодели от 1-го лица • 24 Graphics Settings
 echo ================================================================
 echo.
 
@@ -121,7 +121,7 @@ echo [4/4] Запуск CS-2 JAVA 7.0 (Hyper-Turbo Engine & Pro Graphics Studio)
 echo Управление: WASD - движение, B - магазин (M249/RPG-7), J - авто-турель CT,
 echo             K - Босс-Вертолёт, Z - радио, Y - граффити, F11 - полный экран.
 echo.
-"%JAVA_CMD%" -Xms256m -Xmx1536m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -cp "bin;lib\*" Main
+"%JAVA_CMD%" -Xms256m -Xmx1536m -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dsun.java2d.uiScale=1.0 -Dfile.encoding=UTF-8 -cp "bin;res;lib\*" Main
 if errorlevel 1 goto :RUNTIME_ERROR
 goto :EOF
 

@@ -592,6 +592,7 @@ public class Weapon {
     private void dispatchWeaponModel(Renderer3D renderer, double ox, double oy, double oz,
                                      double rotX, double rotY, double rotZ,
                                      GameSettings.WeaponSkin skin, boolean drawHands) {
+        if (Bot.useGlbModels && renderGlbModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands)) return;
         switch (type) {
             case AK47:   renderAk47Model(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
             case M4A1S:  renderM4a1sModel(renderer, ox, oy, oz, rotX, rotY, rotZ, skin, drawHands); break;
@@ -1075,6 +1076,71 @@ public class Weapon {
         r.drawViewModelBox(kx, ky + 0.028, kz + 0.168, 0.008, 0.029, 0.072, rotX + 0.34, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
         r.drawViewModelBox(kx, ky + 0.052, kz + 0.218, 0.007, 0.023, 0.064, rotX + 0.62, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
         r.drawViewModelBox(kx, ky + 0.082, kz + 0.252, 0.005, 0.013, 0.046, rotX + 0.90, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
+    }
+
+    // ===================== 11.0: GLB-ОРУЖИЕ И РУКИ ОТ 1-ГО ЛИЦА =====================
+    private static CharacterRig fpRig;
+    private static final CharacterRig.Params FP_PARAMS = new CharacterRig.Params();
+    private final double[] glbView = new double[12];
+    private final double[] glbTmp = new double[3];
+
+    private boolean renderGlbModel(Renderer3D r, double ox, double oy, double oz,
+                                   double rotX, double rotY, double rotZ,
+                                   GameSettings.WeaponSkin skin, boolean drawHands) {
+        GunModels.Gun gun = GunModels.get(type);
+        if (gun == null) return false;
+        if (drawHands && fpRig == null) {
+            fpRig = CharacterRig.create(CharacterRig.Variant.CT_SWAT);
+            if (fpRig == null) return false;
+        }
+        double cx = Math.cos(rotX), sx = Math.sin(rotX);
+        double cy = Math.cos(rotY), sy = Math.sin(rotY);
+        double cz = Math.cos(rotZ), sz = Math.sin(rotZ);
+        // R = Rz * Ry * Rx (как в transformViewPoint)
+        double[] R = {
+                cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+                sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+                -sy,     cy * sx,                cy * cx};
+        boolean pistol = gun.spec.file.contains("pistol");
+        double gs = gun.spec.scale;
+        // база вьюмодели 11.0 (выверена по GLB-рукам): спуск оружия в точке хвата
+        double bx = ox + (pistol ? -0.085 : -0.055);
+        double by = oy + (pistol ? 0.090 : 0.100);
+        double bz = oz + (pistol ? 0.120 : 0.020);
+        double offX = 0.0, offY = 0.0, offZ = 0.0;
+        if (!drawHands) { // витрина: центр модели в точке вращения
+            offY = -(gun.minY + gun.maxY) * 0.5 * gs;
+            offZ = -(gun.minZ + gun.maxZ) * 0.5 * gs;
+        }
+        for (int i = 0; i < 3; i++) {
+            glbView[i * 4] = R[i * 3] * gs; glbView[i * 4 + 1] = R[i * 3 + 1] * gs; glbView[i * 4 + 2] = R[i * 3 + 2] * gs;
+        }
+        glbView[3] = bx + R[0] * offX + R[1] * offY + R[2] * offZ;
+        glbView[7] = by + R[3] * offX + R[4] * offY + R[5] * offZ;
+        glbView[11] = bz + R[6] * offX + R[7] * offY + R[8] * offZ;
+
+        CharacterRig.Params p = FP_PARAMS;
+        p.recoil = recoilKick;
+        p.reload = (reloading && reloadDuration > 0.0) ? 1.0 - reloadTimer / reloadDuration : -1.0;
+        p.death = -1;
+        p.flash = false;
+        if (drawHands) {
+            fpRig.renderFirstPerson(r, gun, glbView, p, skin, true);
+        } else {
+            p.recoil = 0; p.reload = -1;
+            CharacterRig.animateGun(gun, p);
+            int[] cols = gun.colors(skin, null);
+            r.drawMesh(gun.model, 0, gun.pose.skin, glbView, cols, true, null, 1.15);
+            CharacterRig.drawAttachments(r, gun, glbView, true, skin);
+        }
+        if (muzzleFlashTimer > 0.0 && drawHands) {
+            double[] m = gun.muzzle;
+            CharacterRig.gunViewPoint(glbView, m[0], m[1], m[2] + CharacterRig.extraMuzzle(gun) + 0.01, glbTmp);
+            double span = silenced ? 0.06 : (weaponClass == WeaponClass.SNIPER || weaponClass == WeaponClass.MACHINE_GUN ? 0.19
+                    : (weaponClass == WeaponClass.PISTOL ? 0.11 : 0.15));
+            renderMuzzleFlash3D(r, glbTmp[0], glbTmp[1], glbTmp[2], span);
+        }
+        return true;
     }
 
     private void renderMuzzleFlash3D(Renderer3D r, double fx, double fy, double fz, double span) {

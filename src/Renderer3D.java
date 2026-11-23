@@ -1941,7 +1941,34 @@ public class Renderer3D {
         double wy = camY - 1.38;
         double camYawAngle = Math.atan2(sinYaw, cosYaw);
         double opYaw = camYawAngle + Math.PI - 0.32 + Math.sin(animTime * 0.85) * 0.045;
+        if (Bot.useGlbModels && drawGlbShowcase(wx, wy, wz, opYaw, animTime, skin, weaponType)) return;
         drawMenuOperatorShowcase(wx, wy, wz, opYaw, animTime, skin, weaponType);
+    }
+
+    private CharacterRig showcaseRig;
+    private final CharacterRig.Params showcaseParams = new CharacterRig.Params();
+
+    /** 11.0: оперативник CT из GLB-модели с выбранным оружием и скином. */
+    public boolean drawGlbShowcase(double wx, double wy, double wz, double yaw, double animTime,
+                                   GameSettings.WeaponSkin skin, Weapon.Type weaponType) {
+        if (showcaseRig == null) {
+            showcaseRig = CharacterRig.create(CharacterRig.Variant.CT_SWAT);
+            if (showcaseRig == null) return false;
+        }
+        GunModels.Gun gun = GunModels.get(weaponType);
+        if (gun == null) gun = GunModels.get(Weapon.Type.M4A1S);
+        CharacterRig.Params p = showcaseParams;
+        p.time = animTime;
+        p.moveSpeed = 0;
+        double cyc = animTime % 9.0;
+        // каждые 9 секунд — короткий «осмотр»: поднимает ствол к плечу
+        p.aimBlend = cyc > 6.5 && cyc < 8.6 ? 1.0 : 0.35;
+        p.aimPitch = 0;
+        p.recoil = 0;
+        p.reload = -1;
+        p.death = -1;
+        p.flash = false;
+        return showcaseRig.render(this, wx, wy, wz, yaw, 1.0, p, gun, skin, -1) || true;
     }
 
     public void drawMenuOperatorShowcase(double wx, double wy, double wz, double yaw, double animTime) {
@@ -2266,6 +2293,145 @@ public class Renderer3D {
         submitViewSpaceSmoothQuad(boxVx[1], boxVy[1], boxVz[1], 0.84, boxVx[5], boxVy[5], boxVz[5], 0.80, boxVx[6], boxVy[6], boxVz[6], 0.94, boxVx[2], boxVy[2], boxVz[2], 0.98, texId, tinted);
         submitViewSpaceSmoothQuad(boxVx[3], boxVy[3], boxVz[3], 1.08, boxVx[2], boxVy[2], boxVz[2], 1.12, boxVx[6], boxVy[6], boxVz[6], 1.06, boxVx[7], boxVy[7], boxVz[7], 1.04, texId, tinted);
         submitViewSpaceSmoothQuad(boxVx[4], boxVy[4], boxVz[4], 0.62, boxVx[5], boxVy[5], boxVz[5], 0.64, boxVx[1], boxVy[1], boxVz[1], 0.68, boxVx[0], boxVy[0], boxVz[0], 0.66, texId, tinted);
+    }
+
+    // ===================== 11.0: НАСТОЯЩИЕ 3D-МОДЕЛИ ИЗ GLB =====================
+    private float[] meshVx = new float[4096], meshVy = new float[4096], meshVz = new float[4096], meshL = new float[4096];
+
+    /**
+     * Рисует скиннингованную GLB-модель.
+     * @param skin    матрицы скиннинга (MeshModel.Pose.skin) или null для позы покоя
+     * @param xf      3x4 row-major: модель -> мир (viewSpace=false) или модель -> пространство камеры (viewSpace=true)
+     * @param colors  цвет каждого материала (sRGB) — перекраска команд и скинов
+     * @param subset  индексы треугольников для отрисовки (null = все)
+     * @param lightBoost множитель освещённости (1.0 — норма)
+     */
+    public void drawMesh(MeshModel model, int lodIdx, float[] skin, double[] xf, int[] colors,
+                         boolean viewSpace, int[] subset, double lightBoost) {
+        if (model == null) return;
+        MeshModel.Lod d = model.lods[Math.max(0, Math.min(model.lods.length - 1, lodIdx))];
+        int nv = d.nv;
+        if (meshVx.length < nv) {
+            int n = Math.max(nv, meshVx.length * 2);
+            meshVx = new float[n]; meshVy = new float[n]; meshVz = new float[n]; meshL = new float[n];
+        }
+        final float[] P = d.pos, N = d.nrm, W = d.wgt;
+        final byte[] J = d.jnt;
+        final boolean[] single = d.single;
+        double a0 = xf[0], a1 = xf[1], a2 = xf[2], a3 = xf[3];
+        double b0 = xf[4], b1 = xf[5], b2 = xf[6], b3 = xf[7];
+        double c0 = xf[8], c1 = xf[9], c2 = xf[10], c3 = xf[11];
+        // масштаб модели (для нормалей нужна только ориентация)
+        double sc = Math.sqrt(a0 * a0 + b0 * b0 + c0 * c0);
+        double invSc = sc > 1e-9 ? 1.0 / sc : 1.0;
+        double flip = viewSpace ? viewFlipX : 1.0;
+
+        for (int v = 0; v < nv; v++) {
+            int pv = v * 3;
+            double x = P[pv], y = P[pv + 1], z = P[pv + 2];
+            double nx = N[pv], ny = N[pv + 1], nz = N[pv + 2];
+            if (skin != null) {
+                int jb = v * 4;
+                if (single[v]) {
+                    int m = (J[jb] & 0xFF) * 12;
+                    double sx = skin[m] * x + skin[m + 1] * y + skin[m + 2] * z + skin[m + 3];
+                    double sy = skin[m + 4] * x + skin[m + 5] * y + skin[m + 6] * z + skin[m + 7];
+                    double sz = skin[m + 8] * x + skin[m + 9] * y + skin[m + 10] * z + skin[m + 11];
+                    double tnx = skin[m] * nx + skin[m + 1] * ny + skin[m + 2] * nz;
+                    double tny = skin[m + 4] * nx + skin[m + 5] * ny + skin[m + 6] * nz;
+                    double tnz = skin[m + 8] * nx + skin[m + 9] * ny + skin[m + 10] * nz;
+                    x = sx; y = sy; z = sz; nx = tnx; ny = tny; nz = tnz;
+                } else {
+                    double sx = 0, sy = 0, sz = 0, tnx = 0, tny = 0, tnz = 0;
+                    for (int k = 0; k < 4; k++) {
+                        float w = W[jb + k];
+                        if (w <= 0f) continue;
+                        int m = (J[jb + k] & 0xFF) * 12;
+                        sx += w * (skin[m] * x + skin[m + 1] * y + skin[m + 2] * z + skin[m + 3]);
+                        sy += w * (skin[m + 4] * x + skin[m + 5] * y + skin[m + 6] * z + skin[m + 7]);
+                        sz += w * (skin[m + 8] * x + skin[m + 9] * y + skin[m + 10] * z + skin[m + 11]);
+                        tnx += w * (skin[m] * nx + skin[m + 1] * ny + skin[m + 2] * nz);
+                        tny += w * (skin[m + 4] * nx + skin[m + 5] * ny + skin[m + 6] * nz);
+                        tnz += w * (skin[m + 8] * nx + skin[m + 9] * ny + skin[m + 10] * nz);
+                    }
+                    x = sx; y = sy; z = sz; nx = tnx; ny = tny; nz = tnz;
+                }
+            }
+            double wx = a0 * x + a1 * y + a2 * z + a3;
+            double wy = b0 * x + b1 * y + b2 * z + b3;
+            double wz = c0 * x + c1 * y + c2 * z + c3;
+            double wnx = (a0 * nx + a1 * ny + a2 * nz) * invSc;
+            double wny = (b0 * nx + b1 * ny + b2 * nz) * invSc;
+            double wnz = (c0 * nx + c1 * ny + c2 * nz) * invSc;
+            double vx, vy, vz;
+            if (viewSpace) {
+                vx = wx * flip; vy = wy; vz = wz;
+                // нормаль из пространства камеры в мир — освещение Солнцем согласовано с картой
+                double ry = wny * cosPitch + wnz * sinPitch;
+                double rz = -wny * sinPitch + wnz * cosPitch;
+                double gx = wnx * cosYaw + rz * sinYaw;
+                double gz = -wnx * sinYaw + rz * cosYaw;
+                wnx = gx; wny = ry; wnz = gz;
+            } else {
+                double dx = wx - camX, dy = wy - camY, dz = wz - camZ;
+                vx = dx * cosYaw - dz * sinYaw;
+                double rz = dx * sinYaw + dz * cosYaw;
+                vy = dy * cosPitch - rz * sinPitch;
+                vz = dy * sinPitch + rz * cosPitch;
+            }
+            double nl = Math.sqrt(wnx * wnx + wny * wny + wnz * wnz);
+            if (nl > 1e-9) { wnx /= nl; wny /= nl; wnz /= nl; }
+            meshVx[v] = (float) vx; meshVy[v] = (float) vy; meshVz[v] = (float) vz;
+            meshL[v] = (float) (computeSmoothLightFactor(wnx, wny, wnz) * lightBoost);
+        }
+
+        double det = a0 * (b1 * c2 - b2 * c1) - a1 * (b0 * c2 - b2 * c0) + a2 * (b0 * c1 - b1 * c0);
+        boolean swap = (det < 0) ^ (flip < 0);
+        int nColors = colors.length;
+        int[] tinted = meshTintCache.length >= nColors ? meshTintCache : (meshTintCache = new int[nColors * 2]);
+        for (int i = 0; i < nColors; i++) tinted[i] = multiplyColors(colors[i], lightTintColor);
+        boolean fog = fogEnabled && !viewSpace;
+        int count = subset != null ? subset.length : d.nt;
+        final int[] I = d.idx;
+        final byte[] M = d.mat;
+        for (int q = 0; q < count; q++) {
+            int t = subset != null ? subset[q] : q;
+            int i0 = I[t * 3], i1 = I[t * 3 + 1], i2 = I[t * 3 + 2];
+            if (swap) { int tmp = i1; i1 = i2; i2 = tmp; }
+            int mi = M[t] & 0xFF;
+            int col = tinted[mi < nColors ? mi : 0];
+            clipAndEnqueueTri(meshVx[i0], meshVy[i0], meshVz[i0], 0, 0, meshL[i0],
+                    meshVx[i1], meshVy[i1], meshVz[i1], 1, 0, meshL[i1],
+                    meshVx[i2], meshVy[i2], meshVz[i2], 1, 1, meshL[i2],
+                    TEX_SOLID, col, true, fog, 2);
+        }
+    }
+    private int[] meshTintCache = new int[16];
+
+    /** Проекция мировой точки в экранные координаты [0..1] (для оверлеев; z вперёд от камеры). */
+    public void projectPoint(double wx, double wy, double wz, double[] outXY) {
+        double dx = wx - camX, dy = wy - camY, dz = wz - camZ;
+        double vx = dx * cosYaw - dz * sinYaw;
+        double rz = dx * sinYaw + dz * cosYaw;
+        double vy = dy * cosPitch - rz * sinPitch;
+        double vz = dy * sinPitch + rz * cosPitch;
+        double k = vz > 1e-6 ? 1.0 / vz : 0.0;
+        outXY[0] = (halfW + vx * k * focalLength) / width;
+        outXY[1] = (halfH - vy * k * focalLength) / height;
+    }
+
+    /** Смещение LOD для GLB-моделей по настройке детализации. */
+    public int meshLodBias() { return geometryLodScale < 0.85 ? 1 : 0; }
+
+    /** Видимость сферы в мире (для моделей). */
+    public boolean isMeshVisible(double wx, double wy, double wz, double radius) {
+        return isSphereVisible(wx, wy, wz, radius);
+    }
+
+    /** Расстояние от камеры до точки. */
+    public double distanceToCamera(double wx, double wy, double wz) {
+        double dx = wx - camX, dy = wy - camY, dz = wz - camZ;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     public void drawDecal(Vec3.Decal d) {
