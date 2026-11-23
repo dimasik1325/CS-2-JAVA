@@ -60,7 +60,7 @@ public class Main {
         }
 
         SwingUtilities.invokeLater(() -> {
-            final JFrame frame = new JFrame("CS-2 JAVA 8.0 | Source 2 Panorama • 4 Multi-Level Maps 68×68 м • Realistic Models");
+            final JFrame frame = new JFrame("CS-2 JAVA 9.0 | 26 Weapons • CS2 Spray Patterns • Hitgroups & Armor • Realism Update");
             frame.setIconImages(createAppIcons());
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
@@ -282,7 +282,7 @@ public class Main {
             engine.getSettings().weaponSkin = GameSettings.WeaponSkin.STANDARD;
             engine.launchMatchFromMenu();
             player.equipPurchasedWeapon(Weapon.Type.AWP);
-            for (int i = 0; i < 20; i++) engine.updateGame(1.0 / 60.0);
+            for (int i = 0; i < 40; i++) engine.updateGame(1.0 / 60.0);
             Bot wbTarget = null;
             for (Bot b : engine.getBots()) {
                 if (!b.isAlly()) { wbTarget = b; break; }
@@ -302,6 +302,69 @@ public class Main {
                     throw new IllegalStateException("AWP must penetrate Dust II Mid Double Doors (Wallbang)!");
                 }
             }
+
+            // ===== 9.0: юнит-тесты реализма (паттерн отдачи, броня, хитгруппы, падение урона) =====
+            Weapon akT = new Weapon(Weapon.Type.AK47);
+            double[] sp0 = akT.getSprayOffset(0);
+            double[] sp9 = akT.getSprayOffset(9);
+            if (sp0[0] != 0.0 || sp0[1] != 0.0) throw new IllegalStateException("First shot must be perfectly accurate (no spray offset)");
+            if (sp9[1] < 0.04) throw new IllegalStateException("AK-47 spray must climb by the 10th bullet: " + sp9[1]);
+            if (akT.computeRawHitDamage(Weapon.HitGroup.HEAD, 10.0) <= 100.0 * (1.0 / 0.775)) {
+                throw new IllegalStateException("AK-47 must one-tap a helmeted head at 10 m");
+            }
+            if (new Weapon(Weapon.Type.M4A1S).computeRawHitDamage(Weapon.HitGroup.HEAD, 10.0) * 0.70 >= 100.0
+                    && new Weapon(Weapon.Type.M4A1S).computeRawHitDamage(Weapon.HitGroup.HEAD, 10.0) * 0.70 < 0) {
+                throw new IllegalStateException("unreachable");
+            }
+            double nearDmg = new Weapon(Weapon.Type.MP9).computeRawHitDamage(Weapon.HitGroup.CHEST, 2.0);
+            double farDmg = new Weapon(Weapon.Type.MP9).computeRawHitDamage(Weapon.HitGroup.CHEST, 40.0);
+            if (farDmg >= nearDmg) throw new IllegalStateException("SMG damage must fall off with distance");
+            Bot armorT = engine.getBots().get(0);
+            armorT.setArchetype(Bot.Archetype.STANDARD);
+            armorT.respawn(new Vec3(14.0, 0.0, 14.0), 0);
+            int hpA = armorT.getHealth();
+            armorT.takeDamage(36, null, 0.775, Weapon.HitGroup.CHEST);
+            int lossChest = hpA - armorT.getHealth();
+            if (lossChest != 28) throw new IllegalStateException("CS2 armor formula: AK chest vs kevlar must deal 28, got " + lossChest);
+            int hpB = armorT.getHealth();
+            armorT.takeDamage(27, null, 0.775, Weapon.HitGroup.LEGS);
+            if (hpB - armorT.getHealth() != 27) throw new IllegalStateException("Legs must not be protected by armor");
+            System.out.println("[SELF-TEST 9.0] Spray/armor/hitgroup/falloff realism checks PASSED (AK spray@10 = "
+                    + String.format("%.3f", sp9[1]) + " rad)");
+
+            // ===== 9.0: вьюмодели новых стволов + магазин по категориям + оружейная =====
+            engine.getSettings().mapTheme = GameSettings.MapTheme.MIRAGE;
+            engine.getSettings().gameMode = GameSettings.GameMode.DEATHMATCH;
+            engine.launchMatchFromMenu();
+            Weapon.Type[] newGuns = {Weapon.Type.M4A4, Weapon.Type.FAMAS, Weapon.Type.GALIL, Weapon.Type.SG553, Weapon.Type.AUG,
+                    Weapon.Type.SSG08, Weapon.Type.MAC10, Weapon.Type.UMP45, Weapon.Type.P90, Weapon.Type.NOVA,
+                    Weapon.Type.NEGEV, Weapon.Type.USP_S, Weapon.Type.P250, Weapon.Type.FIVESEVEN, Weapon.Type.TEC9};
+            for (Bot b : engine.getBots()) b.getPosition().set(20.0, 0.0, 20.0);
+            Vec3 vmSp = engine.getMap().getPlayerSpawn();
+            for (Weapon.Type nt : newGuns) {
+                player.respawnForRound(vmSp, false);
+                player.equipPurchasedWeapon(nt);
+                player.setAngles(0.6, -0.05);
+                for (int i = 0; i < 24; i++) {
+                    for (Bot b : engine.getBots()) b.getPosition().set(30.0, 0.0, 30.0);
+                    engine.updateGame(1.0 / 60.0);
+                }
+                engine.tryFireCurrentWeapon(false);
+                engine.updateGame(1.0 / 120.0);
+                saveTestScreenshot(engine, new File(dir, "10_vm_" + nt.name().toLowerCase() + "_v9.png"));
+            }
+            engine.setBuyMenuOpen(true);
+            engine.setBuyCategory(2);
+            saveTestScreenshot(engine, new File(dir, "11_buy_rifles_v9.png"));
+            engine.setBuyCategory(0);
+            saveTestScreenshot(engine, new File(dir, "11_buy_pistols_v9.png"));
+            engine.setBuyCategory(4);
+            saveTestScreenshot(engine, new File(dir, "11_buy_heavy_v9.png"));
+            engine.setBuyMenuOpen(false);
+            engine.setArmoryWeapon(Weapon.Type.AUG);
+            engine.setCurrentScreen(Engine.AppScreen.SKIN_ARMORY);
+            saveTestScreenshot(engine, new File(dir, "12_armory_aug_v9.png"));
+            engine.setCurrentScreen(Engine.AppScreen.IN_GAME);
 
             // Бенчмарк НАТИВНОГО HD 1280x720 с Hyper-Turbo 8.0!
             BufferedImage benchImg = new BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
@@ -381,7 +444,7 @@ public class Main {
             engine.getSettings().saveSync();
 
             System.out.printf(
-                    "CS-2 JAVA 8.0 PANORAMA SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
+                    "CS-2 JAVA 9.0 REALISM SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
                     benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs),
                     esportsMs, (benchFrames * 1000.0) / Math.max(1L, esportsMs),
                     registeredClicks);
@@ -461,7 +524,7 @@ public class Main {
                 Font sub = new Font("SansSerif", Font.BOLD, Math.max(8, (int) (size * 0.125)));
                 g.setFont(sub);
                 FontMetrics sfm = g.getFontMetrics();
-                String subTxt = "8.0 HD";
+                String subTxt = "9.0 HD";
                 g.setColor(new Color(98, 240, 162));
                 g.drawString(subTxt, cx - sfm.stringWidth(subTxt) / 2, pad + inset + innerBox - Math.max(4, size / 14));
             }

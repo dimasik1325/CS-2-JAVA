@@ -2059,7 +2059,7 @@ public class Renderer3D {
         double gz = wz + fz * 0.28 - rz * 0.04;
         double gfx = Math.sin(gYaw), gfz = Math.cos(gYaw);
 
-        if (weaponType == Weapon.Type.AWP) {
+        if (weaponType == Weapon.Type.AWP || weaponType == Weapon.Type.SSG08) {
             drawOrientedWorldBox(gx, gy, gz, 0.058, 0.105, 0.68, gYaw, gPitch, TEX_SOLID, hasCustomSkin ? gunBody : 0x354B34);
             drawOrientedWorldCylinder(gx + gfx * 0.48, gy - 0.08, gz + gfz * 0.48, 0.018, 0.016, 0.56, gYaw, gPitch, 10, gunTrim);
             drawOrientedWorldCylinder(gx + gfx * 0.04, gy + 0.095, gz + gfz * 0.04, 0.028, 0.032, 0.34, gYaw, gPitch, 12, gunTrim);

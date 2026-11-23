@@ -56,6 +56,14 @@ public class SoundSystem {
     private final byte[] sfxM249Shot;
     private final byte[] sfxRpgLaunch;
     private final byte[] sfxTurretShot;
+    // ===== 9.0: индивидуальный звук каждого ствола + дальнее эхо, свист пуль, «дзынь» по шлему =====
+    private final java.util.EnumMap<Weapon.Type, byte[]> weaponShots = new java.util.EnumMap<>(Weapon.Type.class);
+    private final java.util.EnumMap<Weapon.Type, byte[]> distantShots = new java.util.EnumMap<>(Weapon.Type.class);
+    private final byte[] sfxBulletWhiz;
+    private final byte[] sfxHelmetDink;
+    private final byte[] sfxBodyThud;
+    private final byte[] sfxShellLoad;
+    private final byte[] sfxFallCrunch;
 
     public SoundSystem(boolean enabled) {
         this.format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
@@ -96,6 +104,38 @@ public class SoundSystem {
         this.sfxRpgLaunch   = buildRpgLaunchSound();
         this.sfxTurretShot  = buildGunshot(0.09, 340.0, 110.0, 0.56, 6161L);
 
+        weaponShots.put(Weapon.Type.AK47, sfxAkShot);
+        weaponShots.put(Weapon.Type.M4A1S, sfxM4Silenced);
+        weaponShots.put(Weapon.Type.AWP, sfxAwpBoom);
+        weaponShots.put(Weapon.Type.M249, sfxM249Shot);
+        weaponShots.put(Weapon.Type.XM1014, sfxShotgun);
+        weaponShots.put(Weapon.Type.MP9, sfxMp9Shot);
+        weaponShots.put(Weapon.Type.GLOCK, sfxGlockShot);
+        weaponShots.put(Weapon.Type.DEAGLE, sfxDeagleShot);
+        weaponShots.put(Weapon.Type.M4A4,      buildGunshot(0.20, 172.0, 50.0, 0.90, 4401L));
+        weaponShots.put(Weapon.Type.FAMAS,     buildGunshot(0.17, 196.0, 58.0, 0.84, 4402L));
+        weaponShots.put(Weapon.Type.GALIL,     buildGunshot(0.21, 156.0, 44.0, 0.90, 4403L));
+        weaponShots.put(Weapon.Type.SG553,     buildGunshot(0.20, 164.0, 46.0, 0.92, 4404L));
+        weaponShots.put(Weapon.Type.AUG,       buildGunshot(0.19, 180.0, 52.0, 0.88, 4405L));
+        weaponShots.put(Weapon.Type.SSG08,     buildGunshot(0.36, 118.0, 30.0, 1.15, 4406L));
+        weaponShots.put(Weapon.Type.MAC10,     buildGunshot(0.10, 310.0, 100.0, 0.66, 4407L));
+        weaponShots.put(Weapon.Type.UMP45,     buildGunshot(0.13, 230.0, 70.0, 0.74, 4408L));
+        weaponShots.put(Weapon.Type.P90,       buildGunshot(0.10, 330.0, 120.0, 0.64, 4409L));
+        weaponShots.put(Weapon.Type.NOVA,      buildGunshot(0.32, 110.0, 30.0, 1.18, 4410L));
+        weaponShots.put(Weapon.Type.NEGEV,     buildGunshot(0.15, 176.0, 50.0, 0.98, 4411L));
+        weaponShots.put(Weapon.Type.USP_S,     buildSilencedShot());
+        weaponShots.put(Weapon.Type.P250,      buildGunshot(0.15, 228.0, 70.0, 0.78, 4413L));
+        weaponShots.put(Weapon.Type.FIVESEVEN, buildGunshot(0.14, 262.0, 84.0, 0.76, 4414L));
+        weaponShots.put(Weapon.Type.TEC9,      buildGunshot(0.14, 250.0, 80.0, 0.78, 4415L));
+        for (java.util.Map.Entry<Weapon.Type, byte[]> e : weaponShots.entrySet()) {
+            distantShots.put(e.getKey(), makeDistant(e.getValue()));
+        }
+        this.sfxBulletWhiz  = buildBulletWhiz();
+        this.sfxHelmetDink  = buildHelmetDink();
+        this.sfxBodyThud    = buildGunshot(0.07, 120.0, 60.0, 0.55, 5150L);
+        this.sfxShellLoad   = buildToneClick(720.0, 0.05, 0.50);
+        this.sfxFallCrunch  = buildGunshot(0.16, 90.0, 40.0, 0.80, 6262L);
+
         if (this.audioAvailable) {
             this.audioPool = Executors.newCachedThreadPool(r -> {
                 Thread t = new Thread(r, "CS2-Audio");
@@ -133,7 +173,75 @@ public class SoundSystem {
             case DEAGLE: playAsync(sfxDeagleShot, 1.0); break;
             case ZEUS:   playAsync(sfxZeusZap, 1.0); break;
             case KNIFE:  playAsync(sfxKnifeSlash, 0.85); break;
+            default: {
+                byte[] d = weaponShots.get(type);
+                if (d != null) playAsync(d, Weapon.prototype(type).isSilenced() ? 0.90 : 0.97);
+                break;
+            }
         }
+    }
+
+    /** Выстрел бота с реальным звуком его ствола: вблизи — резкий хлопок, вдали — приглушённое эхо. */
+    public void playBotShot(double distance, Weapon.Type type) {
+        byte[] near = weaponShots.get(type), far = distantShots.get(type);
+        if (near == null) { playBotShot(distance); return; }
+        boolean sil = Weapon.prototype(type).isSilenced();
+        double reach = sil ? 30.0 : 70.0;
+        double atten = Math.max(0.06, Math.min(0.82, 1.0 - distance / reach));
+        if (sil && distance > 30.0) return;
+        playAsync(distance > 24.0 ? far : near, atten * (distance > 24.0 ? 1.25 : 0.80));
+    }
+
+    public void playBulletWhiz(double closeness) { playAsync(sfxBulletWhiz, Math.max(0.2, Math.min(0.9, closeness))); }
+    public void playHelmetDink() { playAsyncPriority(sfxHelmetDink, 0.95); }
+    public void playBodyThud() { playAsync(sfxBodyThud, 0.70); }
+    public void playShellLoad() { playAsync(sfxShellLoad, 0.75); }
+    public void playFallCrunch() { playAsyncPriority(sfxFallCrunch, 0.95); }
+
+    private static byte[] makeDistant(byte[] pcm) {
+        int n = pcm.length / 2;
+        int echo1 = (int) (SAMPLE_RATE * 0.11), echo2 = (int) (SAMPLE_RATE * 0.27);
+        double[] out = new double[n + echo2 + (int) (SAMPLE_RATE * 0.05)];
+        double lp = 0.0;
+        for (int i = 0; i < n; i++) {
+            short v = (short) ((pcm[i * 2] & 0xFF) | (pcm[i * 2 + 1] << 8));
+            double x = v / 32000.0;
+            lp = lp * 0.86 + x * 0.14;          // воздух съедает высокие частоты
+            out[i] += lp * 1.6;
+            out[i + echo1] += lp * 0.55;        // отражение от стен
+            out[i + echo2] += lp * 0.28;
+        }
+        return toPcmBytes(out);
+    }
+
+    private static byte[] buildBulletWhiz() {
+        int count = (int) (SAMPLE_RATE * 0.16);
+        double[] buf = new double[count];
+        Random rng = new Random(9091L);
+        double bp = 0.0, prev = 0.0;
+        for (int i = 0; i < count; i++) {
+            double t = (double) i / count;
+            double env = Math.sin(Math.PI * Math.pow(t, 0.6)) * Math.pow(1.0 - t, 1.2);
+            double n = rng.nextDouble() * 2.0 - 1.0;
+            double hp = n - prev; prev = n;          // сверхзвуковой «щелчок» — ВЧ шум
+            bp = bp * 0.55 + hp * 0.45;
+            double sweep = Math.sin(2.0 * Math.PI * (2400.0 - 1500.0 * t) * (i / SAMPLE_RATE)) * 0.25;
+            buf[i] = (bp * 0.8 + sweep) * env * 0.75;
+        }
+        return toPcmBytes(buf);
+    }
+
+    private static byte[] buildHelmetDink() {
+        int count = (int) (SAMPLE_RATE * 0.32);
+        double[] buf = new double[count];
+        for (int i = 0; i < count; i++) {
+            double sec = i / SAMPLE_RATE;
+            double t = (double) i / count;
+            double env = Math.exp(-t * 7.5);
+            buf[i] = (Math.sin(2 * Math.PI * 3150.0 * sec) * 0.55 + Math.sin(2 * Math.PI * 4720.0 * sec) * 0.30
+                    + Math.sin(2 * Math.PI * 6890.0 * sec) * 0.15 * Math.exp(-t * 20.0)) * env * 0.9;
+        }
+        return toPcmBytes(buf);
     }
 
     public void playTurretShot(double distance) {

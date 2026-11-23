@@ -186,20 +186,22 @@ public class Engine extends JPanel implements Runnable {
     private String radioBannerText = "";
     private double radioBannerTimer = 0.0;
 
-    private final Weapon[] armoryShowcaseWeapons = new Weapon[]{
-        new Weapon(Weapon.Type.AK47),
-        new Weapon(Weapon.Type.M4A1S),
-        new Weapon(Weapon.Type.AWP),
-        new Weapon(Weapon.Type.M249),
-        new Weapon(Weapon.Type.RPG7),
-        new Weapon(Weapon.Type.XM1014),
-        new Weapon(Weapon.Type.MP9),
-        new Weapon(Weapon.Type.DEAGLE),
-        new Weapon(Weapon.Type.GLOCK),
-        new Weapon(Weapon.Type.ZEUS),
-        new Weapon(Weapon.Type.KNIFE)
+    private static final Weapon.Type[] ARMORY_ORDER = {
+        Weapon.Type.AK47, Weapon.Type.M4A4, Weapon.Type.M4A1S, Weapon.Type.GALIL, Weapon.Type.FAMAS,
+        Weapon.Type.SG553, Weapon.Type.AUG, Weapon.Type.AWP, Weapon.Type.SSG08, Weapon.Type.MAC10,
+        Weapon.Type.MP9, Weapon.Type.UMP45, Weapon.Type.P90, Weapon.Type.NOVA, Weapon.Type.XM1014,
+        Weapon.Type.NEGEV, Weapon.Type.M249, Weapon.Type.RPG7, Weapon.Type.GLOCK, Weapon.Type.USP_S,
+        Weapon.Type.P250, Weapon.Type.FIVESEVEN, Weapon.Type.TEC9, Weapon.Type.DEAGLE, Weapon.Type.ZEUS,
+        Weapon.Type.KNIFE
     };
+    private final Weapon[] armoryShowcaseWeapons = buildArmory();
+    private static Weapon[] buildArmory() {
+        Weapon[] arr = new Weapon[ARMORY_ORDER.length];
+        for (int i = 0; i < arr.length; i++) arr[i] = new Weapon(ARMORY_ORDER[i]);
+        return arr;
+    }
     private int armoryWeaponIdx = 0;
+    private int soundTestIdx = 0;
 
     private final SoundSystem soundSystem;
     private final Random rng = new Random(2026L);
@@ -601,7 +603,7 @@ public class Engine extends JPanel implements Runnable {
                 streakBannerTimer = 1.8;
                 return;
             }
-            buyMenuOpen = !buyMenuOpen;
+            buyMenuOpen = !buyMenuOpen; buyCategoryChosen = false;
             leftMouseDown = false;
             setMouseCaptured(!buyMenuOpen);
             soundSystem.playUiClick();
@@ -700,6 +702,8 @@ public class Engine extends JPanel implements Runnable {
             soundSystem.playUiClick();
             streakBannerText = "СКИН ОРУЖИЯ: " + settings.weaponSkin.label.toUpperCase();
             streakBannerTimer = 1.6;
+        } else if (code == KeyEvent.VK_E) {
+            tryPickupDroppedWeapon();
         } else if (code == KeyEvent.VK_F) {
             if (player.isAlive()) player.getCurrentWeapon().triggerInspect();
         } else if (code == KeyEvent.VK_R) {
@@ -709,20 +713,42 @@ public class Engine extends JPanel implements Runnable {
         }
     }
 
+    // ====== МАГАЗИН CS2 9.0: категории → оружие (B → 1..6 → 1..N), как в оригинальной Panorama ======
+    private static final String[] BUY_CATEGORY_NAMES = {"ПИСТОЛЕТЫ", "ПИСТОЛЕТЫ-ПУЛЕМЁТЫ", "ШТУРМОВЫЕ ВИНТОВКИ", "СНАЙПЕРСКИЕ", "ТЯЖЁЛОЕ ОРУЖИЕ", "СНАРЯЖЕНИЕ"};
+    private static final Weapon.Type[][] BUY_CATEGORIES = {
+        {Weapon.Type.GLOCK, Weapon.Type.USP_S, Weapon.Type.P250, Weapon.Type.FIVESEVEN, Weapon.Type.TEC9, Weapon.Type.DEAGLE},
+        {Weapon.Type.MAC10, Weapon.Type.MP9, Weapon.Type.UMP45, Weapon.Type.P90},
+        {Weapon.Type.GALIL, Weapon.Type.FAMAS, Weapon.Type.AK47, Weapon.Type.M4A4, Weapon.Type.M4A1S, Weapon.Type.SG553, Weapon.Type.AUG},
+        {Weapon.Type.SSG08, Weapon.Type.AWP},
+        {Weapon.Type.NOVA, Weapon.Type.XM1014, Weapon.Type.NEGEV, Weapon.Type.M249, Weapon.Type.RPG7},
+        {}
+    };
+    private int buyCategory = 2;
+    private boolean buyCategoryChosen = false;
+
     private void handleBuyShortcut(int keyCode) {
-        switch (keyCode) {
-            case KeyEvent.VK_1: tryPurchaseWeapon(Weapon.Type.AK47); break;
-            case KeyEvent.VK_2: tryPurchaseWeapon(Weapon.Type.M4A1S); break;
-            case KeyEvent.VK_3: tryPurchaseWeapon(Weapon.Type.AWP); break;
-            case KeyEvent.VK_4: tryPurchaseWeapon(Weapon.Type.M249); break;
-            case KeyEvent.VK_5: tryPurchaseWeapon(Weapon.Type.RPG7); break;
-            case KeyEvent.VK_6: tryPurchaseWeapon(Weapon.Type.XM1014); break;
-            case KeyEvent.VK_7: tryPurchaseWeapon(Weapon.Type.DEAGLE); break;
-            case KeyEvent.VK_8: tryPurchaseUtility(1); break;
-            case KeyEvent.VK_9: tryPurchaseUtility(3); break;
-            case KeyEvent.VK_0: tryPurchaseUtility(4); break;
-            default: break;
+        int num = -1;
+        if (keyCode >= KeyEvent.VK_1 && keyCode <= KeyEvent.VK_9) num = keyCode - KeyEvent.VK_1;
+        if (keyCode == KeyEvent.VK_BACK_SPACE || keyCode == KeyEvent.VK_BACK_QUOTE || keyCode == KeyEvent.VK_0) {
+            buyCategoryChosen = false;
+            soundSystem.playUiClick();
+            return;
         }
+        if (num < 0) return;
+        if (!buyCategoryChosen) {
+            if (num < BUY_CATEGORY_NAMES.length) {
+                buyCategory = num;
+                buyCategoryChosen = true;
+                soundSystem.playUiClick();
+            }
+            return;
+        }
+        if (buyCategory == 5) {
+            if (num < 4) tryPurchaseUtility(num + 1);
+            return;
+        }
+        Weapon.Type[] list = BUY_CATEGORIES[buyCategory];
+        if (num < list.length) tryPurchaseWeapon(list[num]);
     }
 
     private void tryPurchaseWeapon(Weapon.Type type) {
@@ -1148,6 +1174,8 @@ public class Engine extends JPanel implements Runnable {
         this.smokeClouds.clear();
         this.fireZones.clear();
         this.pickups.clear();
+        this.droppedWeapons.clear();
+        this.lastKillerInfo = null;
         this.rockets.clear();
         this.sentryTurrets.clear();
         this.supplyDrops.clear();
@@ -1543,6 +1571,22 @@ public class Engine extends JPanel implements Runnable {
         if (settings.footstepSounds && player.consumeFootstepTrigger()) {
             soundSystem.playFootstep();
         }
+        // Урон от падения с высоты (реализм 9.0)
+        int fallDmg = player.consumePendingFallDamage();
+        if (fallDmg > 0 && settings.fallDamage && player.isAlive() && matchState == MatchState.PLAYING) {
+            player.takeEnvironmentalDamage(fallDmg, null, true);
+            soundSystem.playFallCrunch();
+            if (settings.showDamageNumbers) {
+                streakBannerText = "УРОН ОТ ПАДЕНИЯ: -" + fallDmg + " HP";
+                streakBannerTimer = 1.3;
+            }
+            if (!player.isAlive()) {
+                addKillFeed("ВЫ", "Падение", "ВЫ", false, true);
+                lastKillerInfo = "Гравитация • падение с высоты";
+                if (settings.gameMode == GameSettings.GameMode.DEATHMATCH || settings.gameMode == GameSettings.GameMode.ARMS_RACE) dmPlayerRespawnTimer = 1.7;
+            }
+        }
+        updateDroppedWeapons(dt);
 
         if (leftMouseDown && !buyMenuOpen && matchState == MatchState.PLAYING && player.isAlive()) {
             if (player.getCurrentWeapon().isAutomatic()) {
@@ -1579,31 +1623,44 @@ public class Engine extends JPanel implements Runnable {
             }
 
             if (shot != null && matchState == MatchState.PLAYING) {
-                int trCol = bot.isAlly() ? 0x62D8FF : 0xFF9F38;
+                int trCol = shot.silenced ? 0xB8E4FF : (bot.isAlly() ? 0x62D8FF : 0xFF9F38);
                 tracers.add(new Vec3.Tracer(shot.muzzlePos, shot.endPos, trCol, 0.085));
-                soundSystem.playBotShot(bot.getPosition().dist(player.getPosition()));
+                if (shot.extraTracerEnd != null) tracers.add(new Vec3.Tracer(shot.muzzlePos, shot.extraTracerEnd, trCol, 0.07));
+                soundSystem.playBotShot(bot.getPosition().dist(player.getPosition()), shot.weapon);
+                String botGun = Weapon.nameOf(shot.weapon);
+
+                // Свист/щелчок пролетающей рядом пули (сверхзвуковой «крэк» как в CS2)
+                if (!shot.hitPlayer && !bot.isAlly() && player.isAlive()) {
+                    double miss = distancePointToSegment(player.getEyePosition(), shot.muzzlePos, shot.endPos);
+                    if (miss < 1.6 && settings.bulletWhizSounds) {
+                        soundSystem.playBulletWhiz(1.0 - miss / 1.6);
+                        player.addCameraShake(0.05);
+                    }
+                }
 
                 if (shot.hitPlayer && player.isAlive()) {
                     boolean wasAlive = player.isAlive();
-                    player.takeDamage(shot.damage, bot.getPosition());
-                    soundSystem.playPlayerHurt();
-                    spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xE03030, 5);
+                    boolean helmetDink = shot.hitGroup == Weapon.HitGroup.HEAD && player.hasHelmet() && player.getArmor() > 0;
+                    player.takeDamage(shot.damage, bot.getPosition(), shot.armorPenetration, shot.hitGroup, false);
+                    if (helmetDink) soundSystem.playHelmetDink(); else soundSystem.playPlayerHurt();
+                    spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xB01818, 7);
                     if (wasAlive && !player.isAlive()) {
                         bot.recordKill();
-                        addKillFeed(bot.getName(), "AK-47", "ВЫ", false, true);
+                        addKillFeed(bot.getName(), botGun, "ВЫ", shot.hitGroup == Weapon.HitGroup.HEAD, true);
+                        lastKillerInfo = bot.getName() + " • " + botGun + " • " + shot.hitGroup.label;
                         if (respawnMode) {
                             dmPlayerRespawnTimer = 1.7;
                         }
                     }
                 } else if (shot.hitBot != null && shot.hitBot.isAlive()) {
-                    spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xE03030, 5);
-                    if (shot.hitBot.takeDamage(shot.damage, bot.getPosition())) {
+                    spawnBloodImpact(shot.endPos, shot.muzzlePos, shot.hitGroup == Weapon.HitGroup.HEAD);
+                    if (shot.hitBot.takeDamage(shot.damage, bot.getPosition(), shot.armorPenetration, shot.hitGroup)) {
                         bot.recordKill();
                         if (respawnMode) {
                             shot.hitBot.setRespawnTimer(2.4);
                         }
-                        addKillFeed(bot.getName(), bot.isAlly() ? "M4A1-S" : "AK-47",
-                                shot.hitBot.getName(), false, false);
+                        addKillFeed(bot.getName(), botGun, shot.hitBot.getName(), shot.hitGroup == Weapon.HitGroup.HEAD, false);
+                        maybeDropBotWeapon(shot.hitBot);
                     }
                 } else {
                     spawnHitParticles(shot.endPos, new Vec3(0, 1, 0), 0xE2C48E, 4);
@@ -1909,7 +1966,8 @@ public class Engine extends JPanel implements Runnable {
             streakBannerTimer = 3.6;
         }
 
-        if (rng.nextDouble() < 0.48) {
+        maybeDropBotWeapon(victim);
+        if (rng.nextDouble() < 0.30) {
             Vec3.Pickup.Type pt = rng.nextBoolean() ? Vec3.Pickup.Type.MEDKIT : Vec3.Pickup.Type.AMMO_PACK;
             pickups.add(new Vec3.Pickup(pt, new Vec3(victim.getPosition().x, victim.getPosition().y, victim.getPosition().z)));
         }
@@ -1930,7 +1988,7 @@ public class Engine extends JPanel implements Runnable {
             }
             boolean instantUpgrade = (killerType == Weapon.Type.KNIFE || killerType == Weapon.Type.ZEUS);
             int killsInTier = player.getArmsRaceTierKills() + (instantUpgrade ? 2 : 1);
-            if (killsInTier >= 2 && tier < maxTier) {
+            if (killsInTier >= 1 && tier < maxTier) {
                 int nextTier = tier + 1;
                 player.setArmsRaceTier(nextTier);
                 player.setArmsRaceTierKills(0);
@@ -2085,13 +2143,15 @@ public class Engine extends JPanel implements Runnable {
 
     private void performGunshot(Weapon gun) {
         Vec3 eye = player.getEyePosition();
-        Vec3 look = player.getLookDirection();
         Vec3 right = player.getRightVector();
+        // РЕАЛИЗМ 9.0: пуля летит по детерминированному паттерну отдачи CS2 (первый выстрел — идеально в центр)
+        double[] spray = gun.getSprayOffset(Math.floor(gun.getSprayIndex() + 1e-6));
+        Vec3 look = player.getShotDirection(spray[0], spray[1]);
         Vec3 up = right.cross(look).scale(-1.0).normalize();
 
-        boolean moving = player.getHorizontalSpeed() > 1.2;
         boolean airborne = !player.isOnGround();
-        double spread = gun.computeCurrentSpread(moving, player.isSilentWalking(), airborne, player.isCrouching());
+        double speedFrac = player.getHorizontalSpeed() / player.getMaxMoveSpeed();
+        double spread = gun.computeCurrentSpread(speedFrac, airborne, player.isCrouching());
 
         player.applyWeaponRecoilKick(gun.getType());
 
@@ -2111,27 +2171,36 @@ public class Engine extends JPanel implements Runnable {
             return;
         }
 
-        // Выброс латунной 3D-гильзы (кроме электрошокера Zeus x27)!
-        if (settings.decalsAndShells && gun.getType() != Weapon.Type.ZEUS) {
-            double sideSign = settings.leftHandedModel ? -1.0 : 1.0;
-            Vec3 ejectVel = right.scale(sideSign * (2.2 + rng.nextDouble() * 1.4))
-                    .add(0.0, 2.4 + rng.nextDouble() * 1.1, 0.0)
-                    .add(look.scale(-0.6));
-            int shellCol = (gun.getType() == Weapon.Type.XM1014) ? 0xC62828 : 0xE6B84C;
-            shells.add(new Vec3.ShellCasing(
-                    muzzle.x - look.x * 0.25, muzzle.y + 0.04, muzzle.z - look.z * 0.25,
-                    ejectVel.x, ejectVel.y, ejectVel.z, player.getYaw(), shellCol));
-            while (shells.size() > 48) shells.remove(0);
+        // Выброс 3D-гильзы: латунь для винтовок/пистолетов, красная пластиковая гильза 12 калибра у дробовиков
+        if (settings.decalsAndShells && gun.getType() != Weapon.Type.ZEUS && !gun.isShellByShellReload()) {
+            spawnShellCasing(muzzle, look, right, gun.getWeaponClass() == Weapon.WeaponClass.SHOTGUN ? 0xC62828 : 0xE6B84C);
         }
 
         int pellets = gun.getPelletsPerShot();
         boolean anyPelletHit = false;
         boolean anyHeadshot = false;
+        boolean anyHelmetDink = false;
+        // Дробь по одной цели суммируется в одну цифру урона (как в CS2)
+        java.util.HashMap<Bot, int[]> pelletDamage = new java.util.HashMap<>();
+        java.util.HashMap<Bot, Bot.HitResult> pelletHit = new java.util.HashMap<>();
+        java.util.HashMap<Bot, Boolean> pelletWallbang = new java.util.HashMap<>();
+        Vec3 shotDirForFx = look;
 
         for (int p = 0; p < pellets; p++) {
-            double sx = rng.nextGaussian() * spread;
-            double sy = rng.nextGaussian() * spread;
-            Vec3 shotDir = look.add(right.scale(sx)).add(up.scale(sy)).normalize();
+            Vec3 shotDir;
+            if (pellets > 1) {
+                // Фиксированный разлёт дроби CS2 (кольцо+центр) + небольшой случайный шум
+                double ang = (p / (double) pellets) * Math.PI * 2.0 + 0.4;
+                double ring = (p == 0) ? 0.0 : (p % 2 == 0 ? 1.0 : 0.55);
+                double sx = Math.cos(ang) * ring * spread + rng.nextGaussian() * spread * 0.30;
+                double sy = Math.sin(ang) * ring * spread + rng.nextGaussian() * spread * 0.30;
+                shotDir = look.add(right.scale(sx)).add(up.scale(sy)).normalize();
+            } else {
+                double sx = rng.nextGaussian() * spread;
+                double sy = rng.nextGaussian() * spread;
+                shotDir = look.add(right.scale(sx)).add(up.scale(sy)).normalize();
+            }
+            shotDirForFx = shotDir;
 
             double maxRange = gun.getMaxRange();
             Vec3.RayHit wallHit = map.raycast(eye, shotDir, maxRange);
@@ -2141,6 +2210,7 @@ public class Engine extends JPanel implements Runnable {
             Bot hitBot = null;
             Bot.HitResult bestBotHit = null;
             boolean penetratedWallbang = false;
+            double penetrationKeep = 1.0;
             boolean hitHelicopter = false;
 
             // Проверка попадания пули по Боевому Вертолёту-Боссу в небе!
@@ -2169,25 +2239,46 @@ public class Engine extends JPanel implements Runnable {
                 }
             }
 
-            // Механика прострела деревянных ящиков и двойных дверей CS2 (Wallbang)!
-            if (hitBot == null && wallHit != null && gun.canWallbang() && map.isBoxPenetrable(wallHit.box)) {
-                Vec3.RayHit secondWall = map.raycastIgnoringBox(eye, shotDir, maxRange, wallHit.box);
-                double wbMaxDist = (secondWall != null) ? secondWall.distance : maxRange;
-                for (int i = 0; i < bots.size(); i++) {
-                    Bot bot = bots.get(i);
-                    if (bot.isAlly()) continue;
-                    Bot.HitResult hr = bot.intersectShotRay(eye, shotDir, wbMaxDist);
-                    if (hr != null && hr.distance > wallHit.distance && hr.distance < wbMaxDist) {
-                        wbMaxDist = hr.distance;
-                        bestBotHit = hr;
-                        hitBot = bot;
-                        endPoint = hr.point;
-                        penetratedWallbang = true;
+            // Пробитие материалов CS2 9.0: толщина препятствия × пробиваемость материала × мощность калибра (до 2 стен)
+            if (hitBot == null && !hitHelicopter && wallHit != null && gun.canWallbang()) {
+                Vec3.RayHit curWall = wallHit;
+                double power = gun.getPenetrationPower();
+                for (int layer = 0; layer < 2 && curWall != null && curWall.box != null && hitBot == null; layer++) {
+                    double matK = map.getMaterialPenetrability(curWall.box);
+                    if (matK <= 0.0) break;
+                    double thickness = map.getBoxThicknessAlongRay(curWall.box, curWall.point, shotDir);
+                    double allowed = power * matK * 0.35;
+                    if (thickness > allowed) break;
+                    penetrationKeep *= gun.getWallbangDamageFactor() * (1.0 - 0.45 * thickness / allowed);
+                    power *= 0.55;
+                    if (settings.decalsAndShells) {
+                        addBulletDecal(curWall.point, curWall.normal, 0.11, 0x2C2620);
+                        spawnHitParticles(curWall.point, curWall.normal, materialDustColor(curWall.box), 5);
+                        Vec3 exitPt = curWall.point.add(shotDir.scale(thickness + 0.01));
+                        addBulletDecal(exitPt, shotDir, 0.14, 0x231E1A); // выходное отверстие крупнее
                     }
-                }
-                if (penetratedWallbang && settings.decalsAndShells) {
-                    addBulletDecal(wallHit.point, wallHit.normal, 0.11, 0x2C2620);
-                    spawnHitParticles(wallHit.point, wallHit.normal, 0xDEC08E, 5);
+                    Vec3.RayHit nextWall = map.raycastIgnoringBox(eye, shotDir, maxRange, curWall.box);
+                    if (nextWall != null && nextWall.distance <= curWall.distance + 1e-3) nextWall = null;
+                    double segMax = (nextWall != null) ? nextWall.distance : maxRange;
+                    for (int i = 0; i < bots.size(); i++) {
+                        Bot bot = bots.get(i);
+                        if (bot.isAlly()) continue;
+                        Bot.HitResult hr = bot.intersectShotRay(eye, shotDir, segMax);
+                        if (hr != null && hr.distance > curWall.distance && hr.distance < segMax) {
+                            segMax = hr.distance;
+                            bestBotHit = hr;
+                            hitBot = bot;
+                            endPoint = hr.point;
+                            penetratedWallbang = true;
+                        }
+                    }
+                    if (hitBot == null) {
+                        endPoint = (nextWall != null) ? nextWall.point : eye.add(shotDir.scale(maxRange));
+                        if (nextWall != null && settings.decalsAndShells) {
+                            addBulletDecal(nextWall.point, nextWall.normal, 0.10, 0x2C2620);
+                        }
+                    }
+                    curWall = nextWall;
                 }
             }
 
@@ -2195,7 +2286,7 @@ public class Engine extends JPanel implements Runnable {
             for (int i = 0; i < smokeClouds.size(); i++) {
                 Vec3.SmokeCloud sc = smokeClouds.get(i);
                 if (sc.blocksSegment(eye, endPoint)) {
-                    sc.bulletHoleTimer = (gun.getType() == Weapon.Type.AWP) ? 0.95 : 0.32;
+                    sc.bulletHoleTimer = (gun.getWeaponClass() == Weapon.WeaponClass.SNIPER) ? 0.95 : 0.32;
                 }
             }
 
@@ -2207,51 +2298,62 @@ public class Engine extends JPanel implements Runnable {
                 tracers.add(new Vec3.Tracer(mid1, mid2, 0xDCF9FF, 0.18));
                 tracers.add(new Vec3.Tracer(mid2, endPoint, 0x52F6FF, 0.18));
                 spawnHitParticles(endPoint, shotDir.scale(-1.0), 0x48F5FF, 12);
-            } else {
+            } else if (pellets == 1 || p % 3 == 0) {
                 int tracerCol = gun.isSilenced() ? 0xB8E4FF : 0xFFE37E;
-                tracers.add(new Vec3.Tracer(muzzle, endPoint, tracerCol, gun.getType() == Weapon.Type.AWP ? 0.14 : 0.075));
+                tracers.add(new Vec3.Tracer(muzzle, endPoint, tracerCol, gun.getWeaponClass() == Weapon.WeaponClass.SNIPER ? 0.14 : 0.075));
             }
 
             if (hitBot != null && bestBotHit != null) {
                 anyPelletHit = true;
                 if (bestBotHit.headshot) anyHeadshot = true;
-
-                int baseDmg = bestBotHit.headshot ? gun.getHeadDamage() : gun.getBodyDamage();
-                double falloff = (gun.getType() == Weapon.Type.AWP || gun.getType() == Weapon.Type.ZEUS)
-                        ? 1.0
-                        : Math.max(0.65, 1.0 - bestBotHit.distance / 145.0);
-                double wbFactor = penetratedWallbang ? gun.getWallbangDamageFactor() : 1.0;
-                int finalDamage = Math.max(1, (int) Math.round(baseDmg * falloff * wbFactor));
-
-                if (settings.showDamageNumbers) {
-                    damagePopups.add(new DamagePopup(bestBotHit.point.add(0, 0.25, 0), finalDamage, bestBotHit.headshot));
-                }
-
-                boolean killed = hitBot.takeDamage(finalDamage, player.getPosition());
-                int particleColor = (gun.getType() == Weapon.Type.ZEUS) ? 0x48F5FF
-                        : (bestBotHit.headshot ? 0xFFAA22 : 0xDC2626);
-                spawnHitParticles(bestBotHit.point, shotDir.scale(-1.0), particleColor, bestBotHit.headshot ? 10 : 6);
-
-                if (killed) {
-                    String wTag = gun.getDisplayName() + (penetratedWallbang ? " • ПРОСТРЕЛ" : "");
-                    int reward = hitBot.getArchetype() == Bot.Archetype.JUGGERNAUT ? 1000 : gun.getKillReward();
-                    onBotKilledByPlayer(hitBot, wTag, bestBotHit.headshot, reward, gun.getType());
+                double raw = gun.computeRawHitDamage(bestBotHit.group, bestBotHit.distance) * penetrationKeep;
+                if (bestBotHit.headshot && hitBot.hasHelmet() && hitBot.getArmor() > 0 && gun.getArmorPenetration() < 1.0) anyHelmetDink = true;
+                int[] acc = pelletDamage.get(hitBot);
+                if (acc == null) { acc = new int[1]; pelletDamage.put(hitBot, acc); }
+                acc[0] += (int) Math.round(raw);
+                Bot.HitResult prev = pelletHit.get(hitBot);
+                if (prev == null || bestBotHit.group.multiplier > prev.group.multiplier) pelletHit.put(hitBot, bestBotHit);
+                if (penetratedWallbang) pelletWallbang.put(hitBot, Boolean.TRUE);
+                if (gun.getType() == Weapon.Type.ZEUS) {
+                    spawnHitParticles(bestBotHit.point, shotDir.scale(-1.0), 0x48F5FF, 10);
+                } else {
+                    spawnBloodImpact(bestBotHit.point, eye, bestBotHit.headshot);
                 }
             } else if (hitHelicopter && bossHelicopter != null && bossHelicopter.isAlive()) {
                 anyPelletHit = true;
                 int heliDmg = Math.max(8, gun.getBodyDamage());
                 if (gun.getType() == Weapon.Type.AWP) heliDmg = 210;
-                else if (gun.getType() == Weapon.Type.M249) heliDmg = 46;
+                else if (gun.getWeaponClass() == Weapon.WeaponClass.MACHINE_GUN) heliDmg = 46;
                 spawnHitParticles(endPoint, shotDir.scale(-1.0), 0xFFB838, 7);
                 damageBossHelicopter(heliDmg, gun.getDisplayName(), endPoint);
-            } else if (wallHit != null) {
-                spawnHitParticles(wallHit.point, wallHit.normal, 0xE4C896, pellets > 1 ? 3 : 7);
+            } else if (wallHit != null && !penetratedWallbang) {
+                int dust = materialDustColor(wallHit.box);
+                spawnHitParticles(wallHit.point, wallHit.normal, dust, pellets > 1 ? 2 : 7);
                 if (p == 0) {
-                    spawnHitParticles(wallHit.point, wallHit.normal, 0xFFD56B, 3);
+                    spawnHitParticles(wallHit.point, wallHit.normal, 0xFFD56B, 3); // искры
                 }
-                if (settings.decalsAndShells) {
-                    addBulletDecal(wallHit.point, wallHit.normal, 0.11, 0x2C2620);
+                if (settings.decalsAndShells && (pellets == 1 || p % 2 == 0)) {
+                    addBulletDecal(wallHit.point, wallHit.normal, pellets > 1 ? 0.07 : 0.11, 0x2C2620);
                 }
+            }
+        }
+
+        // Применение накопленного урона: зона попадания × броня цели (бронепробитие ствола) × дальность × пробитие
+        for (java.util.Map.Entry<Bot, int[]> e : pelletDamage.entrySet()) {
+            Bot hitBot = e.getKey();
+            if (!hitBot.isAlive()) continue;
+            Bot.HitResult hr = pelletHit.get(hitBot);
+            int raw = Math.max(1, e.getValue()[0]);
+            boolean wb = pelletWallbang.containsKey(hitBot);
+            int shown = hitBot.previewDamage(raw, gun.getArmorPenetration(), hr.group);
+            if (settings.showDamageNumbers) {
+                damagePopups.add(new DamagePopup(hr.point.add(0, 0.25, 0), shown, hr.headshot));
+            }
+            boolean killed = hitBot.takeDamage(raw, player.getPosition(), gun.getArmorPenetration(), hr.group);
+            if (killed) {
+                String wTag = gun.getDisplayName() + (wb ? " • ПРОСТРЕЛ" : "");
+                int reward = hitBot.getArchetype() == Bot.Archetype.JUGGERNAUT ? 1000 : gun.getKillReward();
+                onBotKilledByPlayer(hitBot, wTag, hr.headshot, reward, gun.getType());
             }
         }
 
@@ -2259,11 +2361,159 @@ public class Engine extends JPanel implements Runnable {
         if (anyPelletHit) {
             hitMarkerTimer = 0.16;
             hitMarkerHeadshot = anyHeadshot;
-            soundSystem.playHitMarker(anyHeadshot);
+            if (anyHelmetDink && !anyHeadshotKill(pelletDamage)) soundSystem.playHelmetDink();
+            else soundSystem.playHitMarker(anyHeadshot);
         }
 
         if (gun.getMagAmmo() == 0 && gun.getReserveAmmo() > 0) {
             if (gun.startReload()) soundSystem.playReload();
+        }
+    }
+
+    private boolean anyHeadshotKill(java.util.Map<Bot, int[]> hits) {
+        for (Bot b : hits.keySet()) if (!b.isAlive()) return true;
+        return false;
+    }
+
+    private void spawnShellCasing(Vec3 muzzle, Vec3 look, Vec3 right, int shellCol) {
+        double sideSign = settings.leftHandedModel ? -1.0 : 1.0;
+        Vec3 ejectVel = right.scale(sideSign * (2.2 + rng.nextDouble() * 1.4))
+                .add(0.0, 2.4 + rng.nextDouble() * 1.1, 0.0)
+                .add(look.scale(-0.6));
+        shells.add(new Vec3.ShellCasing(
+                muzzle.x - look.x * 0.25, muzzle.y + 0.04, muzzle.z - look.z * 0.25,
+                ejectVel.x, ejectVel.y, ejectVel.z, player.getYaw(), shellCol));
+        while (shells.size() > 48) shells.remove(0);
+    }
+
+    /** Цвет пыли/щепы при попадании зависит от материала поверхности. */
+    private int materialDustColor(Vec3.Box b) {
+        if (b == null) return 0xC8B48A;
+        switch (b.textureId) {
+            case Renderer3D.TEX_CRATE_WOOD:     return 0xB98A52;
+            case Renderer3D.TEX_METAL_DOOR:
+            case Renderer3D.TEX_NUKE_PANEL:     return 0xFFE08A;
+            case Renderer3D.TEX_CONCRETE:
+            case Renderer3D.TEX_NUKE_FLOOR:     return 0xA8A8A4;
+            case Renderer3D.TEX_MIRAGE_PLASTER:
+            case Renderer3D.TEX_INFERNO_STUCCO: return 0xE8DCC4;
+            case Renderer3D.TEX_WATER:          return 0x9CCCE8;
+            default:                            return 0xE4C896;
+        }
+    }
+
+    /** Реалистичное попадание по телу: брызги крови + кровавое пятно на стене/полу позади цели. */
+    private void spawnBloodImpact(Vec3 hitPoint, Vec3 shooterPos, boolean headshot) {
+        Vec3 dir = hitPoint.sub(shooterPos).normalize();
+        spawnHitParticles(hitPoint, dir, 0x9E1010, headshot ? 12 : 7);
+        spawnHitParticles(hitPoint, dir.scale(-0.4), 0x6E0A0A, headshot ? 5 : 3);
+        if (!settings.decalsAndShells || !settings.bloodDecals) return;
+        Vec3.RayHit behind = map.raycast(hitPoint.add(dir.scale(0.4)), dir, 3.2);
+        if (behind != null) {
+            decals.add(new Vec3.Decal(behind.point, behind.normal, headshot ? 0.42 : 0.30, 0x5A0808, 30.0));
+        } else {
+            Vec3.RayHit floor = map.raycast(hitPoint, new Vec3(dir.x * 0.4, -1.0, dir.z * 0.4).normalize(), 2.6);
+            if (floor != null) decals.add(new Vec3.Decal(floor.point, floor.normal, 0.34, 0x4E0606, 30.0));
+        }
+        while (decals.size() > 90) decals.remove(0);
+    }
+
+    private static double distancePointToSegment(Vec3 p, Vec3 a, Vec3 b) {
+        Vec3 ab = b.sub(a);
+        double len2 = ab.dot(ab);
+        if (len2 < 1e-9) return p.dist(a);
+        double t = Math.max(0.0, Math.min(1.0, p.sub(a).dot(ab) / len2));
+        return p.dist(a.add(ab.scale(t)));
+    }
+
+    // ============================ ВЫПАВШЕЕ ОРУЖИЕ (CS2 9.0) ============================
+    private static final class DroppedWeapon {
+        final Weapon.Type type;
+        final Vec3 pos;
+        final double yaw;
+        final int mag, reserve;
+        double life = 40.0;
+        DroppedWeapon(Weapon.Type type, Vec3 pos, double yaw, int mag, int reserve) {
+            this.type = type; this.pos = pos.copy(); this.yaw = yaw; this.mag = mag; this.reserve = reserve;
+        }
+    }
+    private final List<DroppedWeapon> droppedWeapons = new ArrayList<>();
+    private String lastKillerInfo = null;
+
+    private void maybeDropBotWeapon(Bot victim) {
+        Weapon.Type t = victim.getWeaponType();
+        if (t == null || t == Weapon.Type.KNIFE || t == Weapon.Type.ZEUS) return;
+        Weapon proto = Weapon.prototype(t);
+        Vec3 p = victim.getPosition();
+        double floorY = map.getSupportingFloorY(p.x, p.z, 0.2, p.y + 0.5);
+        droppedWeapons.add(new DroppedWeapon(t, new Vec3(p.x + (rng.nextDouble() - 0.5) * 0.6, floorY, p.z + (rng.nextDouble() - 0.5) * 0.6),
+                rng.nextDouble() * Math.PI * 2.0, Math.max(1, proto.getMaxMagAmmo() / 2 + rng.nextInt(Math.max(1, proto.getMaxMagAmmo() / 2))),
+                proto.getMaxMagAmmo() * 2));
+        while (droppedWeapons.size() > 14) droppedWeapons.remove(0);
+    }
+
+    private DroppedWeapon findNearbyDroppedWeapon() {
+        if (!player.isAlive()) return null;
+        DroppedWeapon best = null;
+        double bestD = 1.75;
+        Vec3 pp = player.getPosition();
+        for (DroppedWeapon dw : droppedWeapons) {
+            double d = Math.hypot(dw.pos.x - pp.x, dw.pos.z - pp.z);
+            if (d < bestD && Math.abs(dw.pos.y - pp.y) < 1.4) { bestD = d; best = dw; }
+        }
+        return best;
+    }
+
+    /** [E] — подобрать оружие с земли: текущий ствол этого слота падает на его место (как в CS2). */
+    private boolean tryPickupDroppedWeapon() {
+        // Приоритет как в CS2: рядом с заложенной C4 клавиша E — это обезвреживание, а не подбор
+        if (plantedC4 != null && player.isAlive() && player.getPosition().dist(plantedC4.pos) < 2.95) return false;
+        DroppedWeapon dw = findNearbyDroppedWeapon();
+        if (dw == null) return false;
+        Weapon proto = Weapon.prototype(dw.type);
+        int slot = proto.getSlotNumber() - 1;
+        Weapon old = player.getWeapons()[slot];
+        if (old != null && old.getType() == dw.type) {
+            old.setAmmoState(old.getMagAmmo(), old.getReserveAmmo() + dw.mag + dw.reserve);
+        } else {
+            if (old != null && old.getType() != Weapon.Type.KNIFE && old.getType() != Weapon.Type.ZEUS) {
+                Vec3 pp = player.getPosition();
+                droppedWeapons.add(new DroppedWeapon(old.getType(), new Vec3(pp.x, dw.pos.y, pp.z), player.getYaw() + 1.2,
+                        old.getMagAmmo(), old.getReserveAmmo()));
+            }
+            player.equipPurchasedWeapon(dw.type);
+            Weapon fresh = player.getWeapons()[slot];
+            fresh.setAmmoState(dw.mag, dw.reserve);
+            player.selectWeaponSlot(slot);
+        }
+        droppedWeapons.remove(dw);
+        soundSystem.playShellLoad();
+        streakBannerText = "ПОДОБРАНО: " + proto.getDisplayName() + "  (" + dw.mag + " / " + dw.reserve + ")";
+        streakBannerTimer = 1.4;
+        return true;
+    }
+
+    private void updateDroppedWeapons(double dt) {
+        for (Iterator<DroppedWeapon> it = droppedWeapons.iterator(); it.hasNext(); ) {
+            DroppedWeapon dw = it.next();
+            dw.life -= dt;
+            if (dw.life <= 0.0) it.remove();
+        }
+    }
+
+    private void renderDroppedWeapons() {
+        for (DroppedWeapon dw : droppedWeapons) {
+            Weapon.WeaponClass wc = Weapon.classOf(dw.type);
+            double len = (wc == Weapon.WeaponClass.PISTOL) ? 0.22 : (wc == Weapon.WeaponClass.SMG ? 0.48 : (wc == Weapon.WeaponClass.SNIPER ? 1.10 : 0.86));
+            double sy = Math.sin(dw.yaw), cy = Math.cos(dw.yaw);
+            int body = (dw.type == Weapon.Type.AK47) ? 0x8C4C26 : (dw.type == Weapon.Type.AUG ? 0x55603E : 0x2B3138);
+            double y = dw.pos.y + 0.035;
+            renderer.drawOrientedWorldBox(dw.pos.x, y, dw.pos.z, 0.05, 0.06, len * 0.55, dw.yaw, 0.0, Renderer3D.TEX_SOLID, body);
+            renderer.drawOrientedWorldBox(dw.pos.x - sy * len * 0.36, y - 0.005, dw.pos.z - cy * len * 0.36, 0.045, 0.05, len * 0.22, dw.yaw, 0.0, Renderer3D.TEX_SOLID, 0x1E2228);
+            renderer.drawOrientedWorldCylinder(dw.pos.x + sy * len * 0.40, y + 0.01, dw.pos.z + cy * len * 0.40, 0.014, len * 0.32, dw.yaw, 0.0, 8, 0x1A1D22);
+            if (wc != Weapon.WeaponClass.PISTOL) {
+                renderer.drawOrientedWorldBox(dw.pos.x + cy * 0.06, y, dw.pos.z - sy * 0.06, 0.12, 0.035, 0.05, dw.yaw, 0.0, Renderer3D.TEX_SOLID, 0x30353C);
+            }
         }
     }
 
@@ -2819,6 +3069,7 @@ public class Engine extends JPanel implements Runnable {
                 renderer.drawOrientedWorldBox(cp.x, cp.y + 0.20, cp.z, 0.12, 0.12, 0.12, 0.0, 0.0, Renderer3D.TEX_SOLID, 0xFF2B22);
             }
         }
+        renderDroppedWeapons();
         for (int i = 0; i < pickups.size(); i++) {
             Vec3.Pickup pk = pickups.get(i);
             double py = pk.pos.y + 0.22 + Math.sin(pk.bobPhase) * 0.06;
@@ -3138,6 +3389,157 @@ public class Engine extends JPanel implements Runnable {
                 g.drawLine(x + 62, cy + 1, x + 72, cy + 4);
                 break;
             }
+            case M4A4: {
+                g.fillRect(x + 2, cy - 2, 16, 8);
+                g.fillRect(x + 18, cy - 5, 34, 9);
+                g.fillRect(x + 52, cy - 4, 20, 6);
+                g.fillRect(x + 72, cy - 2, 14, 3);
+                g.fillRect(x + 84, cy - 3, 4, 5);
+                g.fillPolygon(new int[]{x + 25, x + 31, x + 28, x + 22}, new int[]{cy + 4, cy + 4, cy + 14, cy + 14}, 4);
+                g.setColor(accentCol);
+                g.fillPolygon(new int[]{x + 39, x + 46, x + 47, x + 40}, new int[]{cy + 4, cy + 4, cy + 16, cy + 16}, 4);
+                g.fillRect(x + 26, cy - 9, 8, 4);
+                break;
+            }
+            case FAMAS: {
+                g.fillRect(x + 4, cy - 5, 56, 10);
+                g.fillRect(x + 60, cy - 2, 20, 3);
+                g.fillPolygon(new int[]{x + 40, x + 46, x + 43, x + 37}, new int[]{cy + 5, cy + 5, cy + 15, cy + 15}, 4);
+                g.setColor(accentCol);
+                g.fillRect(x + 12, cy - 11, 44, 3);
+                g.fillRect(x + 14, cy - 9, 3, 4);
+                g.fillRect(x + 52, cy - 9, 3, 4);
+                g.fillRect(x + 20, cy + 5, 8, 11);
+                break;
+            }
+            case GALIL: {
+                g.drawLine(x + 2, cy - 1, x + 18, cy - 1);
+                g.drawLine(x + 2, cy + 5, x + 18, cy + 5);
+                g.fillRect(x + 2, cy - 2, 3, 9);
+                g.fillRect(x + 18, cy - 4, 34, 8);
+                g.fillRect(x + 52, cy - 3, 30, 3);
+                g.fillRect(x + 22, cy - 9, 4, 5);
+                g.fillPolygon(new int[]{x + 23, x + 29, x + 25, x + 19}, new int[]{cy + 4, cy + 4, cy + 14, cy + 14}, 4);
+                g.setColor(accentCol);
+                g.fillPolygon(new int[]{x + 38, x + 45, x + 52, x + 44}, new int[]{cy + 4, cy + 4, cy + 17, cy + 18}, 4);
+                g.fillRect(x + 52, cy - 4, 18, 6);
+                break;
+            }
+            case SG553: {
+                g.fillPolygon(new int[]{x + 2, x + 18, x + 18, x + 2}, new int[]{cy - 4, cy - 3, cy + 6, cy + 9}, 4);
+                g.fillRect(x + 18, cy - 4, 34, 9);
+                g.fillRect(x + 52, cy - 3, 30, 3);
+                g.fillPolygon(new int[]{x + 24, x + 30, x + 27, x + 21}, new int[]{cy + 5, cy + 5, cy + 15, cy + 15}, 4);
+                g.setColor(accentCol);
+                g.fillRoundRect(x + 24, cy - 12, 24, 6, 3, 3);
+                g.fillRect(x + 50, cy - 4, 18, 7);
+                g.fillPolygon(new int[]{x + 36, x + 43, x + 48, x + 41}, new int[]{cy + 5, cy + 5, cy + 16, cy + 16}, 4);
+                break;
+            }
+            case AUG: {
+                g.fillRoundRect(x + 2, cy - 5, 52, 12, 6, 6);
+                g.fillRect(x + 54, cy - 2, 28, 3);
+                g.fillRect(x + 50, cy + 5, 5, 10);
+                g.setColor(accentCol);
+                g.fillRoundRect(x + 26, cy - 12, 26, 6, 3, 3);
+                g.drawRoundRect(x + 30, cy + 5, 16, 9, 4, 4);
+                g.fillRect(x + 14, cy + 6, 8, 12);
+                break;
+            }
+            case SSG08: {
+                g.fillPolygon(new int[]{x + 1, x + 22, x + 22, x + 1}, new int[]{cy - 1, cy - 3, cy + 6, cy + 8}, 4);
+                g.fillRect(x + 22, cy - 3, 32, 6);
+                g.fillRect(x + 54, cy - 2, 38, 2);
+                g.fillRect(x + 32, cy + 3, 6, 5);
+                g.setColor(accentCol);
+                g.fillRect(x + 28, cy - 9, 24, 4);
+                g.fillRect(x + 25, cy - 10, 4, 6);
+                g.fillRect(x + 50, cy - 10, 5, 6);
+                break;
+            }
+            case MAC10: {
+                g.drawLine(x + 14, cy - 2, x + 28, cy - 2);
+                g.drawLine(x + 14, cy + 2, x + 28, cy + 2);
+                g.fillRect(x + 28, cy - 6, 26, 11);
+                g.fillRect(x + 54, cy - 2, 10, 3);
+                g.fillRect(x + 32, cy + 5, 7, 8);
+                g.setColor(accentCol);
+                g.fillRect(x + 33, cy + 13, 6, 8);
+                break;
+            }
+            case UMP45: {
+                g.fillRect(x + 6, cy - 3, 18, 7);
+                g.fillRect(x + 24, cy - 5, 38, 10);
+                g.fillRect(x + 62, cy - 2, 12, 3);
+                g.fillPolygon(new int[]{x + 28, x + 34, x + 31, x + 25}, new int[]{cy + 5, cy + 5, cy + 15, cy + 15}, 4);
+                g.setColor(accentCol);
+                g.fillPolygon(new int[]{x + 42, x + 48, x + 50, x + 44}, new int[]{cy + 5, cy + 5, cy + 17, cy + 17}, 4);
+                g.fillRect(x + 26, cy - 8, 32, 3);
+                break;
+            }
+            case P90: {
+                g.fillRoundRect(x + 8, cy - 6, 56, 14, 8, 8);
+                g.fillRect(x + 64, cy - 2, 10, 3);
+                g.setColor(new Color(0, 0, 0, 0));
+                g.setColor(accentCol);
+                g.fillRect(x + 18, cy - 10, 42, 4);
+                g.fillRect(x + 44, cy - 15, 10, 5);
+                g.drawOval(x + 30, cy + 2, 10, 7);
+                break;
+            }
+            case NOVA: {
+                g.fillPolygon(new int[]{x + 3, x + 22, x + 22, x + 5}, new int[]{cy + 1, cy - 3, cy + 5, cy + 11}, 4);
+                g.fillRect(x + 22, cy - 4, 24, 8);
+                g.fillRect(x + 46, cy - 4, 42, 3);
+                g.fillRect(x + 46, cy, 34, 3);
+                g.setColor(accentCol);
+                g.fillRect(x + 54, cy - 1, 16, 6);
+                g.fillRect(x + 86, cy - 6, 2, 2);
+                break;
+            }
+            case NEGEV: {
+                g.fillRect(x + 2, cy - 2, 16, 9);
+                g.fillRect(x + 18, cy - 6, 38, 12);
+                g.fillRect(x + 56, cy - 4, 18, 6);
+                g.fillRect(x + 74, cy - 2, 14, 3);
+                g.fillRect(x + 24, cy + 6, 6, 10);
+                g.setColor(accentCol);
+                g.fillRect(x + 34, cy + 6, 18, 14);
+                g.fillRect(x + 30, cy - 11, 18, 3);
+                g.drawLine(x + 70, cy + 2, x + 64, cy + 13);
+                g.drawLine(x + 72, cy + 2, x + 78, cy + 13);
+                break;
+            }
+            case USP_S: {
+                g.fillRect(x + 22, cy - 6, 32, 7);
+                g.fillPolygon(new int[]{x + 22, x + 31, x + 27, x + 18}, new int[]{cy + 1, cy + 1, cy + 14, cy + 14}, 4);
+                g.setColor(accentCol);
+                g.fillRoundRect(x + 54, cy - 6, 30, 7, 3, 3);
+                break;
+            }
+            case P250: {
+                g.fillRect(x + 28, cy - 6, 32, 7);
+                g.fillPolygon(new int[]{x + 28, x + 37, x + 33, x + 24}, new int[]{cy + 1, cy + 1, cy + 13, cy + 13}, 4);
+                g.setColor(accentCol);
+                g.fillRect(x + 46, cy - 6, 14, 3);
+                break;
+            }
+            case FIVESEVEN: {
+                g.fillPolygon(new int[]{x + 26, x + 66, x + 64, x + 26}, new int[]{cy - 6, cy - 6, cy, cy}, 4);
+                g.fillPolygon(new int[]{x + 26, x + 35, x + 31, x + 22}, new int[]{cy, cy, cy + 14, cy + 14}, 4);
+                g.setColor(accentCol);
+                g.fillRect(x + 44, cy, 16, 4);
+                break;
+            }
+            case TEC9: {
+                g.fillRect(x + 22, cy - 6, 44, 9);
+                g.fillRect(x + 66, cy - 3, 8, 4);
+                g.fillPolygon(new int[]{x + 24, x + 32, x + 28, x + 20}, new int[]{cy + 3, cy + 3, cy + 14, cy + 14}, 4);
+                g.setColor(accentCol);
+                g.fillRect(x + 40, cy + 3, 6, 15);
+                g.fillRect(x + 54, cy - 7, 12, 2);
+                break;
+            }
             case KNIFE:
             default: {
                 // Изогнутый коготь Керамбита с кольцом под палец
@@ -3222,7 +3624,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setColor(Color.WHITE);
         g.setFont(uiFont("SansSerif", Font.BOLD, 21));
-        g.drawString("CS-2 JAVA 8.0", 82, 33);
+        g.drawString("CS-2 JAVA 9.0", 82, 33);
         g.setColor(new Color(102, 222, 255));
         g.setFont(uiFont("SansSerif", Font.BOLD, 10));
         g.drawString("SOURCE 2 • 68×68 М", 83, 50);
@@ -3525,29 +3927,25 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         g.setColor(new Color(185, 198, 216));
-        g.drawString("ОРУЖИЕ НА 3D-ПОДИУМЕ (11 МОДЕЛЕЙ):", 28, 86);
+        g.drawString("ОРУЖИЕ НА 3D-ПОДИУМЕ (" + armoryShowcaseWeapons.length + " МОДЕЛЕЙ):", 28, 86);
 
         int wx = 28, wy = 94;
-        int cols = 4;
+        int cols = 5;
         int btnW = (panelW - 56 - (cols - 1) * 6) / cols;
         for (int i = 0; i < armoryShowcaseWeapons.length; i++) {
             final int idx = i;
             Weapon w = armoryShowcaseWeapons[i];
             int col = i % cols;
             int row = i / cols;
-            Rectangle r = new Rectangle(wx + col * (btnW + 6), wy + row * 38, btnW, 32);
+            Rectangle r = new Rectangle(wx + col * (btnW + 6), wy + row * 30, btnW, 26);
             boolean sel = (armoryWeaponIdx == i);
-            String label = w.getType() == Weapon.Type.DEAGLE ? "Deagle"
-                    : (w.getType() == Weapon.Type.M249 ? "M249"
-                    : (w.getType() == Weapon.Type.GLOCK ? "Glock"
-                    : (w.getType() == Weapon.Type.ZEUS ? "Zeus"
-                    : (w.getType() == Weapon.Type.KNIFE ? "Керамбит" : w.getDisplayName()))));
+            String label = w.getShortName();
             addMenuButton(g, r, label,
                     sel ? new Color(232, 156, 38) : new Color(30, 42, 60), sel,
                     () -> armoryWeaponIdx = idx);
         }
 
-        int sy = 224;
+        int sy = wy + ((armoryShowcaseWeapons.length + cols - 1) / cols) * 30 + 20;
         g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         g.setColor(new Color(185, 198, 216));
         g.drawString("КОЛЛЕКЦИОННАЯ РАСКРАСКА CS2:", 28, sy);
@@ -3558,7 +3956,7 @@ public class Engine extends JPanel implements Runnable {
             final GameSettings.WeaponSkin sk = allSkins[i];
             boolean active = (settings.weaponSkin == sk);
             Color base = active ? new Color(142, 58, 184) : new Color(26, 36, 52);
-            addMenuButton(g, new Rectangle(28, sy + i * 39, panelW - 56, 33),
+            addMenuButton(g, new Rectangle(28, sy + i * 34, panelW - 56, 29),
                     (active ? "★  " : "    ") + sk.label, base, false, () -> {
                         settings.weaponSkin = sk;
                         settings.save();
@@ -3589,15 +3987,16 @@ public class Engine extends JPanel implements Runnable {
 
         String statsLine = cw.isMelee()
                 ? "Изогнутый клинок Керамбит  •  ЛКМ: 55  •  Удар ПКМ: 92 / 155 HS  •  Вращение на кольце [F]!"
-                : String.format("Урон (тело / голова): %d / %d   •   Стоимость: $%d   •   Награда за фраг: $%d",
-                        cw.getBodyDamage(), cw.getHeadDamage(), cw.getPrice(), cw.getKillReward());
+                : String.format("Урон %d / HS %d  •  %d выстр/мин  •  Броня %.0f%%  •  %d+%d патр.  •  $%d / фраг $%d",
+                        cw.getBodyDamage(), cw.getHeadDamage(), cw.getRoundsPerMinute(), cw.getArmorPenetration() * 100.0,
+                        cw.getMaxMagAmmo(), cw.getReserveAmmo(), cw.getPrice(), cw.getKillReward());
         drawCenteredText(g, statsLine, infoX + infoW / 2, infoY + 56,
                 uiFont("SansSerif", Font.PLAIN, 13), new Color(226, 234, 246));
 
         // 3 визуальные шкалы характеристик оружия
-        double dmgFrac = Math.min(1.0, cw.getHeadDamage() / 220.0);
-        double penFrac = cw.isMelee() ? 0.35 : Math.min(1.0, cw.getWallbangDamageFactor() + 0.35);
-        double rngFrac = Math.min(1.0, cw.getMaxRange() / 110.0);
+        double dmgFrac = Math.min(1.0, cw.getBaseDamage() * Math.max(1, cw.getPelletsPerShot()) / 240.0 + 0.12);
+        double penFrac = cw.isMelee() ? 0.35 : Math.min(1.0, cw.getArmorPenetration());
+        double rngFrac = cw.isMelee() ? 0.05 : Math.min(1.0, Math.pow(cw.getRangeModifier(), 4.0));
         int barW = (infoW - 96) / 3;
         String[] bNames = {"МОЩНОСТЬ", "ПРОБИТИЕ", "ДАЛЬНОСТЬ"};
         double[] bVals = {dmgFrac, penFrac, rngFrac};
@@ -3637,7 +4036,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 8.0", px + 28, py + 36);
+        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 9.0", px + 28, py + 36);
 
         String engineBadge = String.format("HYPER-TURBO • %d ПОТОКОВ CPU • %d FPS (%.1f мс)",
                 renderer.getWorkerThreads(), currentFps, lastFrameMs);
@@ -3877,49 +4276,63 @@ public class Engine extends JPanel implements Runnable {
                     String.format("%.4f", settings.mouseSensitivity),
                     () -> { settings.mouseSensitivity = Math.max(0.0005, settings.mouseSensitivity - 0.0003); settings.save(); },
                     () -> { settings.mouseSensitivity = Math.min(0.0080, settings.mouseSensitivity + 0.0003); settings.save(); });
-            rowY += 46;
+            rowY += 41;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Инверсия вертикальной оси мыши (Y)",
                     settings.invertMouseY ? "Включена" : "Выключена", () -> {
                 settings.invertMouseY = !settings.invertMouseY;
                 settings.save();
             });
-            rowY += 44;
+            rowY += 39;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Цвет прицела CS2", settings.crosshairColor.label, () -> {
                 int next = (settings.crosshairColor.ordinal() + 1) % GameSettings.CrosshairColor.values().length;
                 settings.crosshairColor = GameSettings.CrosshairColor.values()[next];
                 settings.save();
             });
-            rowY += 44;
+            rowY += 39;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Поведение прицела при стрельбе",
                     settings.dynamicCrosshair ? "Динамический (расширяется)" : "Статический (Киберспорт)", () -> {
                 settings.dynamicCrosshair = !settings.dynamicCrosshair;
                 settings.save();
             });
-            rowY += 44;
+            rowY += 39;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Ведущая рука с оружием (cl_righthand)",
                     settings.leftHandedModel ? "Левая рука" : "Правая рука", () -> {
                 settings.leftHandedModel = !settings.leftHandedModel;
                 settings.save();
             });
-            rowY += 44;
+            rowY += 39;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Всплывающие цифры урона при попадании",
                     settings.showDamageNumbers ? "Показывать" : "Скрыть", () -> {
                 settings.showDamageNumbers = !settings.showDamageNumbers;
                 settings.save();
             });
-            rowY += 44;
+            rowY += 39;
+
+            drawOptionStepperRow(g, listX, rowY, listW, "Реализм: кровь на стенах и полу",
+                    settings.bloodDecals ? "Включено" : "Выключено", () -> {
+                settings.bloodDecals = !settings.bloodDecals;
+                settings.save();
+            });
+            rowY += 39;
+
+            drawOptionStepperRow(g, listX, rowY, listW, "Реализм: урон от падения с высоты",
+                    settings.fallDamage ? "Включено" : "Выключено", () -> {
+                settings.fallDamage = !settings.fallDamage;
+                settings.save();
+            });
+            rowY += 39;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Сложность ИИ ботов", settings.botDifficulty.label, () -> {
                 int next = (settings.botDifficulty.ordinal() + 1) % GameSettings.BotDifficulty.values().length;
                 settings.botDifficulty = GameSettings.BotDifficulty.values()[next];
                 settings.save();
             });
-            rowY += 44;
+            rowY += 39;
 
             drawOptionStepperRow(g, listX, rowY, listW, "Полноэкранный режим окна (F11)",
                     settings.fullscreen ? "Полный экран" : "Оконный режим", this::toggleFullscreenMode);
@@ -3947,6 +4360,13 @@ public class Engine extends JPanel implements Runnable {
             });
             rowY += 50;
 
+            drawOptionStepperRow(g, listX, rowY, listW, "Свист и щелчки пролетающих пуль",
+                    settings.bulletWhizSounds ? "Включено" : "Выключено", () -> {
+                settings.bulletWhizSounds = !settings.bulletWhizSounds;
+                settings.save();
+            });
+            rowY += 50;
+
             drawOptionStepperRow(g, listX, rowY, listW, "Режим HUD-телеметрии FPS и графика времени кадра",
                     settings.telemetryMode.label, () -> {
                 int next = (settings.telemetryMode.ordinal() + 1) % GameSettings.HudTelemetryMode.values().length;
@@ -3956,11 +4376,15 @@ public class Engine extends JPanel implements Runnable {
             });
             rowY += 56;
 
-            drawStudioTelemetryMonitor(g, listX, rowY, listW, 96);
-            rowY += 112;
+            drawStudioTelemetryMonitor(g, listX, rowY, listW, 80);
+            rowY += 92;
 
-            addMenuButton(g, new Rectangle(listX, rowY, 340, 42), "♪  ПРОВЕРИТЬ ЗВУК ВЫСТРЕЛА AK-47",
-                    new Color(48, 118, 178), false, () -> soundSystem.playWeaponShot(Weapon.Type.AK47));
+            final Weapon.Type testType = ARMORY_ORDER[soundTestIdx % ARMORY_ORDER.length];
+            addMenuButton(g, new Rectangle(listX, rowY, 420, 40), "♪  ПРОВЕРИТЬ ЗВУК: " + Weapon.nameOf(testType) + "  (клик — следующий)",
+                    new Color(48, 118, 178), false, () -> {
+                        soundSystem.playWeaponShot(testType);
+                        soundTestIdx = (soundTestIdx + 1) % ARMORY_ORDER.length;
+                    });
         }
 
         String backLabel = settingsOpenedFromGame ? "← СОХРАНИТЬ И ВЕРНУТЬСЯ В БОЙ (ESC)" : "← СОХРАНИТЬ И В ГЛАВНОЕ МЕНЮ (ESC)";
@@ -4107,7 +4531,7 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(245, 194, 72, 175));
         g.drawRoundRect(px, py, pw, ph, 18, 18);
 
-        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 8.0", outW / 2, py + 42,
+        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 9.0", outW / 2, py + 42,
                 uiFont("SansSerif", Font.BOLD, 22), new Color(252, 208, 88));
 
         String[] leftLines = {
@@ -4116,21 +4540,21 @@ public class Engine extends JPanel implements Runnable {
             "• Alt — Тактический рывок (Dash) с импульсом скорости!",
             "• U — Точечный Авиаудар Спецназа (залп 3 ракет с неба)!",
             "• J — Развернуть 3D Авто-Турель • K — Вызвать Вертолёт-Босс",
-            "• B — 3-колоночный Магазин CS2 • F — Осмотр (Керамбит 720°!)",
+            "• B — Магазин CS2 (6 категорий) • F — Осмотр • E — Подобрать",
             "• H — Мгновенная смена скина • L — 3D-Фонарик • Z — Радио",
             "• 4/G: HE • 5/Q: Дым • 6/V: Флешка • 7/X: Молотов • T: Zeus",
-            "• E — Обезвреживание C4 • Y — Цветное 3D-граффити",
+            "• E (удерж.) — Обезвреживание C4 • Y — 3D-граффити",
             "• Пробел (после гибели) — Ускорить раунд ботов CT"
         };
 
         String[] rightLines = {
-            "НОВИНКИ CS-2 JAVA 8.0 (КАРТЫ, МОДЕЛИ И ИНТЕРФЕЙС):",
-            "• 4 огромные карты 68×68 м: Inferno, Dust II, Mirage, Nuke",
-            "• Лестницы, 2-е этажи, балконы, мостки, крыши и техника",
-            "• 3D-модели спецназа SAS / Phoenix + перчатки и часы в руках",
-            "• Blinn-Phong свет: тёплое солнце + холодное небо + блики",
-            "• Матовое стекло Panorama: HUD, Магазин [B], Главное меню",
-            "• Радар с высотами, Плентами A/B и названием зоны карты",
+            "НОВИНКИ CS-2 JAVA 9.0 (ОРУЖИЕ И РЕАЛИЗМ):",
+            "• 26 стволов: +M4A4, FAMAS, Galil, SG 553, AUG, Scout, P90...",
+            "• Паттерны отдачи CS2, точный 1-й выстрел, контр-стрейф",
+            "• Хитбоксы: голова ×4, живот ×1.25, ноги ×0.75 (без брони)",
+            "• Броня/шлем по формуле CS2, бронепробитие и падение урона",
+            "• Пробитие стен по материалу, кровь, урон от падения",
+            "• Боты с личным оружием, перезарядкой; подбор стволов [E]",
             "",
             "СИСТЕМНЫЕ КЛАВИШИ:",
             "• Tab — Счет команд • F5 — Рестарт • F11 — Полный экран"
@@ -4240,23 +4664,26 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(uiFont("Monospaced", Font.BOLD, 13));
         g.setColor(new Color(120, 230, 170));
-        g.drawString("AWP OPTICS • ZOOM " + (zoomLevel == 1 ? "2.8X" : "6.0X") + " (ПКМ)", cx + 22, cy + radius - 26);
+        g.drawString(player.getCurrentWeapon().getShortName().toUpperCase() + " OPTICS • ZOOM " + (zoomLevel == 1 ? "2.8X" : "6.0X") + " (ПКМ)", cx + 22, cy + radius - 26);
     }
 
     private void drawBuyMenuOverlay(Graphics2D g, int outW, int outH) {
-        int bw = Math.min(1040, outW - 44);
-        int bh = Math.min(548, outH - 48);
+        int bw = Math.min(1120, outW - 40);
+        int bh = Math.min(600, outH - 40);
         int bx = outW / 2 - bw / 2;
         int by = outH / 2 - bh / 2;
 
-        // Живое матовое стекло Panorama 8.0: затемнённый размытый бой за спиной + плотная стеклянная карточка
         g.setColor(new Color(7, 11, 18, 150));
         g.fillRect(0, 0, outW, outH);
-        drawFrostedGlassPanel(g, bx, by, bw, bh, 0x0C1220, 178, new Color(92, 232, 148, 150), new Color(92, 232, 148));
+        drawFrostedGlassPanel(g, bx, by, bw, bh, 0x0C1220, 182, new Color(92, 232, 148, 150), new Color(92, 232, 148));
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("МАГАЗИН ВООРУЖЕНИЯ CS-2 JAVA 8.0", bx + 26, by + 38);
+        g.drawString("МАГАЗИН ВООРУЖЕНИЯ CS-2 JAVA 9.0", bx + 26, by + 38);
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
+        g.setColor(new Color(170, 190, 214));
+        g.drawString("Реальные ТТХ CS2: урон, скорострельность, бронепробитие, скорость бега • [1-6] категория → [1-7] ствол • [0/Backspace] назад",
+                bx + 26, by + 58);
 
         boolean freeDm = (settings.gameMode == GameSettings.GameMode.DEATHMATCH);
         String cashStr = freeDm ? "РЕЖИМ DM: $ БЕСПЛАТНО" : ("БАЛАНС: $ " + player.getMoney());
@@ -4268,64 +4695,154 @@ public class Engine extends JPanel implements Runnable {
         g.drawRoundRect(bx + bw - cw - 24, by + 13, cw, 34, 10, 10);
         g.drawString(cashStr, bx + bw - cw - 10, by + 36);
 
-        // 3 КОЛОНКИ КАТЕГОРИЙ CS2 PANORAMA: ВИНТОВКИ | ТЯЖЁЛОЕ ОРУЖИЕ | СНАРЯЖЕНИЕ И ПОДДЕРЖКА
-        int colGap = 16;
-        int colW = (bw - 52 - colGap * 2) / 3;
-        int colY = by + 62;
+        // Левая колонка — категории
+        int tabX = bx + 22, tabY = by + 74, tabW = 228, tabH = 52;
+        Color[] catCols = {new Color(76, 178, 255), new Color(120, 220, 140), new Color(252, 196, 72),
+                new Color(188, 118, 255), new Color(248, 128, 64), new Color(88, 234, 200)};
+        for (int i = 0; i < BUY_CATEGORY_NAMES.length; i++) {
+            final int ci = i;
+            Rectangle tr = new Rectangle(tabX, tabY + i * (tabH + 8), tabW, tabH);
+            boolean sel = (buyCategory == i);
+            boolean hov = tr.contains(mouseClientX, mouseClientY);
+            g.setColor(sel ? new Color(catCols[i].getRed(), catCols[i].getGreen(), catCols[i].getBlue(), 70)
+                    : (hov ? new Color(40, 58, 84, 200) : new Color(20, 30, 46, 170)));
+            g.fillRoundRect(tr.x, tr.y, tr.width, tr.height, 10, 10);
+            g.setColor(catCols[i]);
+            g.fillRoundRect(tr.x, tr.y + 8, 4, tr.height - 16, 4, 4);
+            if (sel) g.drawRoundRect(tr.x, tr.y, tr.width, tr.height, 10, 10);
+            g.setColor(new Color(38, 52, 72));
+            g.fillRoundRect(tr.x + 12, tr.y + 14, 24, 24, 6, 6);
+            drawCenteredText(g, String.valueOf(i + 1), tr.x + 24, tr.y + 31, uiFont("Monospaced", Font.BOLD, 13), new Color(252, 210, 92));
+            g.setFont(uiFont("SansSerif", Font.BOLD, 12));
+            g.setColor(sel ? Color.WHITE : new Color(206, 216, 232));
+            g.drawString(BUY_CATEGORY_NAMES[i], tr.x + 46, tr.y + 24);
+            g.setFont(uiFont("SansSerif", Font.PLAIN, 11));
+            g.setColor(new Color(150, 168, 190));
+            g.drawString(i == 5 ? "гранаты • броня • поддержка" : (BUY_CATEGORIES[i].length + " ед. оружия"), tr.x + 46, tr.y + 40);
+            uiRegisterClickable(tr, () -> { buyCategory = ci; buyCategoryChosen = true; soundSystem.playUiClick(); });
+        }
 
-        // Колонка 1: Винтовки и Пистолеты
-        int c1X = bx + 26;
-        drawBuyColumnHeader(g, c1X, colY, colW, "ВИНТОВКИ И ТОЧНОСТЬ", new Color(76, 178, 255));
-        int y1 = colY + 36;
-        drawBuyCard(g, c1X, y1, colW, "1", "AK-47", "Штурмовая • 142 ур. в голову (Ваншот!)", freeDm ? 0 : 2700, new Color(76, 178, 255),
-                Weapon.Type.AK47, () -> tryPurchaseWeapon(Weapon.Type.AK47)); y1 += 88;
-        drawBuyCard(g, c1X, y1, colW, "2", "M4A1-S", "С глушителем • Кучная стрельба CT", freeDm ? 0 : 2900, new Color(76, 178, 255),
-                Weapon.Type.M4A1S, () -> tryPurchaseWeapon(Weapon.Type.M4A1S)); y1 += 88;
-        drawBuyCard(g, c1X, y1, colW, "3", "AWP Снайперская", "Оптика 2.8x/6x ПКМ • Урон 115/440", freeDm ? 0 : 4750, new Color(188, 118, 255),
-                Weapon.Type.AWP, () -> tryPurchaseWeapon(Weapon.Type.AWP)); y1 += 88;
-        drawBuyCard(g, c1X, y1, colW, "7", "Desert Eagle .50", "Крупный калибр • 168 ур. в голову", freeDm ? 0 : 700, new Color(76, 178, 255),
-                Weapon.Type.DEAGLE, () -> tryPurchaseWeapon(Weapon.Type.DEAGLE));
+        // Правая часть — карточки стволов категории (2 колонки)
+        int gx = tabX + tabW + 18;
+        int gw = bx + bw - 22 - gx;
+        int colGap = 14;
+        int cardW = (gw - colGap) / 2;
+        int cardH = 96;
+        int gy = by + 74;
+        drawBuyColumnHeader(g, gx, gy - 2, gw, BUY_CATEGORY_NAMES[buyCategory] + (buyCategoryChosen ? "  •  НАЖМИТЕ 1-" + Math.max(4, BUY_CATEGORIES[buyCategory].length) : "  •  ВЫБЕРИТЕ КАТЕГОРИЮ 1-6"), catCols[buyCategory]);
+        gy += 34;
+        if (buyCategory == 5) {
+            drawBuyCard(g, gx, gy, cardW, "1", "Пояс HE + Флеш", "Осколочная [G] + Светошумовая [V]", freeDm ? 0 : 400, catCols[5], () -> tryPurchaseUtility(1));
+            drawBuyCard(g, gx + cardW + colGap, gy, cardW, "2", "Дым + Молотов", "Дымовая [Q] + Зажигательная [X]", freeDm ? 0 : 600, catCols[5], () -> tryPurchaseUtility(2));
+            drawBuyCard(g, gx, gy + cardH, cardW, "3", "Кевлар + Шлем + Zeus", "100 HP/AP, шлем от хэдшотов, набор сапёра", freeDm ? 0 : 850, catCols[5], () -> tryPurchaseUtility(3));
+            drawBuyCard(g, gx + cardW + colGap, gy + cardH, cardW, "4", "Турель + Авиаудар", "Полевая 3D-турель [J] + залп ракет [U]", freeDm ? 0 : 1200, catCols[5], () -> tryPurchaseUtility(4));
+            int iy = gy + cardH * 2 + 6;
+            g.setColor(new Color(20, 30, 46, 210));
+            g.fillRoundRect(gx, iy, gw, 70, 10, 10);
+            g.setFont(uiFont("SansSerif", Font.BOLD, 12));
+            g.setColor(new Color(148, 224, 255));
+            g.drawString("ВАШЕ СНАРЯЖЕНИЕ:", gx + 14, iy + 22);
+            g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
+            g.setColor(new Color(224, 232, 244));
+            g.drawString("Броня: " + player.getArmor() + " AP  •  Шлем: " + (player.hasHelmet() ? "ЕСТЬ" : "НЕТ") + "  •  Сапёрный набор: "
+                    + (player.hasDefuseKit() ? "ЕСТЬ" : "НЕТ") + "  •  Турелей [J]: " + player.getSentryCharges() + "  •  Авиаударов [U]: " + player.getAirstrikeCharges(), gx + 14, iy + 44);
+            g.drawString("HE: " + player.getHeGrenades() + "  •  Дым: " + player.getSmokeGrenades() + "  •  Флеш: " + player.getFlashGrenades()
+                    + "  •  Молотов: " + player.getMolotovGrenades(), gx + 14, iy + 62);
+        } else {
+            Weapon.Type[] list = BUY_CATEGORIES[buyCategory];
+            for (int i = 0; i < list.length; i++) {
+                final Weapon.Type t = list[i];
+                Weapon w = Weapon.prototype(t);
+                int cx = gx + (i % 2) * (cardW + colGap);
+                int cy = gy + (i / 2) * cardH;
+                drawWeaponBuyCard(g, cx, cy, cardW, cardH - 10, String.valueOf(i + 1), w, freeDm ? 0 : w.getPrice(), catCols[buyCategory],
+                        () -> tryPurchaseWeapon(t));
+            }
+        }
 
-        // Колонка 2: Тяжёлое оружие и RPG
-        int c2X = c1X + colW + colGap;
-        drawBuyColumnHeader(g, c2X, colY, colW, "ТЯЖЁЛОЕ И ОСАДНОЕ", new Color(248, 158, 56));
-        int y2 = colY + 36;
-        drawBuyCard(g, c2X, y2, colW, "4", "M249 Para (Пулемёт)", "Короб 100 патронов • Подавление волн!", freeDm ? 0 : 5200, new Color(248, 158, 56),
-                Weapon.Type.M249, () -> tryPurchaseWeapon(Weapon.Type.M249)); y2 += 88;
-        drawBuyCard(g, c2X, y2, colW, "5", "RPG-7 Гранатомёт", "3D-ракеты против Вертолёта и толп!", freeDm ? 0 : 4500, new Color(252, 92, 68),
-                Weapon.Type.RPG7, () -> tryPurchaseWeapon(Weapon.Type.RPG7)); y2 += 88;
-        drawBuyCard(g, c2X, y2, colW, "6", "XM1014 Дробовик", "Автоматический • 8 картечин за залп", freeDm ? 0 : 2000, new Color(248, 158, 56),
-                Weapon.Type.XM1014, () -> tryPurchaseWeapon(Weapon.Type.XM1014)); y2 += 88;
-        drawBuyCard(g, c2X, y2, colW, "M", "MP9 Тактический ПП", "Скорострельность 850 в/мин • $600/фраг", freeDm ? 0 : 1250, new Color(248, 158, 56),
-                Weapon.Type.MP9, () -> tryPurchaseWeapon(Weapon.Type.MP9));
-
-        // Колонка 3: Гранаты и Спецсредства CT
-        int c3X = c2X + colW + colGap;
-        drawBuyColumnHeader(g, c3X, colY, colW, "ГРАНАТЫ И ПОДДЕРЖКА CT", new Color(88, 234, 152));
-        int y3 = colY + 36;
-        drawBuyCard(g, c3X, y3, colW, "8", "Полный пояс гранат", "HE [G] + Дым [Q] + Флеш [V] + Молотов [X]", freeDm ? 0 : 500, new Color(88, 234, 152),
-                () -> { tryPurchaseUtility(1); tryPurchaseUtility(2); }); y3 += 88;
-        drawBuyCard(g, c3X, y3, colW, "9", "Броня 100 AP + Zeus", "Полное ХП/Броня + Набор C4 + Шокер [T]", freeDm ? 0 : 850, new Color(88, 234, 152),
-                () -> tryPurchaseUtility(3)); y3 += 88;
-        drawBuyCard(g, c3X, y3, colW, "0", "Турель + Авиаудар", "Полевая 3D-Турель [J] + Залп 3 ракет [U]!", freeDm ? 0 : 1200, new Color(96, 224, 255),
-                () -> tryPurchaseUtility(4)); y3 += 88;
-
-        // Сводка текущего снаряжения внизу 3-й колонки
-        g.setColor(new Color(20, 30, 46, 210));
-        g.fillRoundRect(c3X, y3, colW, 76, 10, 10);
+        // Текущий арсенал игрока
+        int ly = by + bh - 96;
+        g.setColor(new Color(16, 24, 38, 200));
+        g.fillRoundRect(tabX, ly, bw - 44, 40, 10, 10);
         g.setFont(uiFont("SansSerif", Font.BOLD, 12));
-        g.setColor(new Color(148, 224, 255));
-        g.drawString("ВАШ ЗАПАС СПЕЦСРЕДСТВ:", c3X + 14, y3 + 24);
-        g.setFont(uiFont("SansSerif", Font.PLAIN, 12));
-        g.setColor(new Color(224, 232, 244));
-        g.drawString("Авто-Турелей [J]: " + player.getSentryCharges() + "   •   Авиаударов [U]: " + player.getAirstrikeCharges(), c3X + 14, y3 + 46);
-        g.drawString("Сапёрный набор C4: " + (player.hasDefuseKit() ? "ЕСТЬ (5с)" : "НЕТ") + "  •  Рывок [Alt]: ГОТОВ", c3X + 14, y3 + 65);
+        g.setColor(new Color(252, 210, 92));
+        Weapon[] ws = player.getWeapons();
+        g.drawString("В РУКАХ:  [1] " + ws[0].getDisplayName() + " (" + ws[0].getMagAmmo() + "/" + ws[0].getReserveAmmo() + ")   •   [2] "
+                + ws[1].getDisplayName() + " (" + ws[1].getMagAmmo() + "/" + ws[1].getReserveAmmo() + ")   •   [3] " + ws[2].getDisplayName()
+                + (player.hasZeus() ? "   •   [T] Zeus x27" : ""), tabX + 14, ly + 25);
 
-        addMenuButton(g, new Rectangle(bx + bw / 2 - 155, by + bh - 50, 310, 38),
+        addMenuButton(g, new Rectangle(bx + bw / 2 - 155, by + bh - 48, 310, 36),
                 "ВЕРНУТЬСЯ В БОЙ (B / ESC)", new Color(46, 138, 92), false, () -> {
             buyMenuOpen = false;
+            buyCategoryChosen = false;
             setMouseCaptured(true);
         });
+    }
+
+    /** Карточка оружия с реальными ТТХ: урон, RPM, бронепробитие, мобильность + бейдж стороны T/CT. */
+    private void drawWeaponBuyCard(Graphics2D g, int x, int y, int w, int h, String keyBadge, Weapon wp, int cost, Color accent, Runnable onBuy) {
+        Rectangle rect = new Rectangle(x, y, w, h);
+        boolean hovered = rect.contains(mouseClientX, mouseClientY);
+        boolean canAfford = player.getMoney() >= cost;
+        boolean owned = player.getWeapons()[Math.max(0, wp.getSlotNumber() - 1)].getType() == wp.getType();
+
+        g.setColor(hovered ? new Color(40, 58, 84, 210) : new Color(22, 31, 46, 175));
+        g.fillRoundRect(x, y, w, h, 10, 10);
+        g.setColor(accent);
+        g.fillRoundRect(x, y + 8, 4, h - 16, 4, 4);
+        g.setColor(owned ? new Color(96, 242, 140) : (hovered ? new Color(252, 206, 86) : new Color(255, 255, 255, 38)));
+        g.drawRoundRect(x, y, w, h, 10, 10);
+
+        int iw = Math.min(150, w / 2 - 10);
+        int alpha = hovered ? 210 : (canAfford ? 130 : 60);
+        drawWeaponSilhouette(g, wp.getType(), x + w - 112, y + 26, iw, 28,
+                new Color(226, 234, 246, alpha), new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), alpha));
+
+        g.setColor(new Color(38, 52, 72));
+        g.fillRoundRect(x + 12, y + 10, 24, 24, 6, 6);
+        drawCenteredText(g, keyBadge, x + 24, y + 27, uiFont("Monospaced", Font.BOLD, 13), new Color(252, 210, 92));
+
+        g.setFont(uiFont("SansSerif", Font.BOLD, 15));
+        g.setColor(canAfford ? Color.WHITE : new Color(148, 156, 170));
+        g.drawString(wp.getDisplayName(), x + 44, y + 27);
+        int nameW = g.getFontMetrics().stringWidth(wp.getDisplayName());
+        if (wp.getTeamAffinity() != Weapon.TEAM_ANY) {
+            boolean ctW = wp.getTeamAffinity() == Weapon.TEAM_CT;
+            g.setColor(ctW ? new Color(60, 120, 200, 200) : new Color(200, 140, 40, 200));
+            g.fillRoundRect(x + 50 + nameW, y + 14, 26, 16, 6, 6);
+            drawCenteredText(g, ctW ? "CT" : "T", x + 63 + nameW, y + 26, uiFont("SansSerif", Font.BOLD, 10), Color.WHITE);
+        }
+        g.setFont(uiFont("SansSerif", Font.BOLD, 10));
+        g.setColor(owned ? new Color(96, 242, 140) : new Color(150, 166, 188));
+        g.drawString((owned ? "В РУКАХ  •  " : "") + wp.getMaxMagAmmo() + "/" + wp.getReserveAmmo() + " патр.  •  фраг $" + wp.getKillReward(), x + 44, y + 44);
+
+        String priceTag = (cost == 0) ? "FREE" : ("$" + cost);
+        g.setFont(uiFont("Monospaced", Font.BOLD, 15));
+        g.setColor(canAfford ? new Color(96, 242, 140) : new Color(242, 88, 82));
+        g.drawString(priceTag, x + w - g.getFontMetrics().stringWidth(priceTag) - 14, y + 22);
+
+        // Шкалы характеристик
+        String[] names = {"УРОН", "ТЕМП", "БРОНЯ", "БЕГ"};
+        double dmg = Math.min(1.0, wp.getBaseDamage() * Math.max(1, wp.getPelletsPerShot()) / 80.0);
+        double rpm = Math.min(1.0, wp.getRoundsPerMinute() / 1000.0);
+        double ap = Math.min(1.0, wp.getArmorPenetration());
+        double mob = Math.min(1.0, (wp.getMoveSpeedUnits() - 140) / 110.0);
+        double[] vals = {dmg, rpm, ap, mob};
+        String[] nums = {String.valueOf(wp.getBaseDamage()) + (wp.getPelletsPerShot() > 1 ? "×" + wp.getPelletsPerShot() : ""),
+                String.valueOf(wp.getRoundsPerMinute()), Math.round(wp.getArmorPenetration() * 100) + "%", String.valueOf(wp.getMoveSpeedUnits())};
+        int barW = (w - 40 - 3 * 10) / 4;
+        for (int b = 0; b < 4; b++) {
+            int bxp = x + 14 + b * (barW + 10);
+            int byp = y + h - 16;
+            g.setFont(uiFont("SansSerif", Font.BOLD, 9));
+            g.setColor(new Color(168, 186, 208));
+            g.drawString(names[b] + " " + nums[b], bxp, byp - 5);
+            g.setColor(new Color(32, 44, 62));
+            g.fillRoundRect(bxp, byp, barW, 6, 3, 3);
+            g.setColor(accent);
+            g.fillRoundRect(bxp, byp, (int) (barW * Math.max(0.04, vals[b])), 6, 3, 3);
+        }
+        uiRegisterClickable(rect, onBuy);
     }
 
     private void drawBuyColumnHeader(Graphics2D g, int x, int y, int w, String title, Color accent) {
@@ -4505,6 +5022,29 @@ public class Engine extends JPanel implements Runnable {
         if (!player.isAlive()) {
             g.setColor(new Color(95, 12, 12, 95));
             g.fillRect(0, 0, outW, outH);
+            if (lastKillerInfo != null) {
+                String kt = "ВАС УБИЛ: " + lastKillerInfo;
+                Font kf = uiFont("SansSerif", Font.BOLD, 18);
+                g.setFont(kf);
+                int kw = g.getFontMetrics().stringWidth(kt) + 40;
+                drawFrostedGlassPanel(g, outW / 2 - kw / 2, outH / 2 + 70, kw, 42, 0x200A0A, 200, null, new Color(255, 90, 80, 160));
+                drawCenteredText(g, kt, outW / 2, outH / 2 + 97, kf, new Color(255, 214, 206));
+            }
+        }
+
+        // Индикатор зоны попадания по вам (силуэт тела: голова/грудь/живот/ноги) + замедление
+        if (player.isAlive() && player.getHitIndicatorTimer() > 0.0) {
+            drawHitgroupIndicator(g, outW, outH);
+        }
+        // Подсказка подбора оружия с земли
+        DroppedWeapon nearDw = findNearbyDroppedWeapon();
+        if (nearDw != null && !buyMenuOpen) {
+            String ht = "[E] ПОДОБРАТЬ  " + Weapon.nameOf(nearDw.type) + "   " + nearDw.mag + " / " + nearDw.reserve;
+            Font hf = uiFont("SansSerif", Font.BOLD, 15);
+            g.setFont(hf);
+            int hw = g.getFontMetrics().stringWidth(ht) + 36;
+            drawFrostedGlassPanel(g, outW / 2 - hw / 2, outH / 2 + 46, hw, 34, 0x0A1220, 190, null, new Color(252, 206, 86, 170));
+            drawCenteredText(g, ht, outW / 2, outH / 2 + 68, hf, new Color(255, 232, 160));
         }
 
         // Светошумовая вспышка от Flashbang
@@ -4516,17 +5056,64 @@ public class Engine extends JPanel implements Runnable {
         }
     }
 
+    private void drawHitgroupIndicator(Graphics2D g, int outW, int outH) {
+        double t = player.getHitIndicatorTimer();
+        int alpha = (int) Math.max(0, Math.min(230, t * 300));
+        int x = 34, y = outH - 250;
+        Weapon.HitGroup hg = player.getLastHitGroup();
+        Color base = new Color(220, 228, 240, Math.min(120, alpha));
+        Color hot = new Color(255, 60, 48, alpha);
+        g.setColor(hg == Weapon.HitGroup.HEAD ? hot : base);
+        g.fillOval(x + 12, y, 18, 18);
+        g.setColor(hg == Weapon.HitGroup.CHEST ? hot : base);
+        g.fillRoundRect(x + 6, y + 21, 30, 24, 8, 8);
+        g.fillRoundRect(x - 4, y + 22, 8, 30, 6, 6);
+        g.fillRoundRect(x + 38, y + 22, 8, 30, 6, 6);
+        g.setColor(hg == Weapon.HitGroup.STOMACH ? hot : base);
+        g.fillRoundRect(x + 8, y + 47, 26, 16, 6, 6);
+        g.setColor(hg == Weapon.HitGroup.LEGS ? hot : base);
+        g.fillRoundRect(x + 8, y + 65, 11, 38, 6, 6);
+        g.fillRoundRect(x + 23, y + 65, 11, 38, 6, 6);
+        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
+        g.setColor(new Color(255, 120, 108, alpha));
+        g.drawString(hg.label + (player.getTaggingAmount() > 0.05 ? " • ЗАМЕДЛЕНИЕ" : ""), x - 4, y + 120);
+        if (player.isBleeding()) {
+            g.setColor(new Color(255, 70, 70, alpha));
+            g.drawString("КРОВОТЕЧЕНИЕ", x - 4, y + 136);
+        }
+    }
+
     private void drawCrosshairAndHitmarker(Graphics2D g, int outW, int outH) {
         if (!player.isAlive()) return;
         Weapon w = player.getCurrentWeapon();
         int cx = outW / 2;
         int cy = outH / 2;
 
-        if (w.getScopeZoomLevel() == 0) {
+        boolean augScope = w.isAdsActive() && w.getEffectiveFovFactor() < 0.7;
+        if (augScope) {
+            // Прицельный режим AUG / SG 553: круглое поле оптики с красной точкой
+            int rad = Math.min(outW, outH) * 42 / 100;
+            java.awt.geom.Area mask = new java.awt.geom.Area(new Rectangle(0, 0, outW, outH));
+            mask.subtract(new java.awt.geom.Area(new java.awt.geom.Ellipse2D.Double(cx - rad, cy - rad, rad * 2, rad * 2)));
+            g.setColor(new Color(6, 8, 10, 235));
+            g.fill(mask);
+            g.setStroke(new BasicStroke(6f));
+            g.setColor(new Color(20, 22, 26));
+            g.drawOval(cx - rad, cy - rad, rad * 2, rad * 2);
+            g.setStroke(new BasicStroke(1.0f));
+            g.setColor(new Color(0, 0, 0, 160));
+            g.drawLine(cx - rad, cy, cx - 18, cy);
+            g.drawLine(cx + 18, cy, cx + rad, cy);
+            g.drawLine(cx, cy + 18, cx, cy + rad);
+            g.setColor(new Color(255, 40, 40));
+            g.fillOval(cx - 3, cy - 3, 6, 6);
+        }
+        boolean sniperUnscoped = w.hasSniperScope() && w.getScopeZoomLevel() == 0;
+        if (w.getScopeZoomLevel() == 0 && !augScope && !sniperUnscoped) {
             int gap = 5;
             if (settings.dynamicCrosshair) {
                 double spread = w.computeCurrentSpread(
-                        player.getHorizontalSpeed() > 1.2, player.isSilentWalking(),
+                        player.getHorizontalSpeed() / player.getMaxMoveSpeed(),
                         !player.isOnGround(), player.isCrouching());
                 gap += (int) (spread * 175.0);
             }
@@ -4738,7 +5325,7 @@ public class Engine extends JPanel implements Runnable {
                 int tIdx = player.getArmsRaceTier();
                 int totalTiers = Weapon.ARMS_RACE_LADDER.length;
                 subStr = "ГОНКА ПУШЕК: " + (tIdx + 1) + "/" + totalTiers
-                        + (tIdx == totalTiers - 1 ? " (ЗОЛОТОЙ КЕРАМБИТ!)" : " • ФРАГОВ: " + player.getArmsRaceTierKills() + "/2");
+                        + (tIdx == totalTiers - 1 ? " (ЗОЛОТОЙ КЕРАМБИТ!)" : " • " + Weapon.nameOf(Weapon.ARMS_RACE_LADDER[tIdx]));
             } else if (settings.gameMode == GameSettings.GameMode.SIEGE_WAVES) {
                 subStr = "ОСАДА: ВОЛНА " + siegeWave + "/" + MAX_SIEGE_WAVES
                         + " • ВРАГОВ: " + tAlive
@@ -5389,7 +5976,7 @@ public class Engine extends JPanel implements Runnable {
         by += 54;
 
         addMenuButton(g, new Rectangle(bx, by, bw, 44), "$  МАГАЗИН СПЕЦНАЗА (B)",
-                new Color(48, 142, 92), false, () -> { paused = false; buyMenuOpen = true; setMouseCaptured(false); });
+                new Color(48, 142, 92), false, () -> { paused = false; buyMenuOpen = true; buyCategoryChosen = false; setMouseCaptured(false); });
         by += 54;
 
         addMenuButton(g, new Rectangle(bx, by, bw, 44), "⟳  НАЧАТЬ МАТЧ ЗАНОВО (F5)",
@@ -5508,7 +6095,12 @@ public class Engine extends JPanel implements Runnable {
         this.graphicsSubPage = subPage;
         this.currentScreen = AppScreen.SETTINGS;
     }
-    public void setBuyMenuOpen(boolean open) { this.buyMenuOpen = open; }
+    public void setBuyMenuOpen(boolean open) { this.buyMenuOpen = open; this.buyCategoryChosen = false; }
+    public void setBuyCategory(int c) { this.buyCategory = Math.max(0, Math.min(5, c)); this.buyCategoryChosen = true; }
+    public void setArmoryWeapon(Weapon.Type t) {
+        for (int i = 0; i < armoryShowcaseWeapons.length; i++) if (armoryShowcaseWeapons[i].getType() == t) armoryWeaponIdx = i;
+    }
+    public int getDroppedWeaponCount() { return droppedWeapons.size(); }
     public void setScoreTabHeld(boolean held) { this.scoreTabHeld = held; }
     public GameSettings getSettings() { return settings; }
     public Player getPlayer() { return player; }

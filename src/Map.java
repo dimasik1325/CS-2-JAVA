@@ -913,9 +913,56 @@ public class Map {
     }
 
     public boolean isBoxPenetrable(Vec3.Box box) {
-        if (box == null) return false;
-        return box.textureId == Renderer3D.TEX_CRATE_WOOD
-            || box.textureId == Renderer3D.TEX_METAL_DOOR;
+        return getMaterialPenetrability(box) > 0.0;
+    }
+
+    /**
+     * Пробиваемость материала (CS2 9.0): дерево легко, жесть/двери средне, штукатурка и плитка хуже,
+     * песчаник/бетон/булыжник — только тонкие участки мощным калибром. Пол карты и вода не пробиваются.
+     */
+    public double getMaterialPenetrability(Vec3.Box box) {
+        if (box == null) return 0.0;
+        switch (box.textureId) {
+            case Renderer3D.TEX_CRATE_WOOD:      return 1.60;
+            case Renderer3D.TEX_METAL_DOOR:      return 1.10;
+            case Renderer3D.TEX_CRATE_MILITARY:  return 0.80;
+            case Renderer3D.TEX_SOLID:           return 0.70;
+            case Renderer3D.TEX_MIRAGE_PLASTER:  return 0.55;
+            case Renderer3D.TEX_NUKE_PANEL:      return 0.60;
+            case Renderer3D.TEX_ROOF_TILES:      return 0.50;
+            case Renderer3D.TEX_INFERNO_STUCCO:  return 0.45;
+            case Renderer3D.TEX_WALL_SANDSTONE:  return 0.35;
+            case Renderer3D.TEX_CONCRETE:        return 0.30;
+            case Renderer3D.TEX_INFERNO_COBBLE:  return 0.25;
+            default:                             return 0.0;
+        }
+    }
+
+    public String getMaterialName(Vec3.Box box) {
+        if (box == null) return "ГРУНТ";
+        switch (box.textureId) {
+            case Renderer3D.TEX_CRATE_WOOD:      return "ДЕРЕВО";
+            case Renderer3D.TEX_METAL_DOOR:      return "ЖЕСТЬ";
+            case Renderer3D.TEX_CRATE_MILITARY:  return "ЯЩИК";
+            case Renderer3D.TEX_MIRAGE_PLASTER:  return "ШТУКАТУРКА";
+            case Renderer3D.TEX_NUKE_PANEL:      return "ПАНЕЛЬ";
+            case Renderer3D.TEX_CONCRETE:        return "БЕТОН";
+            default:                             return "КАМЕНЬ";
+        }
+    }
+
+    /** Толщина препятствия вдоль луча от точки входа (длина пути пули внутри AABB). */
+    public double getBoxThicknessAlongRay(Vec3.Box b, Vec3 entry, Vec3 dir) {
+        double tExit = Double.MAX_VALUE;
+        double[] o = {entry.x, entry.y, entry.z}, d = {dir.x, dir.y, dir.z};
+        double[] mn = {b.minX, b.minY, b.minZ}, mx = {b.maxX, b.maxY, b.maxZ};
+        for (int i = 0; i < 3; i++) {
+            if (Math.abs(d[i]) < 1e-9) continue;
+            double t1 = (mn[i] - o[i]) / d[i], t2 = (mx[i] - o[i]) / d[i];
+            double far = Math.max(t1, t2);
+            if (far < tExit) tExit = far;
+        }
+        return (tExit == Double.MAX_VALUE) ? 99.0 : Math.max(0.0, tExit);
     }
 
     public Vec3.RayHit raycast(Vec3 origin, Vec3 dir, double maxDist) {

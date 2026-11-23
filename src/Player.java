@@ -78,6 +78,19 @@ public class Player {
     private double shakePhase = 0.0;
     private Vec3 lastDamageSource = null;
 
+    // ===== РЕАЛИЗМ 9.0: отдача CS2, торможение при попадании, урон от падения, шлем =====
+    private double punchPitch = 0.0, punchYaw = 0.0;      // визуальный «aim punch» от паттерна распыления
+    private double kickPitch = 0.0, kickYaw = 0.0;        // мгновенный толчок камеры (затухает)
+    private double taggingTimer = 0.0;                    // замедление при получении урона (tagging)
+    private double landingSlowTimer = 0.0;                // штраф скорости после приземления
+    private double airPeakY = 0.0;                        // высшая точка полёта (для урона от падения)
+    private int pendingFallDamage = 0;
+    private boolean hasHelmet = true;
+    private Weapon.HitGroup lastHitGroup = Weapon.HitGroup.CHEST;
+    private double hitIndicatorTimer = 0.0;
+    private double bleedTimer = 0.0;
+    private int damageTakenThisRound = 0;
+
     // Статистика матча и текущего раунда (включая карточки фрагов CS2)
     private int kills = 0;
     private int deaths = 0;
@@ -105,6 +118,15 @@ public class Player {
         this.damageFlash = 0.0;
         this.flashBlindTimer = 0.0;
         this.cameraShake = 0.0;
+        this.punchPitch = this.punchYaw = this.kickPitch = this.kickYaw = 0.0;
+        this.taggingTimer = 0.0;
+        this.landingSlowTimer = 0.0;
+        this.airPeakY = spawnPos.y;
+        this.pendingFallDamage = 0;
+        this.hasHelmet = true;
+        this.hitIndicatorTimer = 0.0;
+        this.bleedTimer = 0.0;
+        this.damageTakenThisRound = 0;
         this.dashTimer = 0.0;
         this.dashCooldown = 0.0;
         this.lastDamageSource = null;
@@ -148,7 +170,7 @@ public class Player {
             // Финальный 8-й уровень: Золотой Нож!
             this.currentWeaponIndex = 2;
             this.weapons[2].onEquip();
-        } else if (tierType == Weapon.Type.DEAGLE || tierType == Weapon.Type.GLOCK) {
+        } else if (Weapon.classOf(tierType) == Weapon.WeaponClass.PISTOL) {
             this.weapons[1] = new Weapon(tierType);
             this.currentWeaponIndex = 1;
             this.weapons[1].onEquip();
@@ -235,22 +257,39 @@ public class Player {
         applyMouseLook(deltaX, deltaY, sensitivity, false);
     }
 
+    /**
+     * Отдача CS2 9.0: вместо «вечного» подъёма камеры — мгновенный толчок (view punch), который сам возвращается,
+     * а основная отдача задаётся детерминированным паттерном распыления ствола (см. Weapon.getSprayOffset).
+     */
     public void applyWeaponRecoilKick(Weapon.Type type) {
-        double kick;
+        double kick, side = 0.0;
         switch (type) {
-            case RPG7:   kick = 0.052; cameraShake = Math.max(cameraShake, 0.34); break;
-            case AWP:    kick = 0.045; cameraShake = Math.max(cameraShake, 0.25); break;
-            case DEAGLE: kick = 0.032; cameraShake = Math.max(cameraShake, 0.14); break;
-            case XM1014: kick = 0.028; cameraShake = Math.max(cameraShake, 0.12); break;
-            case AK47:   kick = 0.019; break;
-            case M249:   kick = 0.015; cameraShake = Math.max(cameraShake, 0.06); break;
-            case M4A1S:  kick = 0.012; break;
-            case MP9:    kick = 0.009; break;
-            case GLOCK:  kick = 0.010; break;
+            case RPG7:   kick = 0.060; cameraShake = Math.max(cameraShake, 0.34); break;
+            case AWP:    kick = 0.052; cameraShake = Math.max(cameraShake, 0.25); break;
+            case SSG08:  kick = 0.034; cameraShake = Math.max(cameraShake, 0.10); break;
+            case DEAGLE: kick = 0.040; side = 0.010; cameraShake = Math.max(cameraShake, 0.14); break;
+            case NOVA: case XM1014: kick = 0.034; cameraShake = Math.max(cameraShake, 0.13); break;
+            case NEGEV: case M249: kick = 0.010; side = 0.006; cameraShake = Math.max(cameraShake, 0.06); break;
+            case AK47: case GALIL: case SG553: kick = 0.011; side = 0.004; break;
+            case M4A4: case M4A1S: case AUG: case FAMAS: kick = 0.008; side = 0.003; break;
+            case P250: case FIVESEVEN: case TEC9: kick = 0.016; side = 0.005; break;
+            case GLOCK: case USP_S: kick = 0.012; side = 0.004; break;
+            case MP9: case MAC10: case UMP45: case P90: kick = 0.006; side = 0.004; break;
             default:     kick = 0.0; break;
         }
-        pitch = clamp(pitch + kick, -MAX_PITCH, MAX_PITCH);
+        kickPitch = Math.min(0.12, kickPitch + kick);
+        kickYaw += side * (Math.random() * 2.0 - 1.0);
     }
+
+    public Weapon.HitGroup getLastHitGroup() { return lastHitGroup; }
+    public double getHitIndicatorTimer() { return hitIndicatorTimer; }
+    public double getTaggingAmount() { return Math.min(1.0, taggingTimer / 0.45); }
+    public boolean hasHelmet() { return hasHelmet; }
+    public void setHelmet(boolean h) { hasHelmet = h; }
+    public int consumePendingFallDamage() { int d = pendingFallDamage; pendingFallDamage = 0; return d; }
+    public double getPunchPitch() { return punchPitch + kickPitch; }
+    public double getPunchYaw() { return punchYaw + kickYaw; }
+    public int getDamageTakenThisRound() { return damageTakenThisRound; }
 
     public void addCameraShake(double amount) {
         this.cameraShake = Math.min(1.0, this.cameraShake + amount);
@@ -299,6 +338,20 @@ public class Player {
         if (cameraShake > 0.0) {
             cameraShake = Math.max(0.0, cameraShake - dt * 2.6);
             shakePhase += dt * 46.0;
+        }
+        if (taggingTimer > 0.0) taggingTimer = Math.max(0.0, taggingTimer - dt);
+        if (landingSlowTimer > 0.0) landingSlowTimer = Math.max(0.0, landingSlowTimer - dt);
+        if (hitIndicatorTimer > 0.0) hitIndicatorTimer = Math.max(0.0, hitIndicatorTimer - dt);
+        if (bleedTimer > 0.0) bleedTimer = Math.max(0.0, bleedTimer - dt);
+        // Визуальный aim punch следует за паттерном распыления оружия (50% как в CS2) и плавно возвращается
+        {
+            double[] spray = getCurrentWeapon().getCurrentSprayOffset();
+            double k = Math.min(1.0, dt * 26.0);
+            punchPitch += (spray[1] * 0.5 - punchPitch) * k;
+            punchYaw += (spray[0] * 0.5 - punchYaw) * k;
+            double kd = Math.exp(-dt * 11.0);
+            kickPitch *= kd;
+            kickYaw *= kd;
         }
         swayX *= Math.pow(0.001, dt);
         swayY *= Math.pow(0.001, dt);
@@ -350,6 +403,9 @@ public class Player {
         } else if (silentWalking) {
             maxSpeed *= WALK_SPEED_MULT;
         }
+        // Tagging CS2: попадание пули резко тормозит бойца; жёсткое приземление тоже гасит скорость
+        maxSpeed *= 1.0 - 0.55 * getTaggingAmount();
+        if (landingSlowTimer > 0.0) maxSpeed *= 0.72;
 
         double accel = onGround ? 18.0 : 10.5;
         if (dashTimer > 0.0) {
@@ -363,7 +419,9 @@ public class Player {
         if (jumpRequested && onGround) {
             velocity.y = JUMP_VELOCITY;
             onGround = false;
+            airPeakY = position.y;
         }
+        boolean wasOnGround = onGround;
 
         velocity.y -= GRAVITY * dt;
         if (velocity.y < -28.0) velocity.y = -28.0;
@@ -392,6 +450,23 @@ public class Player {
             } else {
                 velocity.y = 0.0;
             }
+        }
+
+        // Урон от падения: безопасная высота ≈ 5.3 м (580 u/s в Source), затем ~10 HP за метр
+        if (!onGround) {
+            if (wasOnGround) airPeakY = position.y;
+            airPeakY = Math.max(airPeakY, position.y);
+        } else if (!wasOnGround) {
+            double drop = airPeakY - position.y;
+            if (drop > 1.6) {
+                landingSlowTimer = Math.min(0.45, 0.10 + drop * 0.05);
+                cameraShake = Math.min(0.8, cameraShake + Math.min(0.5, drop * 0.05));
+                kickPitch -= Math.min(0.05, drop * 0.006);
+            }
+            if (drop > 5.3) {
+                pendingFallDamage = (int) Math.round((drop - 5.3) * 10.5 + 2);
+            }
+            airPeakY = position.y;
         }
 
         double horizSpeed = getHorizontalSpeed();
@@ -442,18 +517,48 @@ public class Player {
     }
 
     public void takeDamage(int rawDamage, Vec3 attackerPos) {
+        takeDamage(rawDamage, attackerPos, 0.70, Weapon.HitGroup.CHEST, false);
+    }
+
+    /** Взрывы/огонь/падение — без зоны попадания и без учёта шлема. */
+    public void takeEnvironmentalDamage(int rawDamage, Vec3 sourcePos, boolean bypassArmor) {
+        takeDamage(rawDamage, sourcePos, bypassArmor ? 1.0 : 0.55, Weapon.HitGroup.CHEST, true);
+    }
+
+    /**
+     * Реальная формула брони CS2: при попадании в защищённую зону (торс/руки, голова — только со шлемом)
+     * здоровье теряет урон × бронепробитие оружия, а броня — половину поглощённого. Ноги броня не защищает.
+     */
+    public void takeDamage(int rawDamage, Vec3 attackerPos, double armorPenetration, Weapon.HitGroup hg, boolean environmental) {
         if (!alive || rawDamage <= 0) return;
 
         int healthLoss = rawDamage;
-        if (armor > 0) {
-            int absorbed = Math.min(armor, (int) Math.round(rawDamage * 0.35));
-            armor -= absorbed;
-            healthLoss = Math.max(1, rawDamage - absorbed);
+        boolean armored = armor > 0 && hg != Weapon.HitGroup.LEGS && (hg != Weapon.HitGroup.HEAD || hasHelmet);
+        if (armored && armorPenetration < 1.0) {
+            double hp = rawDamage * armorPenetration;
+            double ap = (rawDamage - hp) * 0.5;
+            if (ap > armor) {
+                hp = rawDamage - armor * 2.0;
+                ap = armor;
+            }
+            healthLoss = Math.max(1, (int) Math.round(hp));
+            armor = Math.max(0, armor - (int) Math.round(ap));
         }
 
         health = Math.max(0, health - healthLoss);
-        damageFlash = Math.min(1.0, damageFlash + 0.65);
+        damageTakenThisRound += healthLoss;
+        lastHitGroup = hg;
+        hitIndicatorTimer = 0.9;
+        damageFlash = Math.min(1.0, damageFlash + (hg == Weapon.HitGroup.HEAD ? 0.95 : 0.65));
         cameraShake = Math.min(0.65, cameraShake + 0.16);
+        if (!environmental) {
+            taggingTimer = 0.45;   // замедление от попадания
+            // Флинч от пули: без брони камеру дёргает сильно, со шлемом/бронёй — слабее
+            double flinch = (armored ? 0.010 : 0.030) * (hg == Weapon.HitGroup.HEAD ? 2.2 : 1.0);
+            kickPitch += flinch;
+            kickYaw += flinch * (Math.random() - 0.5);
+            if (healthLoss >= 20) bleedTimer = 2.0;
+        }
         if (attackerPos != null) {
             lastDamageSource = attackerPos.copy();
         }
@@ -563,12 +668,23 @@ public class Player {
     }
 
     public double getEffectiveYaw() {
-        return yaw + cameraShake * Math.cos(shakePhase) * 0.025;
+        return yaw + punchYaw + kickYaw + cameraShake * Math.cos(shakePhase) * 0.025;
     }
 
     public double getEffectivePitch() {
-        return clamp(pitch + cameraShake * Math.sin(shakePhase * 1.7) * 0.025, -MAX_PITCH, MAX_PITCH);
+        return clamp(pitch + punchPitch + kickPitch + cameraShake * Math.sin(shakePhase * 1.7) * 0.025, -MAX_PITCH, MAX_PITCH);
     }
+
+    /** Направление полёта пули с учётом полного паттерна отдачи ствола (aim punch ×1, view punch ×0.5). */
+    public Vec3 getShotDirection(double sprayYaw, double sprayPitch) {
+        double y = yaw + sprayYaw + kickYaw;
+        double p = clamp(pitch + sprayPitch + kickPitch, -MAX_PITCH, MAX_PITCH);
+        double cp = Math.cos(p);
+        return new Vec3(Math.sin(y) * cp, Math.sin(p), Math.cos(y) * cp).normalize();
+    }
+
+    public double getMaxMoveSpeed() { return BASE_MOVE_SPEED; }
+    public boolean isBleeding() { return bleedTimer > 0.0; }
 
     public Vec3 getCenterTargetPosition() {
         return new Vec3(position.x, position.y + currentEyeHeight * 0.84, position.z);

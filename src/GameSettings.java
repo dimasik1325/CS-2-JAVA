@@ -14,7 +14,7 @@ import java.util.Properties;
  */
 public class GameSettings {
 
-    public static final int CONFIG_VERSION = 8;
+    public static final int CONFIG_VERSION = 9;
 
     public enum QualityPreset {
         ESPORTS("Киберспорт (Макс. FPS)"),
@@ -359,6 +359,10 @@ public class GameSettings {
     public boolean dynamicCrosshair = true;
     public boolean leftHandedModel = false;
     public boolean showDamageNumbers = true;
+    // --- РЕАЛИЗМ 9.0 ---
+    public boolean bloodDecals = true;          // кровь на стенах/полу
+    public boolean fallDamage = true;           // урон от падения с высоты
+    public boolean bulletWhizSounds = true;     // свист пролетающих пуль
 
     // --- ПАРАМЕТРЫ МАТЧА ---
     public MapTheme mapTheme = MapTheme.INFERNO;
@@ -572,6 +576,9 @@ public class GameSettings {
             dynamicCrosshair = Boolean.parseBoolean(p.getProperty("dynamicCrosshair", String.valueOf(dynamicCrosshair)));
             leftHandedModel = Boolean.parseBoolean(p.getProperty("leftHandedModel", String.valueOf(leftHandedModel)));
             showDamageNumbers = Boolean.parseBoolean(p.getProperty("showDamageNumbers", String.valueOf(showDamageNumbers)));
+            bloodDecals = Boolean.parseBoolean(p.getProperty("bloodDecals", String.valueOf(bloodDecals)));
+            fallDamage = Boolean.parseBoolean(p.getProperty("fallDamage", String.valueOf(fallDamage)));
+            bulletWhizSounds = Boolean.parseBoolean(p.getProperty("bulletWhizSounds", String.valueOf(bulletWhizSounds)));
 
             mapTheme = parseEnum(p.getProperty("mapTheme"), MapTheme.class, mapTheme);
             gameMode = parseEnum(p.getProperty("gameMode"), GameMode.class, gameMode);
@@ -601,7 +608,7 @@ public class GameSettings {
                 if (!savePending) return;
                 savePending = false;
                 try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                    snapshot.store(fos, "CS-2 JAVA 8.0 Hyper-Turbo & Pro Graphics Studio Configuration");
+                    snapshot.store(fos, "CS-2 JAVA 9.0 Hyper-Turbo & Pro Graphics Studio Configuration");
                 } catch (Throwable ignored) {
                 }
             }
@@ -616,7 +623,7 @@ public class GameSettings {
         synchronized (saveLock) {
             savePending = false;
             try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                snapshot.store(fos, "CS-2 JAVA 8.0 Hyper-Turbo & Pro Graphics Studio Configuration");
+                snapshot.store(fos, "CS-2 JAVA 9.0 Hyper-Turbo & Pro Graphics Studio Configuration");
             } catch (Throwable ignored) {
             }
         }
@@ -661,6 +668,9 @@ public class GameSettings {
         p.setProperty("dynamicCrosshair", String.valueOf(dynamicCrosshair));
         p.setProperty("leftHandedModel", String.valueOf(leftHandedModel));
         p.setProperty("showDamageNumbers", String.valueOf(showDamageNumbers));
+        p.setProperty("bloodDecals", String.valueOf(bloodDecals));
+        p.setProperty("fallDamage", String.valueOf(fallDamage));
+        p.setProperty("bulletWhizSounds", String.valueOf(bulletWhizSounds));
 
         p.setProperty("mapTheme", mapTheme.name());
         p.setProperty("gameMode", gameMode.name());

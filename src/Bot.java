@@ -38,11 +38,17 @@ public class Bot {
         public final double distance;
         public final Vec3 point;
         public final boolean headshot;
+        public final Weapon.HitGroup group;
 
         public HitResult(double distance, Vec3 point, boolean headshot) {
+            this(distance, point, headshot ? Weapon.HitGroup.HEAD : Weapon.HitGroup.CHEST);
+        }
+
+        public HitResult(double distance, Vec3 point, Weapon.HitGroup group) {
             this.distance = distance;
             this.point = point;
-            this.headshot = headshot;
+            this.group = group;
+            this.headshot = (group == Weapon.HitGroup.HEAD);
         }
     }
 
@@ -52,6 +58,11 @@ public class Bot {
         public final boolean hitPlayer;
         public final Bot hitBot;
         public final int damage;
+        public Weapon.Type weapon = Weapon.Type.AK47;
+        public Weapon.HitGroup hitGroup = Weapon.HitGroup.CHEST;
+        public double armorPenetration = 0.775;
+        public boolean silenced = false;
+        public Vec3 extraTracerEnd = null;   // для дробовиков — разлёт второй дробины
 
         public ShotEvent(Vec3 muzzlePos, Vec3 endPos, boolean hitPlayer, Bot hitBot, int damage) {
             this.muzzlePos = muzzlePos;
@@ -79,6 +90,16 @@ public class Bot {
     private int maxHealth = 100;
     private int health = 100;
     private boolean alive = true;
+    // РЕАЛИЗМ 9.0: личное оружие бота, кевлар+шлем, магазин и перезарядка, замедление от попаданий
+    private Weapon.Type weaponType = Weapon.Type.AK47;
+    private Weapon.Type forcedWeapon = null;
+    private int armor = 100;
+    private boolean helmet = true;
+    private int botMag = 30;
+    private double botReloadTimer = 0.0;
+    private double taggedTimer = 0.0;
+    private Weapon.HitGroup lastHitGroup = Weapon.HitGroup.CHEST;
+    private int sprayShot = 0;
 
     private State state = State.PATROL;
     private RadioOrder radioOrder = RadioOrder.PATROL_FREE;
@@ -135,9 +156,47 @@ public class Bot {
             this.maxHealth = 100;
         }
         this.health = this.maxHealth;
+        rollWeapon();
     }
 
     public Archetype getArchetype() { return archetype; }
+
+    /** Реалистичная закупка бота по стороне конфликта и роли (как в эко-системе CS2). */
+    private void rollWeapon() {
+        if (forcedWeapon != null) {
+            weaponType = forcedWeapon;
+        } else if (archetype == Archetype.JUGGERNAUT) {
+            weaponType = rng.nextBoolean() ? Weapon.Type.NEGEV : Weapon.Type.M249;
+        } else if (archetype == Archetype.SNIPER) {
+            weaponType = rng.nextDouble() < 0.62 ? Weapon.Type.AWP : Weapon.Type.SSG08;
+        } else {
+            double r = rng.nextDouble();
+            if (team == Team.TERRORIST) {
+                weaponType = r < 0.42 ? Weapon.Type.AK47 : r < 0.58 ? Weapon.Type.GALIL : r < 0.68 ? Weapon.Type.SG553
+                        : r < 0.78 ? Weapon.Type.MAC10 : r < 0.84 ? Weapon.Type.UMP45 : r < 0.89 ? Weapon.Type.P90
+                        : r < 0.93 ? Weapon.Type.NOVA : r < 0.97 ? Weapon.Type.TEC9 : Weapon.Type.DEAGLE;
+            } else {
+                weaponType = r < 0.30 ? Weapon.Type.M4A4 : r < 0.52 ? Weapon.Type.M4A1S : r < 0.64 ? Weapon.Type.FAMAS
+                        : r < 0.72 ? Weapon.Type.AUG : r < 0.81 ? Weapon.Type.MP9 : r < 0.87 ? Weapon.Type.UMP45
+                        : r < 0.92 ? Weapon.Type.P90 : r < 0.96 ? Weapon.Type.FIVESEVEN : Weapon.Type.USP_S;
+            }
+        }
+        botMag = Weapon.prototype(weaponType).getMaxMagAmmo();
+        botReloadTimer = 0.0;
+        sprayShot = 0;
+    }
+
+    /** Принудительное оружие (Гонка вооружений / пистолетный раунд). null — обычная закупка. */
+    public void setForcedWeapon(Weapon.Type t) {
+        this.forcedWeapon = t;
+        rollWeapon();
+    }
+
+    public Weapon.Type getWeaponType() { return weaponType; }
+    public int getArmor() { return armor; }
+    public boolean hasHelmet() { return helmet; }
+    public Weapon.HitGroup getLastHitGroup() { return lastHitGroup; }
+    public boolean isReloadingWeapon() { return botReloadTimer > 0.0; }
     public int getMaxHealth() { return maxHealth; }
     public double getModelScale() {
         return archetype == Archetype.JUGGERNAUT ? 1.26 : 1.0;
@@ -171,6 +230,10 @@ public class Bot {
         this.c4TargetSpot = null;
         this.c4PlantTimer = 0.0;
         this.c4PlantCompleted = false;
+        this.armor = (archetype == Archetype.JUGGERNAUT) ? 200 : 100;
+        this.helmet = true;
+        this.taggedTimer = 0.0;
+        rollWeapon();
     }
 
     public void resetMatchStats() {
@@ -239,6 +302,14 @@ public class Bot {
         if (muzzleFlashTimer > 0.0) muzzleFlashTimer = Math.max(0.0, muzzleFlashTimer - dt);
         if (healthBarTimer > 0.0) healthBarTimer = Math.max(0.0, healthBarTimer - dt);
         if (blindTimer > 0.0) blindTimer = Math.max(0.0, blindTimer - dt);
+        if (taggedTimer > 0.0) taggedTimer = Math.max(0.0, taggedTimer - dt);
+        if (botReloadTimer > 0.0) {
+            botReloadTimer -= dt;
+            if (botReloadTimer <= 0.0) {
+                botReloadTimer = 0.0;
+                botMag = Weapon.prototype(weaponType).getMaxMagAmmo();
+            }
+        }
 
         if (!alive) {
             if (deathAnimProgress < 1.0) {
@@ -275,7 +346,10 @@ public class Bot {
             bestTargetDist = d;
             targetIsPlayer = true;
             targetFeetPos = player.getPosition();
-            targetAimPos = player.getCenterTargetPosition();
+            // Боты целятся в торс (как реальные игроки на префайре); элита держит прицел выше — ближе к шее
+            double aimFrac = 0.60 + 0.05 * difficulty.ordinal();
+            Vec3 pp = player.getPosition();
+            targetAimPos = new Vec3(pp.x, pp.y + player.getCurrentBodyHeight() * aimFrac, pp.z);
         }
 
         for (int i = 0; i < allBots.size(); i++) {
@@ -308,7 +382,8 @@ public class Bot {
         ShotEvent shotEvent = null;
         double moveX = 0.0;
         double moveZ = 0.0;
-        double combatSpeed = difficulty.combatSpeed;
+        double combatSpeed = difficulty.combatSpeed * Weapon.prototype(weaponType).getMoveSpeedMultiplier() / 0.86;
+        if (taggedTimer > 0.0) combatSpeed *= 0.5; // tagging: попадание тормозит бота
 
         if (state == State.ENGAGE && seesEnemy) {
             double dx = targetFeetPos.x - position.x;
@@ -344,22 +419,31 @@ public class Bot {
                 reactionTimer -= dt;
             } else {
                 fireCooldown -= dt;
-                if (fireCooldown <= 0.0) {
+                if (botReloadTimer > 0.0) {
+                    // Бот перезаряжается — реальное окно для пика!
+                } else if (fireCooldown <= 0.0) {
+                    Weapon proto = Weapon.prototype(weaponType);
                     shotEvent = fireAtTarget(map, player, targetIsPlayer, targetBot, targetAimPos, difficulty);
                     burstRemaining--;
+                    sprayShot++;
+                    botMag--;
+                    if (botMag <= 0) {
+                        botReloadTimer = proto.getBaseReloadDuration() * (proto.isShellByShellReload() ? 4.0 : 1.0);
+                        burstRemaining = 0;
+                    }
+                    double interval = proto.getFireInterval();
                     if (burstRemaining <= 0) {
-                        if (archetype == Archetype.JUGGERNAUT) {
-                            burstRemaining = 6 + rng.nextInt(5);
-                            fireCooldown = 0.42 + rng.nextDouble() * 0.25;
-                        } else if (archetype == Archetype.SNIPER) {
-                            burstRemaining = 1;
-                            fireCooldown = 1.05 + rng.nextDouble() * 0.35;
-                        } else {
-                            burstRemaining = 2 + rng.nextInt(3);
-                            fireCooldown = 0.60 + rng.nextDouble() * 0.34;
+                        sprayShot = 0;
+                        switch (proto.getWeaponClass()) {
+                            case MACHINE_GUN: burstRemaining = 6 + rng.nextInt(6); fireCooldown = 0.42 + rng.nextDouble() * 0.25; break;
+                            case SNIPER:      burstRemaining = 1; fireCooldown = Math.max(interval, 1.05) + rng.nextDouble() * 0.35; break;
+                            case SHOTGUN:     burstRemaining = 1; fireCooldown = interval + 0.15 + rng.nextDouble() * 0.25; break;
+                            case PISTOL:      burstRemaining = 1 + rng.nextInt(2); fireCooldown = interval + 0.20 + rng.nextDouble() * 0.25; break;
+                            case SMG:         burstRemaining = 3 + rng.nextInt(5); fireCooldown = 0.40 + rng.nextDouble() * 0.30; break;
+                            default:          burstRemaining = 2 + rng.nextInt(3); fireCooldown = 0.55 + rng.nextDouble() * 0.34; break;
                         }
                     } else {
-                        fireCooldown = (archetype == Archetype.JUGGERNAUT ? 0.11 : 0.16) + rng.nextDouble() * 0.04;
+                        fireCooldown = interval * (1.05 + rng.nextDouble() * 0.25);
                     }
                 }
             }
@@ -588,49 +672,98 @@ public class Bot {
 
     private ShotEvent fireAtTarget(Map map, Player player, boolean targetIsPlayer, Bot targetBot,
                                    Vec3 aimTarget, GameSettings.BotDifficulty difficulty) {
-        muzzleFlashTimer = 0.075;
+        Weapon proto = Weapon.prototype(weaponType);
+        Weapon.WeaponClass wc = proto.getWeaponClass();
+        muzzleFlashTimer = proto.isSilenced() ? 0.03 : 0.075;
         Vec3 muzzle = getMuzzleWorldPosition();
         Vec3 baseDir = aimTarget.sub(muzzle).normalize();
 
         double spread = difficulty.aimSpread;
+        switch (wc) {
+            case SNIPER:      spread *= 0.55; break;
+            case MACHINE_GUN: spread *= 1.30; break;
+            case SMG:         spread *= 1.15; break;
+            case PISTOL:      spread *= 1.08; break;
+            case SHOTGUN:     spread = spread * 0.6 + proto.computeCurrentSpread(0.0, false, false); break;
+            default: break;
+        }
+        // Боты тоже подвержены отдаче: чем длиннее очередь, тем выше и шире уходят пули
+        double[] spray = proto.getSprayOffset(Math.min(sprayShot, 12));
         if (targetIsPlayer && player != null) {
-            if (player.isCrouching()) spread += 0.016;
-            if (player.getHorizontalSpeed() > 3.5) spread += 0.018;
+            if (player.isCrouching()) spread += 0.012;
+            if (player.getHorizontalSpeed() > 3.5) spread += 0.016;
         }
+        if (taggedTimer > 0.0) spread += 0.020; // попадание по боту сбивает его прицел
 
-        Vec3 shotDir = new Vec3(
-            baseDir.x + rng.nextGaussian() * spread,
-            baseDir.y + rng.nextGaussian() * (spread * 0.78),
-            baseDir.z + rng.nextGaussian() * spread
-        ).normalize();
+        double distToTarget = aimTarget.sub(muzzle).length();
+        double dmgScale = difficulty.baseDamage / 22.0;
+        int pellets = proto.getPelletsPerShot();
+        int totalDamage = 0;
+        Vec3 firstEnd = null, secondEnd = null;
+        boolean hitP = false;
+        Bot hitB = null;
+        Weapon.HitGroup bestGroup = Weapon.HitGroup.CHEST;
 
-        Vec3.RayHit wallHit = map.raycast(muzzle, shotDir, 118.0);
-        double maxDist = (wallHit != null) ? wallHit.distance : 118.0;
-        Vec3 endPos = (wallHit != null) ? wallHit.point : muzzle.add(shotDir.scale(118.0));
+        for (int pi = 0; pi < pellets; pi++) {
+            double ps = (pellets > 1) ? spread * 1.0 : spread;
+            Vec3 shotDir = new Vec3(
+                baseDir.x + rng.nextGaussian() * ps + Math.cos(yaw) * spray[0] * 0.7,
+                baseDir.y + rng.nextGaussian() * (ps * 0.78) + spray[1] * 0.6,
+                baseDir.z + rng.nextGaussian() * ps - Math.sin(yaw) * spray[0] * 0.7
+            ).normalize();
 
-        if (targetIsPlayer && player != null && player.isAlive()) {
-            Vec3 pPos = player.getPosition();
-            double pH = player.getCurrentBodyHeight();
-            Vec3.Box playerBox = new Vec3.Box(
-                pPos.x - Player.RADIUS, pPos.y, pPos.z - Player.RADIUS,
-                pPos.x + Player.RADIUS, pPos.y + pH, pPos.z + Player.RADIUS,
-                0, 0, 0, true
-            );
-            double tPlayer = playerBox.intersectRay(muzzle, shotDir, maxDist, null);
-            if (tPlayer >= 0.0 && tPlayer < maxDist) {
-                Vec3 hitPt = muzzle.add(shotDir.scale(tPlayer));
-                int dmg = difficulty.baseDamage + rng.nextInt(5);
-                return new ShotEvent(muzzle, hitPt, true, null, dmg);
+            double range = proto.getMaxRange();
+            Vec3.RayHit wallHit = map.raycast(muzzle, shotDir, range);
+            double maxDist = (wallHit != null) ? wallHit.distance : range;
+            Vec3 endPos = (wallHit != null) ? wallHit.point : muzzle.add(shotDir.scale(range));
+            Weapon.HitGroup group = null;
+            double hitDist = 0.0;
+
+            if (targetIsPlayer && player != null && player.isAlive()) {
+                Vec3 pPos = player.getPosition();
+                double pH = player.getCurrentBodyHeight();
+                Vec3.Box playerBox = new Vec3.Box(
+                    pPos.x - Player.RADIUS * 0.8, pPos.y, pPos.z - Player.RADIUS * 0.8,
+                    pPos.x + Player.RADIUS * 0.8, pPos.y + pH, pPos.z + Player.RADIUS * 0.8,
+                    0, 0, 0, true
+                );
+                double tPlayer = playerBox.intersectRay(muzzle, shotDir, maxDist, null);
+                if (tPlayer >= 0.0 && tPlayer < maxDist) {
+                    endPos = muzzle.add(shotDir.scale(tPlayer));
+                    double rel = (endPos.y - pPos.y) / pH;
+                    group = rel > 0.86 ? Weapon.HitGroup.HEAD : rel > 0.60 ? Weapon.HitGroup.CHEST
+                            : rel > 0.45 ? Weapon.HitGroup.STOMACH : Weapon.HitGroup.LEGS;
+                    hitP = true;
+                    hitDist = tPlayer;
+                }
+            } else if (targetBot != null && targetBot.alive) {
+                HitResult bHit = targetBot.intersectShotRay(muzzle, shotDir, maxDist);
+                if (bHit != null) {
+                    endPos = bHit.point;
+                    group = bHit.group;
+                    hitB = targetBot;
+                    hitDist = bHit.distance;
+                }
             }
-        } else if (targetBot != null && targetBot.alive) {
-            HitResult bHit = targetBot.intersectShotRay(muzzle, shotDir, maxDist);
-            if (bHit != null) {
-                int dmg = (bHit.headshot ? difficulty.baseDamage * 2 : difficulty.baseDamage) + rng.nextInt(7);
-                return new ShotEvent(muzzle, bHit.point, false, targetBot, dmg);
+            if (group != null) {
+                double raw = proto.computeRawHitDamage(group, hitDist) * dmgScale;
+                totalDamage += (int) Math.round(raw * (0.92 + rng.nextDouble() * 0.16));
+                if (group.multiplier > bestGroup.multiplier || totalDamage == 0) bestGroup = group;
             }
+            if (firstEnd == null) firstEnd = endPos; else if (secondEnd == null) secondEnd = endPos;
         }
+        if (distToTarget > proto.getMaxRange()) totalDamage = 0;
 
-        return new ShotEvent(muzzle, endPos, false, null, 0);
+        ShotEvent ev;
+        if (hitP && totalDamage > 0) ev = new ShotEvent(muzzle, firstEnd, true, null, totalDamage);
+        else if (hitB != null && totalDamage > 0) ev = new ShotEvent(muzzle, firstEnd, false, hitB, totalDamage);
+        else ev = new ShotEvent(muzzle, firstEnd, false, null, 0);
+        ev.weapon = weaponType;
+        ev.hitGroup = bestGroup;
+        ev.armorPenetration = proto.getArmorPenetration();
+        ev.silenced = proto.isSilenced();
+        ev.extraTracerEnd = secondEnd;
+        return ev;
     }
 
     private boolean tryMoveBotAxis(Map map, double dx, double dz) {
@@ -672,28 +805,48 @@ public class Bot {
     public HitResult intersectShotRay(Vec3 origin, Vec3 dir, double maxDist) {
         if (!alive) return null;
 
+        // Анатомические хитбоксы CS2: голова (×4), грудь+руки (×1), живот (×1.25), ноги (×0.75)
         double s = getModelScale();
-        Vec3.Box headBox = new Vec3.Box(
-            position.x - 0.22 * s, position.y + 1.38 * s, position.z - 0.22 * s,
-            position.x + 0.22 * s, position.y + 1.84 * s, position.z + 0.22 * s,
-            0, 0, 0, true
-        );
-        Vec3.Box bodyBox = new Vec3.Box(
-            position.x - 0.34 * s, position.y + 0.02, position.z - 0.34 * s,
-            position.x + 0.34 * s, position.y + 1.40 * s, position.z + 0.34 * s,
-            0, 0, 0, true
-        );
+        double px = position.x, py = position.y, pz = position.z;
+        Vec3.Box headBox = new Vec3.Box(px - 0.17 * s, py + 1.41 * s, pz - 0.17 * s, px + 0.17 * s, py + 1.79 * s, pz + 0.17 * s, 0, 0, 0, true);
+        Vec3.Box chestBox = new Vec3.Box(px - 0.31 * s, py + 1.05 * s, pz - 0.31 * s, px + 0.31 * s, py + 1.41 * s, pz + 0.31 * s, 0, 0, 0, true);
+        Vec3.Box stomachBox = new Vec3.Box(px - 0.27 * s, py + 0.82 * s, pz - 0.27 * s, px + 0.27 * s, py + 1.05 * s, pz + 0.27 * s, 0, 0, 0, true);
+        Vec3.Box legsBox = new Vec3.Box(px - 0.24 * s, py + 0.02, pz - 0.24 * s, px + 0.24 * s, py + 0.82 * s, pz + 0.24 * s, 0, 0, 0, true);
 
-        double tHead = headBox.intersectRay(origin, dir, maxDist, null);
-        double tBody = bodyBox.intersectRay(origin, dir, maxDist, null);
+        double best = Double.MAX_VALUE;
+        Weapon.HitGroup bestG = null;
+        double t;
+        if ((t = headBox.intersectRay(origin, dir, maxDist, null)) >= 0.0 && t < best - 0.04) { best = t; bestG = Weapon.HitGroup.HEAD; }
+        if ((t = chestBox.intersectRay(origin, dir, maxDist, null)) >= 0.0 && t < best - 0.04) { best = t; bestG = Weapon.HitGroup.CHEST; }
+        if ((t = stomachBox.intersectRay(origin, dir, maxDist, null)) >= 0.0 && t < best) { best = t; bestG = Weapon.HitGroup.STOMACH; }
+        if ((t = legsBox.intersectRay(origin, dir, maxDist, null)) >= 0.0 && t < best) { best = t; bestG = Weapon.HitGroup.LEGS; }
+        if (bestG == null) return null;
+        return new HitResult(best, origin.add(dir.scale(best)), bestG);
+    }
 
-        if (tHead >= 0.0 && (tBody < 0.0 || tHead <= tBody + 0.05)) {
-            return new HitResult(tHead, origin.add(dir.scale(tHead)), true);
+    /** Реальная броня CS2 у ботов: урон × бронепробитие, броня теряет половину поглощённого; ноги не защищены. */
+    public boolean takeDamage(int rawDamage, Vec3 attackerPos, double armorPen, Weapon.HitGroup hg) {
+        if (!alive || rawDamage <= 0) return false;
+        int dmg = rawDamage;
+        lastHitGroup = hg;
+        boolean armored = armor > 0 && hg != Weapon.HitGroup.LEGS && (hg != Weapon.HitGroup.HEAD || helmet);
+        if (armored && armorPen < 1.0) {
+            double hp = rawDamage * armorPen;
+            double ap = (rawDamage - hp) * 0.5;
+            if (ap > armor) { hp = rawDamage - armor * 2.0; ap = armor; }
+            dmg = Math.max(1, (int) Math.round(hp));
+            armor = Math.max(0, armor - (int) Math.round(ap));
         }
-        if (tBody >= 0.0) {
-            return new HitResult(tBody, origin.add(dir.scale(tBody)), false);
-        }
-        return null;
+        taggedTimer = 0.40;
+        return takeDamage(dmg, attackerPos);
+    }
+
+    public int previewDamage(int rawDamage, double armorPen, Weapon.HitGroup hg) {
+        boolean armored = armor > 0 && hg != Weapon.HitGroup.LEGS && (hg != Weapon.HitGroup.HEAD || helmet);
+        if (!armored || armorPen >= 1.0) return rawDamage;
+        double hp = rawDamage * armorPen, ap = (rawDamage - hp) * 0.5;
+        if (ap > armor) hp = rawDamage - armor * 2.0;
+        return Math.max(1, (int) Math.round(hp));
     }
 
     public boolean takeDamage(int damage, Vec3 attackerPos) {
@@ -886,42 +1039,88 @@ public class Bot {
             }
         }
 
-        // 5. Детализированное 3D-оружие у плеча (приклад, ствольная коробка, магазин, оптика/коллиматор и ствол/глушитель)!
-        double gunCenterX = bx + rightX * 0.135 * s + sinY * 0.34 * s;
-        double gunCenterY = by + 1.19 * s;
-        double gunCenterZ = bz + rightZ * 0.135 * s + cosY * 0.34 * s;
-        // Приклад в правое плечо
-        r.drawOrientedWorldBox(gunCenterX - sinY * 0.22 * s, gunCenterY - 0.015 * s, gunCenterZ - cosY * 0.22 * s,
-                0.046 * s, 0.095 * s, 0.20 * s, yaw, 0.0, Renderer3D.TEX_SOLID, ct ? gunMetal : gunBody);
-        // Ствольная коробка
+        // 5. Персональное 3D-оружие бота 9.0: силуэт зависит от реального ствола (винтовка, булл-пап, ПП, дробовик, пулемёт, пистолет)
+        Weapon.WeaponClass wcl = Weapon.classOf(weaponType);
+        boolean pistolHeld = (wcl == Weapon.WeaponClass.PISTOL);
+        boolean bullpup = (weaponType == Weapon.Type.AUG || weaponType == Weapon.Type.FAMAS || weaponType == Weapon.Type.P90);
+        boolean scoped = (wcl == Weapon.WeaponClass.SNIPER || weaponType == Weapon.Type.AUG || weaponType == Weapon.Type.SG553);
+        boolean suppressed = (weaponType == Weapon.Type.M4A1S || weaponType == Weapon.Type.USP_S);
+        int wBody;
+        switch (weaponType) {
+            case AK47: wBody = 0x8C4C26; break;
+            case GALIL: wBody = 0x5E4630; break;
+            case SG553: wBody = 0x8A5228; break;
+            case AUG: wBody = 0x55603E; break;
+            case NEGEV: case M249: wBody = 0x3D4A34; break;
+            case FIVESEVEN: wBody = 0x5A5446; break;
+            case P250: wBody = 0x8E979F; break;
+            case AWP: wBody = 0x364C34; break;
+            default: wBody = 0x2B3138; break;
+        }
+        if (flashing) wBody = 0xFF6060;
+        double gunFwd = pistolHeld ? 0.46 : 0.34;
+        double gunCenterX = bx + rightX * (pistolHeld ? 0.05 : 0.135) * s + sinY * gunFwd * s;
+        double gunCenterY = by + (pistolHeld ? 1.22 : 1.19) * s;
+        double gunCenterZ = bz + rightZ * (pistolHeld ? 0.05 : 0.135) * s + cosY * gunFwd * s;
+        double recLen, stockLen, handLen, barrelLen, barrelR;
+        switch (wcl) {
+            case PISTOL:      recLen = 0.17; stockLen = 0.0;  handLen = 0.0;  barrelLen = suppressed ? 0.16 : 0.03; barrelR = suppressed ? 0.018 : 0.010; break;
+            case SMG:         recLen = (weaponType == Weapon.Type.P90) ? 0.40 : 0.24; stockLen = (weaponType == Weapon.Type.P90) ? 0.0 : 0.14; handLen = 0.10; barrelLen = 0.10; barrelR = 0.014; break;
+            case SNIPER:      recLen = 0.30; stockLen = 0.24; handLen = 0.26; barrelLen = (weaponType == Weapon.Type.SSG08) ? 0.52 : 0.62; barrelR = 0.016; break;
+            case SHOTGUN:     recLen = 0.26; stockLen = 0.22; handLen = 0.20; barrelLen = 0.46; barrelR = 0.022; break;
+            case MACHINE_GUN: recLen = 0.34; stockLen = 0.20; handLen = 0.24; barrelLen = 0.50; barrelR = 0.030; break;
+            default:          recLen = bullpup ? 0.44 : 0.32; stockLen = bullpup ? 0.0 : 0.20; handLen = bullpup ? 0.10 : 0.22; barrelLen = suppressed ? 0.48 : 0.40; barrelR = suppressed ? 0.026 : 0.018; break;
+        }
+        if (stockLen > 0.0) {
+            r.drawOrientedWorldBox(gunCenterX - sinY * (recLen * 0.5 + stockLen * 0.4) * s, gunCenterY - 0.015 * s, gunCenterZ - cosY * (recLen * 0.5 + stockLen * 0.4) * s,
+                    0.044 * s, 0.090 * s, stockLen * s, yaw, 0.0, Renderer3D.TEX_SOLID, weaponType == Weapon.Type.AK47 ? wBody : gunMetal);
+        }
         r.drawOrientedWorldBox(gunCenterX, gunCenterY, gunCenterZ,
-                0.058 * s, 0.098 * s, 0.32 * s, yaw, 0.0, Renderer3D.TEX_SOLID, ct ? gunBody : gunMetal);
-        // Цевьё
-        r.drawOrientedWorldBox(gunCenterX + sinY * 0.20 * s, gunCenterY + 0.005 * s, gunCenterZ + cosY * 0.20 * s,
-                0.050 * s, 0.068 * s, 0.22 * s, yaw, 0.0, Renderer3D.TEX_SOLID, gunBody);
-        // Магазин (рожковый у штурмовиков, короб у пулемётчика Juggernaut!)
-        if (jug) {
+                (pistolHeld ? 0.040 : 0.058) * s, (pistolHeld ? 0.060 : (weaponType == Weapon.Type.P90 ? 0.12 : 0.098)) * s, recLen * s,
+                yaw, 0.0, Renderer3D.TEX_SOLID, bullpup || pistolHeld ? wBody : gunMetal);
+        if (pistolHeld) {
+            r.drawOrientedWorldBox(gunCenterX - sinY * 0.05 * s, gunCenterY - 0.07 * s, gunCenterZ - cosY * 0.05 * s,
+                    0.034 * s, 0.10 * s, 0.045 * s, yaw, 0.22, Renderer3D.TEX_SOLID, gunMetal);
+        }
+        if (handLen > 0.0) {
+            double hOff = recLen * 0.5 + handLen * 0.45;
+            r.drawOrientedWorldBox(gunCenterX + sinY * hOff * s, gunCenterY + 0.005 * s, gunCenterZ + cosY * hOff * s,
+                    0.050 * s, 0.066 * s, handLen * s, yaw, 0.0, Renderer3D.TEX_SOLID, wBody);
+        }
+        // Магазины: изогнутый рожок, прямой, короб пулемёта, верхний P90, трубчатый у дробовика
+        if (wcl == Weapon.WeaponClass.MACHINE_GUN) {
             r.drawOrientedWorldBox(gunCenterX + sinY * 0.04 * s, gunCenterY - 0.10 * s, gunCenterZ + cosY * 0.04 * s,
                     0.13 * s, 0.14 * s, 0.13 * s, yaw, 0.0, Renderer3D.TEX_SOLID, 0x3D5236);
-        } else if (!sniper) {
-            r.drawOrientedWorldBox(gunCenterX + sinY * 0.06 * s, gunCenterY - 0.11 * s, gunCenterZ + cosY * 0.06 * s,
-                    0.038 * s, 0.16 * s, 0.068 * s, yaw, 0.32, Renderer3D.TEX_SOLID, ct ? 0x2E343C : 0x9E5224);
+        } else if (weaponType == Weapon.Type.P90) {
+            r.drawOrientedWorldBox(gunCenterX, gunCenterY + 0.075 * s, gunCenterZ, 0.044 * s, 0.024 * s, 0.30 * s, yaw, 0.0, Renderer3D.TEX_SOLID, 0x6E6A5C);
+        } else if (wcl == Weapon.WeaponClass.SHOTGUN) {
+            r.drawOrientedWorldCylinder(gunCenterX + sinY * 0.30 * s, gunCenterY - 0.030 * s, gunCenterZ + cosY * 0.30 * s,
+                    0.016 * s, 0.34 * s, yaw, 0.0, 8, gunMetal);
+        } else if (!pistolHeld && wcl != Weapon.WeaponClass.SNIPER) {
+            double magZ = bullpup ? -0.10 : 0.06;
+            boolean curved = (weaponType == Weapon.Type.AK47 || weaponType == Weapon.Type.GALIL);
+            r.drawOrientedWorldBox(gunCenterX + sinY * magZ * s, gunCenterY - 0.11 * s, gunCenterZ + cosY * magZ * s,
+                    0.038 * s, 0.16 * s, 0.062 * s, yaw, curved ? 0.32 : 0.10, Renderer3D.TEX_SOLID,
+                    weaponType == Weapon.Type.AK47 ? 0x9E5224 : (weaponType == Weapon.Type.AUG ? 0x8FA2A8 : 0x2E343C));
+        } else if (wcl == Weapon.WeaponClass.SNIPER) {
+            r.drawOrientedWorldBox(gunCenterX + sinY * 0.04 * s, gunCenterY - 0.07 * s, gunCenterZ + cosY * 0.04 * s,
+                    0.036 * s, 0.06 * s, 0.07 * s, yaw, 0.0, Renderer3D.TEX_SOLID, gunMetal);
         }
-        // Оптика снайпера AWP или коллиматор спецназа CT
-        if (sniper) {
+        // Оптика / коллиматор
+        if (scoped) {
             r.drawOrientedWorldCylinder(gunCenterX + sinY * 0.02 * s, gunCenterY + 0.082 * s, gunCenterZ + cosY * 0.02 * s,
-                    0.026 * s, 0.030 * s, 0.30 * s, yaw, 0.0, 9, gunMetal);
-        } else if (ct) {
+                    0.026 * s, 0.030 * s, (wcl == Weapon.WeaponClass.SNIPER ? 0.30 : 0.18) * s, yaw, 0.0, 9, gunMetal);
+        } else if (ct && !pistolHeld) {
             r.drawOrientedWorldBox(gunCenterX - sinY * 0.02 * s, gunCenterY + 0.070 * s, gunCenterZ - cosY * 0.02 * s,
                     0.044 * s, 0.048 * s, 0.095 * s, yaw, 0.0, Renderer3D.TEX_SOLID, gunMetal);
         }
-        // Ствол / тактический глушитель M4A1-S
-        double barrelLen = (jug ? 0.54 : (sniper ? 0.62 : 0.42)) * s;
-        r.drawOrientedWorldCylinder(gunCenterX + sinY * (0.24 * s + barrelLen * 0.5), gunCenterY + 0.018 * s, gunCenterZ + cosY * (0.24 * s + barrelLen * 0.5),
-                (jug ? 0.036 : (ct ? 0.024 : 0.018)) * s, barrelLen, yaw, 0.0, 9, gunMetal);
+        // Ствол / глушитель
+        double barrelStart = recLen * 0.5 + handLen * 0.9;
+        r.drawOrientedWorldCylinder(gunCenterX + sinY * (barrelStart + barrelLen * 0.5) * s, gunCenterY + 0.018 * s, gunCenterZ + cosY * (barrelStart + barrelLen * 0.5) * s,
+                barrelR * s, barrelLen * s, yaw, 0.0, 9, gunMetal);
 
         // Лазерный целеуказатель элитного снайпера!
-        if (sniper && state == State.ENGAGE) {
+        if (wcl == Weapon.WeaponClass.SNIPER && state == State.ENGAGE) {
             Vec3 muz = getMuzzleWorldPosition();
             Vec3 laserEnd = muz.add(new Vec3(sinY * 9.5, -0.05, cosY * 9.5));
             r.draw3DLine(muz, laserEnd, 0xFF2E38, 1);
@@ -929,7 +1128,7 @@ public class Bot {
 
         if (muzzleFlashTimer > 0.0) {
             Vec3 muz = getMuzzleWorldPosition();
-            r.drawTranslucentSphereSprite(muz.x, muz.y, muz.z, 0.19 * s, ct ? 0x88ECFF : 0xFFCA3A, 0.92);
+            r.drawTranslucentSphereSprite(muz.x, muz.y, muz.z, (suppressed ? 0.07 : 0.19) * s, ct ? 0x88ECFF : 0xFFCA3A, 0.92);
         }
     }
 
