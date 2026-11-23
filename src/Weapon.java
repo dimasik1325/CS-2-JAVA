@@ -1104,9 +1104,9 @@ public class Weapon {
         boolean pistol = gun.spec.file.contains("pistol");
         double gs = gun.spec.scale;
         // база вьюмодели 11.0 (выверена по GLB-рукам): спуск оружия в точке хвата
-        double bx = ox + (pistol ? -0.085 : -0.055);
-        double by = oy + (pistol ? 0.090 : 0.100);
-        double bz = oz + (pistol ? 0.120 : 0.020);
+        double bx = ox + (pistol ? -0.075 : -0.055);
+        double by = oy + (pistol ? 0.115 : 0.100);
+        double bz = oz + (pistol ? 0.075 : 0.020);
         double offX = 0.0, offY = 0.0, offZ = 0.0;
         if (!drawHands) { // витрина: центр модели в точке вращения
             offY = -(gun.minY + gun.maxY) * 0.5 * gs;

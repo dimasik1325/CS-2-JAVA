@@ -346,6 +346,7 @@ public final class MeshModel {
         public final MeshModel model;
         public final double[] rot;     // 9 на кость
         public final double[] off;     // 3 на кость (сдвиг после поворота, в осях покоя)
+        public final double[] scl;     // посуставной масштаб (1 = без изменений)
         public final float[] skin;     // 12 на кость
         private final double[] sk;     // double-копия для вычислений
 
@@ -354,6 +355,7 @@ public final class MeshModel {
             int n = m.jointCount();
             rot = new double[n * 9];
             off = new double[n * 3];
+            scl = new double[n];
             skin = new float[n * 12];
             sk = new double[n * 12];
             reset();
@@ -365,6 +367,7 @@ public final class MeshModel {
                 int b = j * 9;
                 for (int k = 0; k < 9; k++) rot[b + k] = (k % 4 == 0) ? 1 : 0;
                 off[j * 3] = off[j * 3 + 1] = off[j * 3 + 2] = 0;
+                scl[j] = 1.0;
             }
         }
 
@@ -398,24 +401,28 @@ public final class MeshModel {
                 int rb = j * 9;
                 double px = m.pivot[j * 3], py = m.pivot[j * 3 + 1], pz = m.pivot[j * 3 + 2];
                 double ox = off[j * 3], oy = off[j * 3 + 1], oz = off[j * 3 + 2];
-                // L = T(p) R T(-p) T(off):  A = R,  t = p - R p + R off
+                // L = T(p) R S(k) T(-p) T(off):  A = k*R,  t = p - k*R p + k*R off
+                double k = scl[j];
+                double m0 = r[rb] * k, m1 = r[rb + 1] * k, m2 = r[rb + 2] * k;
+                double m3 = r[rb + 3] * k, m4 = r[rb + 4] * k, m5 = r[rb + 5] * k;
+                double m6 = r[rb + 6] * k, m7 = r[rb + 7] * k, m8 = r[rb + 8] * k;
                 double qx = ox - px, qy = oy - py, qz = oz - pz;
-                double tx = px + r[rb] * qx + r[rb + 1] * qy + r[rb + 2] * qz;
-                double ty = py + r[rb + 3] * qx + r[rb + 4] * qy + r[rb + 5] * qz;
-                double tz = pz + r[rb + 6] * qx + r[rb + 7] * qy + r[rb + 8] * qz;
+                double tx = px + m0 * qx + m1 * qy + m2 * qz;
+                double ty = py + m3 * qx + m4 * qy + m5 * qz;
+                double tz = pz + m6 * qx + m7 * qy + m8 * qz;
                 int sb = j * 12;
                 int p = m.jointParent[j];
                 if (p < 0) {
-                    sk[sb] = r[rb]; sk[sb + 1] = r[rb + 1]; sk[sb + 2] = r[rb + 2]; sk[sb + 3] = tx;
-                    sk[sb + 4] = r[rb + 3]; sk[sb + 5] = r[rb + 4]; sk[sb + 6] = r[rb + 5]; sk[sb + 7] = ty;
-                    sk[sb + 8] = r[rb + 6]; sk[sb + 9] = r[rb + 7]; sk[sb + 10] = r[rb + 8]; sk[sb + 11] = tz;
+                    sk[sb] = m0; sk[sb + 1] = m1; sk[sb + 2] = m2; sk[sb + 3] = tx;
+                    sk[sb + 4] = m3; sk[sb + 5] = m4; sk[sb + 6] = m5; sk[sb + 7] = ty;
+                    sk[sb + 8] = m6; sk[sb + 9] = m7; sk[sb + 10] = m8; sk[sb + 11] = tz;
                 } else {
                     int pb = p * 12;
                     for (int row = 0; row < 3; row++) {
                         double a0 = sk[pb + row * 4], a1 = sk[pb + row * 4 + 1], a2 = sk[pb + row * 4 + 2], a3 = sk[pb + row * 4 + 3];
-                        sk[sb + row * 4]     = a0 * r[rb]     + a1 * r[rb + 3] + a2 * r[rb + 6];
-                        sk[sb + row * 4 + 1] = a0 * r[rb + 1] + a1 * r[rb + 4] + a2 * r[rb + 7];
-                        sk[sb + row * 4 + 2] = a0 * r[rb + 2] + a1 * r[rb + 5] + a2 * r[rb + 8];
+                        sk[sb + row * 4]     = a0 * m0 + a1 * m3 + a2 * m6;
+                        sk[sb + row * 4 + 1] = a0 * m1 + a1 * m4 + a2 * m7;
+                        sk[sb + row * 4 + 2] = a0 * m2 + a1 * m5 + a2 * m8;
                         sk[sb + row * 4 + 3] = a0 * tx + a1 * ty + a2 * tz + a3;
                     }
                 }

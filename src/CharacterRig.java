@@ -213,8 +213,9 @@ public final class CharacterRig {
 
     /** IK рук к рукояти и цевью оружия, матрица которого уже лежит в gunXf (координаты модели персонажа). */
     void armsToGun(Params p, GunModels.Gun gun, boolean pistol) {
-        // запястье правой руки — за рукоятью (ниже и позади спуска)
-        gunPoint(0.012, -0.060, -0.075, tmp);
+        boolean fp = fpArmScale > 0.0;
+        // запястье правой руки: у нижнего торца рукояти (кисть тянется вверх вдоль рукояти)
+        gunPoint(0.006, fp ? (pistol ? -0.115 : -0.112) : -0.060, fp ? (pistol ? -0.070 : -0.078) : -0.075, tmp);
         pose.solveTwoBoneIK(jUaR, jLaR, jHandR, tmp[0], tmp[1], tmp[2], 0.7, -1.0, -0.35);
         double[] fg = gun.foregrip;
         double reload = p.reload;
@@ -223,25 +224,79 @@ public final class CharacterRig {
             double w = Math.sin(Math.min(1, reload) * Math.PI);
             gunPoint(-0.03 - 0.12 * w, gun.magPivot[1] - 0.06 - 0.18 * w, gun.magPivot[2] - 0.05, tmp);
         } else if (pistol) {
-            gunPoint(-0.035, -0.075, -0.07, tmp);
+            gunPoint(fp ? -0.032 : -0.028, fp ? -0.118 : -0.100, fp ? -0.075 : -0.040, tmp);
         } else {
-            gunPoint(fg[0] - 0.030, fg[1] - 0.040, fg[2] - 0.055, tmp);
+            // левая кисть ПОД цевьём: запястье сзади-снизу, пальцы обхватывают цевьё вперёд
+            gunPoint(fg[0] - 0.028, fg[1] - (fp ? 0.042 : 0.045), fg[2] - (fp ? 0.145 : 0.055), tmp);
         }
         pose.solveTwoBoneIK(jUaL, jLaL, jHandL, tmp[0], tmp[1], tmp[2], -0.8, -1.0, -0.4);
-        // кисти: ладонь правой к рукояти, левая снизу под цевьём (обхват снизу-сбоку)
-        pose.rotateX(jHandR, -1.35);
-        pose.rotateX(jHandL, pistol ? -1.55 : -2.4);
-        pose.rotateZ(jHandL, pistol ? 0.9 : 0.25);
-        // хват: пальцы сжаты
-        curl(fingersR, -1, 0.85);
-        curl(fingersL, 1, pistol ? 1.0 : 0.6);
-        curl(thumbsR, -1, 0.35);
-        curl(thumbsL, 1, 0.35);
+        // в FP руки вытянуты масштабом — кисти возвращаем к натуральному размеру
+        if (fp) {
+            double hs = 1.0 / fpArmScale;
+            pose.scl[jHandR] = hs;
+            pose.scl[jHandL] = hs;
+        }
+        boolean reloading = reload >= 0;
+        if (fp) {
+            // точная ориентация кистей матрицами: пальцы вдоль оружия, ладонь к рукояти/цевью
+            // G: колонки = куда смотрят пальцы(X), тыльная сторона кисти(Y), ладонь(Z) в системе оружия
+            double[] gr = {0, 1, -1, 0, 1, 0, 1, 0, 0};          // правая: пальцы +Z, ладонь -X
+            double[] glR = {0, 1, 0, 0, 0, 1, 1, 0, 0};          // левая (винтовка): пальцы +Z, ладонь +Y
+            double[] glP = {0, 0, 1, 0, -1, 0, 1, 0, 0};         // левая (пистолет): пальцы +Z, ладонь +X
+            setHandFrame(jHandR, jLaR, gr);
+            setHandFrame(jHandL, jLaL, pistol ? glP : glR);
+            // пальцы обхватывают рукоять/цевье: сгиб к ладони (локальный Y)
+            curlPalm(fingersR, reloading ? 0.32 : 0.70);
+            curlPalm(fingersL, reloading ? 0.18 : 0.66);
+            curlPalm(thumbsR, 0.28);
+            curlPalm(thumbsL, 0.26);
+        } else {
+            // третье лицо: ладонь правой к рукояти, левая снизу под цевьём (обхват снизу-сбоку)
+            pose.rotateX(jHandR, -1.35);
+            pose.rotateX(jHandL, pistol ? -1.55 : -2.4);
+            pose.rotateZ(jHandL, pistol ? 0.9 : 0.25);
+            curl(fingersR, -1, 0.85);
+            curl(fingersL, 1, reloading ? 0.35 : (pistol ? 1.0 : 0.6));
+            curl(thumbsR, -1, 0.35);
+            curl(thumbsL, 1, 0.40);
+        }
         pose.compute();
     }
 
     private void curl(int[] joints, int sign, double ang) {
         for (int j : joints) pose.rotateZ(j, sign * ang);
+    }
+
+    /** Сгиб пальцев к ладони (после точной ориентации кисти ладонь = локальный +Z). */
+    private void curlPalm(int[] joints, double ang) {
+        for (int j : joints) pose.rotateY(j, -ang);
+    }
+
+    private static double[] mul33rm(double[] a, double[] b) {
+        double[] o = new double[9];
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++)
+                o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+        return o;
+    }
+
+    private static void transpose3(double[] m, double[] out) {
+        out[0] = m[0]; out[1] = m[3]; out[2] = m[6];
+        out[3] = m[1]; out[4] = m[4]; out[5] = m[7];
+        out[6] = m[2]; out[7] = m[5]; out[8] = m[8];
+    }
+
+    /** Ориентировать кисть matrix-точн: локальный поворот = A_parent^T · R_gun · G. */
+    private void setHandFrame(int hand, int lower, double[] G) {
+        if (hand < 0 || lower < 0) return;
+        double[] rg = {gunXf[0], gunXf[1], gunXf[2], gunXf[4], gunXf[5], gunXf[6], gunXf[8], gunXf[9], gunXf[10]};
+        double[] M = mul33rm(rg, G);
+        double[] A = new double[12];
+        pose.boneMatrix(lower, A);
+        double[] At = new double[9];
+        transpose3(new double[]{A[0], A[1], A[2], A[4], A[5], A[6], A[8], A[9], A[10]}, At);
+        double[] L = mul33rm(At, M);
+        pose.setRotation(hand, L);
     }
 
     private void gunPoint(double x, double y, double z, double[] out) {
@@ -422,7 +477,7 @@ public final class CharacterRig {
     private MeshModel armMesh;   // подмножество: скиннинг только вершин рук
     private static final double EYE_Y = 1.64, EYE_Z = 0.02;
     /** Трюк FPS-ригов: руки длиннее пропорций тела (масштаб относительно точки у груди). */
-    private static final double FP_ARM_SCALE = 1.4, FP_PIVOT_Y = 0.90;
+    private static final double FP_ARM_SCALE = 1.32, FP_PIVOT_Y = 0.90;
     private double fpArmScale = 0.0;
 
     /**
@@ -432,6 +487,7 @@ public final class CharacterRig {
     public void renderFirstPerson(Renderer3D r, GunModels.Gun gun, double[] gunView, Params p,
                                   GameSettings.WeaponSkin skin, boolean drawArms) {
         buildFirstPersonPose(gun, gunView, p, skin, drawArms);
+        // руки под оружием: затвор и ствол не перекрываются ладонями
         if (drawArms) {
             // руки длиннее пропорций: масштаб относительно (0, FP_PIVOT_Y, 0) минус положение глаз
             double sc = FP_ARM_SCALE, ty = FP_PIVOT_Y * (1 - sc) - EYE_Y;
@@ -502,9 +558,9 @@ public final class CharacterRig {
             pose.reset();
             pose.rotateX(jAbd, 0.06);
             pose.rotateY(jTorso, 0.22);
-            // плечи заметно ниже глаз и чуть вперёд — руки входят в кадр снизу, без «плит» у краёв
-            pose.translate(jShR, 0.03, -0.20, 0.05);
-            pose.translate(jShL, -0.03, -0.20, 0.05);
+            // плечи заметно ниже глаз — рукава входят в кадр только снизу у кистей
+            pose.translate(jShR, 0.05, -0.24, 0.03);
+            pose.translate(jShL, -0.05, -0.24, 0.03);
             pose.compute();
             // матрица оружия в координатах модели: модель = вид + глаз
             System.arraycopy(gunView, 0, gunXf, 0, 12);
