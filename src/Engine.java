@@ -3057,6 +3057,7 @@ public class Engine extends JPanel implements Runnable {
         renderer.ensureViewport(target3dW, target3dH, effectiveFov);
         renderer.configureAdvancedGraphics(settings);
         renderer.applyTimeOfDay(settings.timeOfDay);
+        renderer.setDynamicBotLod(dynScale < 0.92);
         renderer.setGraphicsFlags(
                 settings.fogEnabled,
                 settings.skyCloudsAndSunFlare,

@@ -2423,6 +2423,12 @@ public class Renderer3D {
     /** Смещение LOD для GLB-моделей по настройке детализации. */
     public int meshLodBias() { return geometryLodScale < 0.85 ? 1 : 0; }
 
+    // 11.0 PERF: динамический LOD ботов — при просадке FPS (динам. разрешение < 92%) боты рисуются LOD1+
+    private boolean dynamicBotLod = false;
+    public void setDynamicBotLod(boolean on) { this.dynamicBotLod = on; }
+    /** Смещение LOD именно для бойцов: настройка детализации ИЛИ активная динамическая оптимизация. */
+    public int botLodBias() { return (geometryLodScale < 0.85 || dynamicBotLod) ? 1 : 0; }
+
     /** Видимость сферы в мире (для моделей). */
     public boolean isMeshVisible(double wx, double wy, double wz, double radius) {
         return isSphereVisible(wx, wy, wz, radius);

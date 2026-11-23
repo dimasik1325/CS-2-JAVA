@@ -42,6 +42,12 @@ public final class CharacterRig {
     private int[] idxR, wrapR;   // правая: указательный (спуск) и обхватывающие пальцы
     private final int[] baseColors;
     private final int[] colors;
+    // 11.0: тактические перчатки от первого лица — материал кожи кистей перекрашивается в цвет перчаток
+    private int skinMatIndex = -1;
+    private final int[] fpArmColors;
+    private static final int GLOVE_CT = 0x2A2F38, GLOVE_T = 0x4C3B27, GLOVE_JUGG = 0x1F2329;
+    private static final int PLATE_CT = 0x39424E, PLATE_T = 0x634E30, PLATE_JUGG = 0x2B313A;
+    private static final int STRAP_COL = 0xB08F5C;
     private final double[] tmp = new double[3];
     private final double[] tmp2 = new double[3];
     private final double[] bone = new double[12];
@@ -73,6 +79,16 @@ public final class CharacterRig {
         baseColors = new int[m.matColors.length];
         for (int i = 0; i < baseColors.length; i++) baseColors[i] = teamColor(v, m.matNames[i], m.matColors[i]);
         colors = baseColors.clone();
+        // 11.0: перчатки — ищем материал кожи и красим его в цвет перчаток (только для FP-рук)
+        for (int i = 0; i < m.matNames.length; i++) {
+            if ("Skin".equalsIgnoreCase(m.matNames[i])) { skinMatIndex = i; break; }
+        }
+        fpArmColors = colors.clone();
+        if (skinMatIndex >= 0) {
+            boolean ct = (v == Variant.CT_SWAT || v == Variant.CT_SOLDIER);
+            int glove = (v == Variant.JUGGERNAUT) ? GLOVE_JUGG : (ct ? GLOVE_CT : GLOVE_T);
+            fpArmColors[skinMatIndex] = glove;
+        }
     }
 
     /** Цепочка суставов одного пальца (Index.R, Middle.L, ...). */
@@ -269,11 +285,11 @@ public final class CharacterRig {
             setHandFrame(jHandR, jLaR, gr);
             setHandFrame(jHandL, jLaL, pistol ? glP : glR);
             // реальный хват: три пальца обхватывают рукоять, указательный — на спуске
-            curlPalm(wrapR, reloading ? 0.32 : 0.86);
+            curlPalm(wrapR, reloading ? 0.32 : 0.95);
             curlPalm(idxR, pistol ? 0.16 : 0.20);
-            curlPalm(thumbsR, 0.42);
+            curlPalm(thumbsR, 0.55);
             // левая: жёсткий обхват цевья/рукояти снизу (при перезарядке раскрывается)
-            curlPalm(fingersL, reloading ? 0.18 : 0.88);
+            curlPalm(fingersL, reloading ? 0.18 : 0.98);
             curlPalm(thumbsL, 0.30);
         } else {
             // третье лицо: ладонь правой к рукояти, указательный на спуске
@@ -391,7 +407,8 @@ public final class CharacterRig {
         double rad = 1.3 * scale;
         if (!r.isMeshVisible(wx, wy + 0.9 * scale, wz, rad)) return false;
         double dist = r.distanceToCamera(wx, wy + 1.0, wz);
-        int lod = dist < 6 ? 0 : (dist < 16 ? 1 : 2);
+        // 11.0 PERF: LOD0 только вплотную (4.5м), дальше LOD1 — 3x меньше трис без потери читаемости
+        int lod = dist < 4.5 ? 0 : (dist < 15 ? 1 : 2);
         lod = Math.min(model.lods.length - 1, lod + lodBias);
         buildPose(p, p.death >= 0 ? null : gun);
 
@@ -518,7 +535,9 @@ public final class CharacterRig {
             // руки длиннее пропорций: масштаб относительно (0, FP_PIVOT_Y, 0) минус положение глаз
             double sc = FP_ARM_SCALE, ty = FP_PIVOT_Y * (1 - sc) - EYE_Y;
             double[] armXf = {sc, 0, 0, 0, 0, sc, 0, ty, 0, 0, sc, -EYE_Z};
-            r.drawMesh(armMesh, 0, pose.skin, armXf, colors, true, null, 1.08);
+            r.drawMesh(armMesh, 0, pose.skin, armXf, fpArmColors, true, null, 1.08);
+            // 11.0: тактические перчатки — костяшная пластина и манжета на запястье
+            drawFpGloves(r, armXf, sc);
         }
         r.drawMesh(gun.model, 0, gun.pose.skin, gunView, gunColors, true, null, 1.12);
         drawAttachments(r, gun, gunView, true, skin);
@@ -603,5 +622,88 @@ public final class CharacterRig {
         out[0] = gunView[0] * x + gunView[1] * y + gunView[2] * z + gunView[3];
         out[1] = gunView[4] * x + gunView[5] * y + gunView[6] * z + gunView[7];
         out[2] = gunView[8] * x + gunView[9] * y + gunView[10] * z + gunView[11];
+    }
+
+    // ===================== 11.0: ТАКТИЧЕСКИЕ ПЕРЧАТКИ FP =====================
+
+    /** Позиция сустава в пространстве камеры (через матрицу кости и armXf). */
+    private double[] jointView(int j, double[] armXf, double[] out) {
+        pose.boneMatrix(j, bone);
+        double bx = bone[3], by = bone[7], bz = bone[11];
+        out[0] = armXf[0] * bx + armXf[1] * by + armXf[2] * bz + armXf[3];
+        out[1] = armXf[4] * bx + armXf[5] * by + armXf[6] * bz + armXf[7];
+        out[2] = armXf[8] * bx + armXf[9] * by + armXf[10] * bz + armXf[11];
+        return out;
+    }
+
+    /**
+     * 11.0: тактические перчатки от первого лица. Кожа кистей уже перекрашена (fpArmColors);
+     * сверху добавляются объёмные элементы: костяшная пластина на тыльной стороне кисти,
+     * манжета на запястье (цилиндр вдоль предплечья) и светлый ремешок.
+     */
+    private void drawFpGloves(Renderer3D r, double[] armXf, double sc) {
+        if (jHandR < 0 || jLaR < 0) return;
+        double[] gv = gunXf;
+        // оси оружия в пространстве камеры (столбцы поворота gunXf), нормализованные
+        double[] ax = norm3(gv[0], gv[4], gv[8]);    // X оружия (вправо)
+        double[] ay = norm3(gv[1], gv[5], gv[9]);    // Y оружия (вверх)
+        double[] az = norm3(gv[2], gv[6], gv[10]);   // Z оружия (вперёд)
+        boolean ct = (variant == Variant.CT_SWAT || variant == Variant.CT_SOLDIER);
+        int plateCol = (variant == Variant.JUGGERNAUT) ? PLATE_JUGG : (ct ? PLATE_CT : PLATE_T);
+
+        double[] tmp = new double[3];
+        double[] tmpE = new double[3];
+
+        // ---- правая рука: костяшки смотрят вправо-вверх (ладонь обхватывает рукоять слева)
+        double[] wR = jointView(jHandR, armXf, new double[3]);
+        double[] eR = jointView(jLaR, armXf, new double[3]);
+        // костяшная пластина: от запястья вперёд по пальцам и наружу от оружия
+        double px = wR[0] + az[0] * 0.045 * sc + ax[0] * 0.024 * sc + ay[0] * 0.010 * sc;
+        double py = wR[1] + az[1] * 0.045 * sc + ax[1] * 0.024 * sc + ay[1] * 0.010 * sc;
+        double pz = wR[2] + az[2] * 0.045 * sc + ax[2] * 0.024 * sc + ay[2] * 0.010 * sc;
+        r.drawViewModelBox(px, py, pz, 0.017 * sc, 0.050 * sc, 0.040 * sc,
+                0.0, -0.10, 0.0, px, py, pz, Renderer3D.TEX_SOLID, plateCol);
+        // манжета: цилиндр вдоль предплечья (запястье -> локоть)
+        tmp[0] = wR[0] - eR[0]; tmp[1] = wR[1] - eR[1]; tmp[2] = wR[2] - eR[2];
+        double fl = Math.sqrt(tmp[0] * tmp[0] + tmp[1] * tmp[1] + tmp[2] * tmp[2]);
+        if (fl > 1e-4) {
+            double dx = tmp[0] / fl, dy = tmp[1] / fl, dz = tmp[2] / fl;
+            double cx = wR[0] - dx * 0.042 * sc, cy = wR[1] - dy * 0.042 * sc, cz = wR[2] - dz * 0.042 * sc;
+            double rotX = -Math.asin(Math.max(-1, Math.min(1, dy)));
+            double rotY = Math.atan2(dx, dz);
+            r.drawViewModelCylinder(cx, cy, cz, 0.031 * sc, 0.032 * sc, 0.098 * sc,
+                    rotX, rotY, 0.0, cx, cy, cz, 12, 0x1C2027);
+            r.drawViewModelCylinder(cx - dx * 0.034 * sc, cy - dy * 0.034 * sc, cz - dz * 0.034 * sc,
+                    0.033 * sc, 0.033 * sc, 0.020 * sc, rotX, rotY, 0.0, cx, cy, cz, 12, STRAP_COL);
+        }
+
+        // ---- левая рука: тыльная сторона смотрит вниз (кисть держит цевьё снизу)
+        if (jHandL >= 0 && jLaL >= 0) {
+            double[] wL = jointView(jHandL, armXf, new double[3]);
+            double[] eL = jointView(jLaL, armXf, tmpE);
+            double qx = wL[0] + az[0] * 0.040 * sc - ay[0] * 0.024 * sc;
+            double qy = wL[1] + az[1] * 0.040 * sc - ay[1] * 0.024 * sc;
+            double qz = wL[2] + az[2] * 0.040 * sc - ay[2] * 0.024 * sc;
+            r.drawViewModelBox(qx, qy, qz, 0.050 * sc, 0.017 * sc, 0.038 * sc,
+                    0.0, -0.10, 0.0, qx, qy, qz, Renderer3D.TEX_SOLID, plateCol);
+            tmp[0] = wL[0] - eL[0]; tmp[1] = wL[1] - eL[1]; tmp[2] = wL[2] - eL[2];
+            double fl2 = Math.sqrt(tmp[0] * tmp[0] + tmp[1] * tmp[1] + tmp[2] * tmp[2]);
+            if (fl2 > 1e-4) {
+                double dx = tmp[0] / fl2, dy = tmp[1] / fl2, dz = tmp[2] / fl2;
+                double cx = wL[0] - dx * 0.042 * sc, cy = wL[1] - dy * 0.042 * sc, cz = wL[2] - dz * 0.042 * sc;
+                double rotX = -Math.asin(Math.max(-1, Math.min(1, dy)));
+                double rotY = Math.atan2(dx, dz);
+                r.drawViewModelCylinder(cx, cy, cz, 0.030 * sc, 0.031 * sc, 0.098 * sc,
+                        rotX, rotY, 0.0, cx, cy, cz, 12, 0x1C2027);
+                r.drawViewModelCylinder(cx - dx * 0.034 * sc, cy - dy * 0.034 * sc, cz - dz * 0.034 * sc,
+                        0.032 * sc, 0.032 * sc, 0.020 * sc, rotX, rotY, 0.0, cx, cy, cz, 12, STRAP_COL);
+            }
+        }
+    }
+
+    private static double[] norm3(double x, double y, double z) {
+        double l = Math.sqrt(x * x + y * y + z * z);
+        if (l < 1e-9) return new double[]{0, 0, 1};
+        return new double[]{x / l, y / l, z / l};
     }
 }

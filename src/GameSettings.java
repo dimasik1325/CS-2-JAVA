@@ -197,9 +197,10 @@ public class GameSettings {
     }
 
     public enum BotDifficulty {
-        EASY("Новичок", 0.55, 0.072, 3.0, 9),
-        NORMAL("Спецназ", 0.34, 0.046, 4.2, 13),
-        HARD("Global Elite", 0.17, 0.025, 5.1, 18);
+        // 11.0 BALANCE: урон снижен ~35-40%, реакция медленнее, разброс шире — враги больше не «лазером»
+        EASY("Новичок", 0.80, 0.085, 3.0, 6),
+        NORMAL("Спецназ", 0.55, 0.058, 4.2, 8),
+        HARD("Global Elite", 0.32, 0.036, 5.1, 11);
 
         public final String label;
         public final double reactionDelay;

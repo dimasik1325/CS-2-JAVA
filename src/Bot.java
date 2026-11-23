@@ -109,6 +109,16 @@ public class Bot {
     private double searchTimer = 0.0;
     private double stuckTimer = 0.0;
     private final Vec3 lastProgressPos = new Vec3();
+    // 11.0 SMART BOTS: обход стен («усики»-рейкасты + скольжение и следование вдоль препятствия)
+    private final double[] steerOut = new double[2];
+    private double avoidSideTimer = 0.0;
+    private int avoidSide = 1;               // -1 влево, +1 вправо
+    private final Vec3 navStep = new Vec3();
+    private double navRepathTimer = 0.0;
+    private double wallFollowTimer = 0.0;    // идём вдоль стены, не пересчитывая навигацию
+    private final Vec3 wallFollowDir = new Vec3(0, 0, 1);  // текущее направление скольжения вдоль стены
+    private double escapeTimer = 0.0;        // откат назад из «кармана»
+    private final Vec3 lastMvDir = new Vec3(0, 0, 1);      // последнее направление движения
 
     private double reactionTimer = 0.35;
     private double fireCooldown = 0.45;
@@ -356,8 +366,8 @@ public class Bot {
             bestTargetDist = d;
             targetIsPlayer = true;
             targetFeetPos = player.getPosition();
-            // Боты целятся в торс (как реальные игроки на префайре); элита держит прицел выше — ближе к шее
-            double aimFrac = 0.60 + 0.05 * difficulty.ordinal();
+            // Боты целятся в торс; элита чуть выше — но не в шею (11.0 BALANCE)
+            double aimFrac = 0.55 + 0.045 * difficulty.ordinal();
             Vec3 pp = player.getPosition();
             targetAimPos = new Vec3(pp.x, pp.y + player.getCurrentBodyHeight() * aimFrac, pp.z);
         }
@@ -394,6 +404,8 @@ public class Bot {
         double moveZ = 0.0;
         double combatSpeed = difficulty.combatSpeed * Weapon.prototype(weaponType).getMoveSpeedMultiplier() / 0.86;
         if (taggedTimer > 0.0) combatSpeed *= 0.5; // tagging: попадание тормозит бота
+        boolean engaged = (state == State.ENGAGE && seesEnemy);
+        Vec3 navGoalForSteering = null;   // долгая цель для «следования вдоль стены»
 
         if (state == State.ENGAGE && seesEnemy) {
             double dx = targetFeetPos.x - position.x;
@@ -446,12 +458,12 @@ public class Bot {
                     if (burstRemaining <= 0) {
                         sprayShot = 0;
                         switch (proto.getWeaponClass()) {
-                            case MACHINE_GUN: burstRemaining = 6 + rng.nextInt(6); fireCooldown = 0.42 + rng.nextDouble() * 0.25; break;
-                            case SNIPER:      burstRemaining = 1; fireCooldown = Math.max(interval, 1.05) + rng.nextDouble() * 0.35; break;
-                            case SHOTGUN:     burstRemaining = 1; fireCooldown = interval + 0.15 + rng.nextDouble() * 0.25; break;
-                            case PISTOL:      burstRemaining = 1 + rng.nextInt(2); fireCooldown = interval + 0.20 + rng.nextDouble() * 0.25; break;
-                            case SMG:         burstRemaining = 3 + rng.nextInt(5); fireCooldown = 0.40 + rng.nextDouble() * 0.30; break;
-                            default:          burstRemaining = 2 + rng.nextInt(3); fireCooldown = 0.55 + rng.nextDouble() * 0.34; break;
+                            case MACHINE_GUN: burstRemaining = 6 + rng.nextInt(6); fireCooldown = 0.58 + rng.nextDouble() * 0.32; break;
+                            case SNIPER:      burstRemaining = 1; fireCooldown = Math.max(interval, 1.30) + rng.nextDouble() * 0.45; break;
+                            case SHOTGUN:     burstRemaining = 1; fireCooldown = interval + 0.30 + rng.nextDouble() * 0.30; break;
+                            case PISTOL:      burstRemaining = 1 + rng.nextInt(2); fireCooldown = interval + 0.38 + rng.nextDouble() * 0.30; break;
+                            case SMG:         burstRemaining = 3 + rng.nextInt(5); fireCooldown = 0.55 + rng.nextDouble() * 0.35; break;
+                            default:          burstRemaining = 2 + rng.nextInt(3); fireCooldown = 0.72 + rng.nextDouble() * 0.42; break;
                         }
                     } else {
                         fireCooldown = interval * (1.05 + rng.nextDouble() * 0.25);
@@ -460,6 +472,7 @@ public class Bot {
             }
         } else if (team == Team.COUNTER_TERRORIST && plantedC4 != null) {
             // Союзник CT спешит к заложенной бомбе C4, чтобы помочь обезвредить её!
+            navGoalForSteering = plantedC4.pos;
             double dx = plantedC4.pos.x - position.x;
             double dz = plantedC4.pos.z - position.z;
             double dist = Math.sqrt(dx * dx + dz * dz);
@@ -472,6 +485,7 @@ public class Bot {
                 yaw = turnSmoothly(yaw, Math.atan2(dx, dz), dt * 5.0);
             }
         } else if (team == Team.TERRORIST && carryingC4 && c4TargetSpot != null) {
+            navGoalForSteering = c4TargetSpot;
             double dx = c4TargetSpot.x - position.x;
             double dz = c4TargetSpot.z - position.z;
             double dist = Math.sqrt(dx * dx + dz * dz);
@@ -493,6 +507,7 @@ public class Bot {
                 moveZ = (ndz / ndist) * (PATROL_SPEED * 1.18);
             }
         } else if (team == Team.COUNTER_TERRORIST && radioOrder == RadioOrder.FOLLOW_PLAYER && player != null && player.isAlive()) {
+            navGoalForSteering = player.getPosition();
             double dx = player.getPosition().x - position.x;
             double dz = player.getPosition().z - position.z;
             double dist = Math.sqrt(dx * dx + dz * dz);
@@ -505,6 +520,7 @@ public class Bot {
                 yaw = turnSmoothly(yaw, player.getYaw(), dt * 3.5);
             }
         } else if (team == Team.COUNTER_TERRORIST && radioOrder == RadioOrder.HOLD_POSITION) {
+            navGoalForSteering = holdAnchorPos;
             double dx = holdAnchorPos.x - position.x;
             double dz = holdAnchorPos.z - position.z;
             double dist = Math.sqrt(dx * dx + dz * dz);
@@ -518,6 +534,7 @@ public class Bot {
             }
         } else if (team == Team.COUNTER_TERRORIST && radioOrder == RadioOrder.RUSH_SITE) {
             Vec3 rushGoal = (currentWaypointIndex % 2 == 0) ? map.getBombsiteASpot() : map.getBombsiteBSpot();
+            navGoalForSteering = rushGoal;
             double dx = rushGoal.x - position.x;
             double dz = rushGoal.z - position.z;
             double dist = Math.sqrt(dx * dx + dz * dz);
@@ -540,8 +557,13 @@ public class Bot {
             } else {
                 double targetYaw = Math.atan2(dx, dz);
                 yaw = turnSmoothly(yaw, targetYaw, dt * 5.2);
-                moveX = (dx / dist) * (combatSpeed * 0.88);
-                moveZ = (dz / dist) * (combatSpeed * 0.88);
+                Vec3 nav = cachedNavStep(map, lastSeenEnemyPos, dt);
+                navGoalForSteering = nav;
+                double ndx = nav.x - position.x;
+                double ndz = nav.z - position.z;
+                double ndist = Math.max(0.01, Math.hypot(ndx, ndz));
+                moveX = (ndx / ndist) * (combatSpeed * 0.88);
+                moveZ = (ndz / ndist) * (combatSpeed * 0.88);
             }
         } else {
             List<Vec3> wps = map.getPatrolWaypoints();
@@ -555,8 +577,13 @@ public class Bot {
                 } else {
                     double targetYaw = Math.atan2(dx, dz);
                     yaw = turnSmoothly(yaw, targetYaw, dt * 4.5);
-                    moveX = (dx / dist) * PATROL_SPEED;
-                    moveZ = (dz / dist) * PATROL_SPEED;
+                    Vec3 nav = cachedNavStep(map, wp, dt);
+                    navGoalForSteering = nav;
+                    double ndx = nav.x - position.x;
+                    double ndz = nav.z - position.z;
+                    double ndist = Math.max(0.01, Math.hypot(ndx, ndz));
+                    moveX = (ndx / ndist) * PATROL_SPEED;
+                    moveZ = (ndz / ndist) * PATROL_SPEED;
                 }
             }
         }
@@ -576,6 +603,24 @@ public class Bot {
             }
         }
 
+        // 11.0 SMART BOTS: обход стен — «усики»-рейкасты поворачивают движение вдоль препятствия
+        double esp = Math.sqrt(moveX * moveX + moveZ * moveZ);
+        if (escapeTimer > 0.0) {
+            // откат назад из «кармана»: идём в противоположную сторону от последнего направления
+            escapeTimer -= dt;
+            if (esp > 0.4) {
+                moveX = -lastMvDir.x * esp;
+                moveZ = -lastMvDir.z * esp;
+            }
+        } else {
+            steerOut[0] = moveX; steerOut[1] = moveZ;
+            steerAroundWalls(map, steerOut, dt, engaged ? null : navGoalForSteering);
+            moveX = steerOut[0];
+            moveZ = steerOut[1];
+            esp = Math.sqrt(moveX * moveX + moveZ * moveZ);
+            if (esp > 0.4) lastMvDir.set(moveX / esp, 0.0, moveZ / esp);
+        }
+
         boolean movedX = tryMoveBotAxis(map, moveX * dt, 0.0);
         boolean movedZ = tryMoveBotAxis(map, 0.0, moveZ * dt);
         applyVerticalPhysics(dt, map);
@@ -591,14 +636,150 @@ public class Bot {
         if (stuckTimer >= 1.1) {
             if (speedSq > 1.0 && position.distXZ(lastProgressPos) < 0.22) {
                 strafeDir = -strafeDir;
-                state = State.PATROL;
-                pickNextWaypoint(map.getPatrolWaypoints());
+                escapeTimer = 0.9;   // 11.0 SMART BOTS: сначала откат из кармана, потом новая цель
+                if (state == State.ENGAGE) {
+                    // не выходим из боя: меняем сторону маневра вдоль укрытия
+                    avoidSide = -avoidSide;
+                    avoidSideTimer = 0.8;
+                } else {
+                    state = State.PATROL;
+                    pickNextWaypoint(map.getPatrolWaypoints());
+                }
             }
             lastProgressPos.set(position);
             stuckTimer = 0.0;
         }
 
         return shotEvent;
+    }
+
+    /** Кэшированный шаг навигации: промежуточная точка с прямой видимостью (пересчёт 4 раза в секунду). */
+    private Vec3 cachedNavStep(Map map, Vec3 goal, double dt) {
+        navRepathTimer -= dt;
+        if (navRepathTimer <= 0.0) {
+            navRepathTimer = 0.25;
+            navStep.set(resolveNavStepTowards(map, goal));
+        }
+        return navStep;
+    }
+
+    /**
+     * 11.0 SMART BOTS: обход стен. «Усики»-рейкасты по ширине корпуса (3 параллельных луча вперёд,
+     * 2 диагональных ±40°) на высоте 0.36 м — видят и низкие ящики, и углы зданий, которые узкий
+     * луч «прошивает» мимо. При контакте — поворот в свободную сторону, скольжение вдоль стены
+     * и «следование вдоль стены» с commitment'ом, пока к цели не откроется прямая видимость.
+     */
+    private void steerAroundWalls(Map map, double[] mv, double dt, Vec3 navGoal) {
+        if (avoidSideTimer > 0.0) avoidSideTimer -= dt;
+        double mx = mv[0], mz = mv[1];
+        double sp = Math.sqrt(mx * mx + mz * mz);
+        if (sp < 0.4) return;
+        double ux = mx / sp, uz = mz / sp;
+        double wY = position.y + 0.36;   // выше макс. шага (0.34), ниже пояса — видит ящики
+        double ox = uz * 0.28, oz = -ux * 0.28;   // поперечник корпуса (право)
+
+        // ---- РЕЖИМ СЛЕДОВАНИЯ ВДОЛЬ СТЕНЫ (с commitment'ом, чтобы не «хлопать» у угла) ----
+        while (wallFollowTimer > 0.0) {
+            wallFollowTimer -= dt;
+            Vec3.RayHit fHit = raycastWide(map, wY, ox, oz, ux, uz, 1.7);
+            if (fHit == null) {
+                // стена кончилась: выходим из follow — дальше идём по цели,
+                // у следующей стены follow перезапустится (тангенс теперь по свободе хода)
+                break;
+            }
+            Vec3 n = fHit.normal;
+            double nl = Math.sqrt(n.x * n.x + n.z * n.z);
+            if (nl < 1e-4) break;
+            double tx = -n.z / nl, tz = n.x / nl;   // касательная к стене
+            // свобода хода вдоль каждой из двух касательных — выбираем более свободную
+            Vec3.RayHit hA = raycastWide(map, wY, ox, oz, tx, tz, 1.8);
+            Vec3.RayHit hB = raycastWide(map, wY, ox, oz, -tx, -tz, 1.8);
+            double cA = hA != null ? hA.distance : 99.0;
+            double cB = hB != null ? hB.distance : 99.0;
+            if (cB > cA + 0.30) { tx = -tx; tz = -tz; }
+            else if (cA > cB + 0.30) {
+                // оставляем как есть
+            } else if (navGoal != null) {
+                double gx = navGoal.x - position.x, gz = navGoal.z - position.z;
+                double gl = Math.sqrt(gx * gx + gz * gz);
+                if (gl > 1e-4) {
+                    double dot = tx * (gx / gl) + tz * (gz / gl);
+                    if (dot < -0.05) { tx = -tx; tz = -tz; }
+                }
+            } else if (tx * ux + tz * uz < 0.0) { tx = -tx; tz = -tz; }
+            // скользим вдоль стены с лёгким сносом от неё
+            double fx = tx + (n.x / nl) * 0.30, fz = tz + (n.z / nl) * 0.30;
+            double fl = Math.sqrt(fx * fx + fz * fz);
+            if (fl < 1e-4) break;
+            wallFollowDir.set(fx / fl, 0.0, fz / fl);
+            mv[0] = wallFollowDir.x * sp;
+            mv[1] = wallFollowDir.z * sp;
+            return;
+        }
+        wallFollowTimer = 0.0;
+
+        Vec3.RayHit fHit = raycastWide(map, wY, ox, oz, ux, uz, 2.4);
+        if (fHit == null && avoidSideTimer <= 0.0) return;   // путь чист — не рулим
+        double fD = fHit != null ? fHit.distance : 99.0;
+        double ca40 = 0.766, sa40 = 0.643;
+        double lx = ux * ca40 + uz * sa40, lz = -ux * sa40 + uz * ca40;   // влево 40°
+        double rx = ux * ca40 - uz * sa40, rz = ux * sa40 + uz * ca40;    // вправо 40°
+        // диагональные лучи смещаем к соответствующему краю корпуса
+        Vec3.RayHit lHit = map.raycast(new Vec3(position.x - ox, wY, position.z - oz), new Vec3(lx, 0.0, lz), 2.9);
+        Vec3.RayHit rHit = map.raycast(new Vec3(position.x + ox, wY, position.z + oz), new Vec3(rx, 0.0, rz), 2.9);
+        double lD = lHit != null ? lHit.distance : 99.0;
+        double rD = rHit != null ? rHit.distance : 99.0;
+        if (fD > 2.1 && lD > 2.4 && rD > 2.4) return;
+
+        // выбор стороны: по запасу просвета, с гистерезисом чтобы не дрожать у угла
+        int side = (avoidSideTimer > 0.0) ? avoidSide : (lD > rD ? -1 : 1);
+        avoidSide = side;
+        avoidSideTimer = 0.55;
+
+        double turn = (fD < 1.15 || (lD < 0.9 && rD < 0.9)) ? 0.95 : 0.48;  // 55° или 28°
+        double ca = Math.cos(turn), sa = Math.sin(turn);
+        double nx, nz;
+        if (side < 0) { nx = ux * ca - uz * sa; nz = ux * sa + uz * ca; }
+        else          { nx = ux * ca + uz * sa; nz = -ux * sa + uz * ca; }
+
+        // скольжение вдоль стены: убираем компоненту в нормаль
+        if (fHit != null && fHit.normal != null && fD < 1.4) {
+            Vec3 n = fHit.normal;
+            double dn = nx * n.x + nz * n.z;
+            if (dn < 0.0) { nx -= n.x * dn; nz -= n.z * dn; }
+        }
+        double nl2 = Math.sqrt(nx * nx + nz * nz);
+        if (nl2 > 1e-6) {
+            mv[0] = (nx / nl2) * sp;
+            mv[1] = (nz / nl2) * sp;
+        }
+        // стена вплотную и цель не видна — включаем следование вдоль стены
+        if (navGoal != null && fD < 1.5
+                && !map.hasLineOfSight(new Vec3(position.x, wY, position.z),
+                                       new Vec3(navGoal.x, wY, navGoal.z))) {
+            wallFollowTimer = 1.6;
+            if (fHit != null && fHit.normal != null) {
+                double nl3 = Math.sqrt(fHit.normal.x * fHit.normal.x + fHit.normal.z * fHit.normal.z);
+                if (nl3 > 1e-4) {
+                    double tx = -fHit.normal.z / nl3, tz = fHit.normal.x / nl3;
+                    if (tx * nx + tz * nz < 0.0) { tx = -tx; tz = -tz; }
+                    wallFollowDir.set(tx, 0.0, tz);
+                }
+            } else {
+                wallFollowDir.set(nx / nl2, 0.0, nz / nl2);
+            }
+        }
+    }
+
+    /** Три параллельных луча по ширине корпуса (центр ± 0.28 м) — ближайшее препятствие. */
+    private Vec3.RayHit raycastWide(Map map, double wY, double ox, double oz, double ux, double uz, double dist) {
+        Vec3.RayHit c = map.raycast(new Vec3(position.x, wY, position.z), new Vec3(ux, 0.0, uz), dist);
+        Vec3.RayHit l = map.raycast(new Vec3(position.x - ox, wY, position.z - oz), new Vec3(ux, 0.0, uz), dist);
+        Vec3.RayHit r = map.raycast(new Vec3(position.x + ox, wY, position.z + oz), new Vec3(ux, 0.0, uz), dist);
+        Vec3.RayHit best = c;
+        if (l != null && (best == null || l.distance < best.distance)) best = l;
+        if (r != null && (best == null || r.distance < best.distance)) best = r;
+        return best;
     }
 
     private void pickNextWaypoint(List<Vec3> waypoints) {
@@ -655,32 +836,54 @@ public class Bot {
     }
 
     private Vec3 resolveNavStepTowards(Map map, Vec3 goal) {
-        Vec3 fromChest = new Vec3(position.x, position.y + 1.05, position.z);
-        Vec3 goalChest = new Vec3(goal.x, goal.y + 1.05, goal.z);
-        if (map.hasLineOfSight(fromChest, goalChest)) {
-            return goal;
-        }
         List<Vec3> wps = map.getPatrolWaypoints();
         double goalDistNow = position.distXZ(goal);
-        Vec3 bestWp = null;
-        double bestScore = Double.MAX_VALUE;
+        // 11.0 SMART BOTS: навигация по ПРОХОДИМОСТИ, а не по видимости — линия до кандидата
+        // проверяется «капсулой» корпуса, чтобы боты не шли в карманы между стенами
+        if (walkableRun(map, goal) >= position.distXZ(goal)) {
+            return goal;
+        }
+        Vec3 bestFull = null;
+        double bestFullScore = Double.MAX_VALUE;
+        Vec3 bestPartial = null;
+        double bestRun = -1.0, bestPartialGoal = Double.MAX_VALUE;
         for (int i = 0, n = wps.size(); i < n; i++) {
             Vec3 wp = wps.get(i);
             double dToMe = position.distXZ(wp);
             if (dToMe < 1.5) continue;
             double wpToGoal = wp.distXZ(goal);
-            if (wpToGoal < goalDistNow + 4.0) {
-                Vec3 wpChest = new Vec3(wp.x, wp.y + 1.05, wp.z);
-                if (map.hasLineOfSight(fromChest, wpChest)) {
-                    double score = wpToGoal + dToMe * 0.45;
-                    if (score < bestScore) {
-                        bestScore = score;
-                        bestWp = wp;
-                    }
-                }
+            // точка должна реально приближать к цели (строгий прогресс)
+            if (wpToGoal >= goalDistNow - 1.2) continue;
+            double run = walkableRun(map, wp);
+            if (run >= dToMe) {
+                double score = wpToGoal + dToMe * 0.45;
+                if (score < bestFullScore) { bestFullScore = score; bestFull = wp; }
+            } else if (run > bestRun + 0.01
+                    || (run > bestRun - 0.01 && wpToGoal < bestPartialGoal)) {
+                bestRun = run;
+                bestPartialGoal = wpToGoal;
+                bestPartial = wp;
             }
         }
-        return bestWp != null ? bestWp : goal;
+        if (bestFull != null) return bestFull;
+        if (bestPartial != null) return bestPartial;
+        return goal;
+    }
+
+    /** Сколько метров по прямой до цели можно пройти корпусом до первого столкновения. */
+    private double walkableRun(Map map, Vec3 to) {
+        double dx = to.x - position.x, dz = to.z - position.z;
+        double len = Math.sqrt(dx * dx + dz * dz);
+        if (len < 1e-4) return 1e9;
+        double stepLen = 0.30;
+        int steps = (int) Math.ceil(len / stepLen);
+        for (int i = 1; i <= steps; i++) {
+            double t = Math.min(1.0, i * stepLen / len);
+            double px = position.x + dx * t;
+            double pz = position.z + dz * t;
+            if (map.collides(px, position.y, pz, RADIUS * 0.95, HEIGHT)) return i * stepLen;
+        }
+        return 1e9;
     }
 
     private ShotEvent fireAtTarget(Map map, Player player, boolean targetIsPlayer, Bot targetBot,
@@ -918,7 +1121,7 @@ public class Bot {
         if (gun == null && alive) return false; // нож/РПГ/Zeus — старая модель
         double s = getModelScale();
         boolean visible = rig.render(r, position.x, position.y, position.z, yaw, s, p, gun,
-                GameSettings.WeaponSkin.STANDARD, r.meshLodBias());
+                GameSettings.WeaponSkin.STANDARD, r.botLodBias());
         if (!visible) return true;
         if (rig.muzzleValid) {
             cachedMuzzle.set(rig.muzzleWorld[0], rig.muzzleWorld[1], rig.muzzleWorld[2]);
