@@ -60,7 +60,7 @@ public class Main {
         }
 
         SwingUtilities.invokeLater(() -> {
-            final JFrame frame = new JFrame("CS-2 JAVA 9.0 | 26 Weapons • CS2 Spray Patterns • Hitgroups & Armor • Realism Update");
+            final JFrame frame = new JFrame("CS-2 JAVA 11.0 | GLB Engine • Реалистичные хваты • 26 стволов");
             frame.setIconImages(createAppIcons());
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
@@ -520,59 +520,66 @@ public class Main {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        int pad = Math.max(1, size / 18);
+        int pad = Math.max(1, size / 20);
         int box = size - pad * 2;
         int arc = Math.max(4, size / 4);
 
-        // Золотисто-оранжевый тактический щит CS2
-        g.setPaint(new GradientPaint(pad, pad, new Color(255, 208, 74), pad + box, pad + box, new Color(220, 114, 22)));
+        // Тёмный стальной щит с золотой рамкой
+        g.setPaint(new GradientPaint(pad, pad, new Color(46, 52, 64), pad + box, pad + box, new Color(16, 20, 28)));
         g.fillRoundRect(pad, pad, box, box, arc, arc);
-
-        int inset = Math.max(2, size / 11);
-        int innerBox = box - inset * 2;
-        int innerArc = Math.max(3, arc - inset);
-        g.setPaint(new GradientPaint(pad + inset, pad + inset, new Color(14, 22, 36),
-                pad + inset, pad + inset + innerBox, new Color(22, 34, 54)));
-        g.fillRoundRect(pad + inset, pad + inset, innerBox, innerBox, innerArc, innerArc);
+        g.setPaint(new GradientPaint(pad, pad, new Color(255, 214, 90), pad + box, pad + box, new Color(224, 118, 20)));
+        g.setStroke(new BasicStroke(Math.max(2f, size / 28f)));
+        g.drawRoundRect(pad, pad, box, box, arc, arc);
 
         // Неоновое прицельное перекрестие на фоне
         int cx = size / 2;
         int cy = size / 2;
-        int cr = Math.max(3, (int) (size * 0.30));
-        g.setColor(new Color(84, 240, 152, 95));
-        g.setStroke(new BasicStroke(Math.max(1.0f, size / 28.0f)));
+        int cr = Math.max(3, (int) (size * 0.32));
+        g.setColor(new Color(84, 240, 152, 90));
+        g.setStroke(new BasicStroke(Math.max(1.0f, size / 30.0f)));
         g.drawOval(cx - cr, cy - cr, cr * 2, cr * 2);
-        int tick = Math.max(2, size / 9);
+        int tick = Math.max(2, size / 10);
         g.drawLine(cx - cr - tick / 2, cy, cx - cr + tick / 2, cy);
         g.drawLine(cx + cr - tick / 2, cy, cx + cr + tick / 2, cy);
         g.drawLine(cx, cy - cr - tick / 2, cx, cy - cr + tick / 2);
         g.drawLine(cx, cy + cr - tick / 2, cx, cy + cr + tick / 2);
 
-        // Чёткая надпись CS2
-        if (size >= 24) {
-            Font font = new Font("SansSerif", Font.BOLD, Math.max(9, (int) (size * 0.36)));
-            g.setFont(font);
-            FontMetrics fm = g.getFontMetrics();
-            String label = "CS2";
-            int tx = cx - fm.stringWidth(label) / 2;
-            int ty = cy + (fm.getAscent() - fm.getDescent()) / 2 - Math.max(0, size / 22);
-            g.setColor(new Color(0, 0, 0, 170));
-            g.drawString(label, tx + Math.max(1, size / 48), ty + Math.max(1, size / 48));
-            g.setColor(new Color(255, 212, 82));
-            g.drawString(label, tx, ty);
+        // Золотой силуэт AK-47 по диагонали
+        double s = size / 210.0;
+        java.awt.geom.AffineTransform saved = g.getTransform();
+        g.translate(cx, cy);
+        g.rotate(-0.42);
+        g.scale(s, s);
+        g.setPaint(new GradientPaint(0, -34, new Color(255, 232, 140), 0, 44, new Color(232, 138, 26)));
+        // ствол и мушка
+        g.fillRect(58, -17, 62, 9);
+        g.fillRect(104, -34, 9, 28);
+        g.fillRect(116, -16, 8, 6);
+        // газовая трубка и цевьё
+        g.fillRect(20, -26, 62, 8);
+        g.fillRect(22, -15, 58, 15);
+        // ресивер
+        g.fillRect(-32, -18, 56, 26);
+        // приклад
+        g.fillPolygon(new int[]{-30, -96, -96, -26}, new int[]{-13, -2, 15, 11}, 4);
+        // пистолетная рукоять
+        g.fillPolygon(new int[]{-26, -42, -33, -15}, new int[]{8, 34, 40, 12}, 4);
+        // изогнутый магазин
+        g.fillPolygon(new int[]{2, -4, 20, 30}, new int[]{8, 44, 52, 12}, 4);
+        g.setTransform(saved);
 
-            if (size >= 64) {
-                Font sub = new Font("SansSerif", Font.BOLD, Math.max(8, (int) (size * 0.125)));
-                g.setFont(sub);
-                FontMetrics sfm = g.getFontMetrics();
-                String subTxt = "9.0 HD";
-                g.setColor(new Color(98, 240, 162));
-                g.drawString(subTxt, cx - sfm.stringWidth(subTxt) / 2, pad + inset + innerBox - Math.max(4, size / 14));
-            }
-        } else {
-            g.setColor(new Color(255, 212, 82));
-            int dot = Math.max(3, size / 4);
-            g.fillOval(cx - dot / 2, cy - dot / 2, dot, dot);
+        // Бейдж версии 11.0
+        if (size >= 40) {
+            Font vFont = new Font("SansSerif", Font.BOLD, Math.max(10, (int) (size * 0.17)));
+            g.setFont(vFont);
+            FontMetrics vfm = g.getFontMetrics();
+            String ver = "11.0";
+            int vx = cx - vfm.stringWidth(ver) / 2;
+            int vy = pad + box - Math.max(3, size / 22);
+            g.setColor(new Color(0, 0, 0, 180));
+            g.drawString(ver, vx + 1, vy + 1);
+            g.setColor(new Color(98, 240, 162));
+            g.drawString(ver, vx, vy);
         }
 
         g.dispose();

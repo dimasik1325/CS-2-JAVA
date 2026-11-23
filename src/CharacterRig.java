@@ -39,6 +39,7 @@ public final class CharacterRig {
     private final int jShL, jUaL, jLaL, jHandL, jShR, jUaR, jLaR, jHandR;
     private final int jUlL, jLlL, jFootL, jUlR, jLlR, jFootR;
     private final int[] fingersL, fingersR, thumbsL, thumbsR;
+    private int[] idxR, wrapR;   // правая: указательный (спуск) и обхватывающие пальцы
     private final int[] baseColors;
     private final int[] colors;
     private final double[] tmp = new double[3];
@@ -72,6 +73,17 @@ public final class CharacterRig {
         baseColors = new int[m.matColors.length];
         for (int i = 0; i < baseColors.length; i++) baseColors[i] = teamColor(v, m.matNames[i], m.matColors[i]);
         colors = baseColors.clone();
+    }
+
+    /** Цепочка суставов одного пальца (Index.R, Middle.L, ...). */
+    private static int[] collectNamed(MeshModel m, String prefix) {
+        int[] out = new int[8];
+        int c = 0;
+        for (int j = 0; j < m.jointCount(); j++) {
+            String n = m.jointNames[j];
+            if (n.startsWith(prefix) && !n.endsWith("_end")) out[c++] = j;
+        }
+        return java.util.Arrays.copyOf(out, c);
     }
 
     private static int[] collect(MeshModel m, String side, boolean thumb) {
@@ -224,12 +236,23 @@ public final class CharacterRig {
             double w = Math.sin(Math.min(1, reload) * Math.PI);
             gunPoint(-0.03 - 0.12 * w, gun.magPivot[1] - 0.06 - 0.18 * w, gun.magPivot[2] - 0.05, tmp);
         } else if (pistol) {
-            gunPoint(fp ? -0.032 : -0.028, fp ? -0.118 : -0.100, fp ? -0.075 : -0.040, tmp);
+            gunPoint(fp ? -0.032 : -0.028, fp ? -0.105 : -0.100, fp ? -0.080 : -0.040, tmp);
         } else {
-            // левая кисть ПОД цевьём: запястье сзади-снизу, пальцы обхватывают цевьё вперёд
-            gunPoint(fg[0] - 0.028, fg[1] - (fp ? 0.042 : 0.045), fg[2] - (fp ? 0.145 : 0.055), tmp);
+            // левая кисть ПОД цевьём; у снайперок — ближе к телу (устойчивая поддержка сошек)
+            boolean snip = gun.spec.file.contains("sniper");
+            double back = fp ? (snip ? 0.300 : 0.145) : (snip ? 0.180 : 0.055);
+            gunPoint(fg[0] - 0.028, fg[1] - (fp ? 0.050 : 0.045), fg[2] - back, tmp);
         }
         pose.solveTwoBoneIK(jUaL, jLaL, jHandL, tmp[0], tmp[1], tmp[2], -0.8, -1.0, -0.4);
+        if (idxR == null) {
+            idxR = collectNamed(model, "Index.R");
+            wrapR = new int[]{};
+            int[] mid = collectNamed(model, "Middle.R"), rng = collectNamed(model, "Ring.R"), pnk = collectNamed(model, "Pinky.R");
+            java.util.ArrayList<Integer> all = new java.util.ArrayList<>();
+            for (int[] arr : new int[][]{mid, rng, pnk}) for (int j : arr) all.add(j);
+            wrapR = new int[all.size()];
+            for (int i = 0; i < wrapR.length; i++) wrapR[i] = all.get(i);
+        }
         // в FP руки вытянуты масштабом — кисти возвращаем к натуральному размеру
         if (fp) {
             double hs = 1.0 / fpArmScale;
@@ -245,18 +268,21 @@ public final class CharacterRig {
             double[] glP = {0, 0, 1, 0, -1, 0, 1, 0, 0};         // левая (пистолет): пальцы +Z, ладонь +X
             setHandFrame(jHandR, jLaR, gr);
             setHandFrame(jHandL, jLaL, pistol ? glP : glR);
-            // пальцы обхватывают рукоять/цевье: сгиб к ладони (локальный Y)
-            curlPalm(fingersR, reloading ? 0.32 : 0.70);
-            curlPalm(fingersL, reloading ? 0.18 : 0.66);
-            curlPalm(thumbsR, 0.28);
-            curlPalm(thumbsL, 0.26);
+            // реальный хват: три пальца обхватывают рукоять, указательный — на спуске
+            curlPalm(wrapR, reloading ? 0.32 : 0.86);
+            curlPalm(idxR, pistol ? 0.16 : 0.20);
+            curlPalm(thumbsR, 0.42);
+            // левая: жёсткий обхват цевья/рукояти снизу (при перезарядке раскрывается)
+            curlPalm(fingersL, reloading ? 0.18 : 0.88);
+            curlPalm(thumbsL, 0.30);
         } else {
-            // третье лицо: ладонь правой к рукояти, левая снизу под цевьём (обхват снизу-сбоку)
+            // третье лицо: ладонь правой к рукояти, указательный на спуске
             pose.rotateX(jHandR, -1.35);
             pose.rotateX(jHandL, pistol ? -1.55 : -2.4);
             pose.rotateZ(jHandL, pistol ? 0.9 : 0.25);
-            curl(fingersR, -1, 0.85);
-            curl(fingersL, 1, reloading ? 0.35 : (pistol ? 1.0 : 0.6));
+            curl(wrapR, -1, reloading ? 0.5 : 0.85);
+            curl(idxR, -1, 0.20);
+            curl(fingersL, 1, reloading ? 0.35 : (pistol ? 1.0 : 0.85));
             curl(thumbsR, -1, 0.35);
             curl(thumbsL, 1, 0.40);
         }

@@ -194,7 +194,7 @@ def build_ico_and_res(icon_dir, jar_path, out_ico_path, out_res_path):
     manifest_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">'
-        '<assemblyIdentity version="10.0.0.0" processorArchitecture="amd64" name="CS2Java.HyperTurbo.Game" type="win32"/>'
+        '<assemblyIdentity version="11.0.0.0" processorArchitecture="amd64" name="CS2Java.HyperTurbo.Game" type="win32"/>'
         '<description>CS-2 JAVA 11.0 Tactical 3D Shooter</description>'
         '<dependency><dependentAssembly>'
         '<assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" '

@@ -1062,20 +1062,21 @@ public class Weapon {
         int bladeEdge  = custom ? skin.accent  : 0xFF427C;
 
         if (drawHands) {
-            drawTacticalHandsAndGloves(r, kx + 0.02, ky + 0.03, kz, -0.02, -1.0, false, -0.26 + swing * 0.42, rotY, rotZ, skin);
+            drawTacticalHandsAndGloves(r, kx + 0.02, ky + 0.052, kz, -0.02, -1.0, false, -0.26 + swing * 0.42, rotY, rotZ, skin);
             // Левая рука в тактической стойке ближнего боя с часами слева!
             r.drawViewModelCylinder(ox - 0.25, oy - 0.14, oz - 0.05, 0.042, 0.035, 0.24, 0.35, 0.55, 0.15, ox, oy, oz, 10, 0x243447);
             r.drawViewModelBox(ox - 0.17, oy - 0.07, oz + 0.04, 0.044, 0.042, 0.064, 0.20, 0.35, 0.10, ox, oy, oz, Renderer3D.TEX_SOLID, 0x1D222B);
         }
 
         // Кольцо Керамбита + текстурированная G10 рукоять с заклёпками + хищный изогнутый клинок с долом!
-        r.drawViewModelCylinder(kx, ky - 0.024, kz - 0.034, 0.023, 0.023, 0.013, rotX + 1.57, rotY, rotZ, kx, ky, kz, 14, ringGold);
-        r.drawViewModelCylinder(kx, ky - 0.004, kz + 0.026, 0.015, 0.019, 0.108, rotX - 0.12, rotY, rotZ, kx, ky, kz, 12, handle);
-        r.drawViewModelBox(kx, ky + 0.002, kz + 0.026, 0.034, 0.008, 0.075, rotX - 0.12, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, ringGold);
-        r.drawViewModelBox(kx, ky + 0.014, kz + 0.105, 0.009, 0.034, 0.078, rotX + 0.10, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
-        r.drawViewModelBox(kx, ky + 0.028, kz + 0.168, 0.008, 0.029, 0.072, rotX + 0.34, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
-        r.drawViewModelBox(kx, ky + 0.052, kz + 0.218, 0.007, 0.023, 0.064, rotX + 0.62, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
-        r.drawViewModelBox(kx, ky + 0.082, kz + 0.252, 0.005, 0.013, 0.046, rotX + 0.90, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
+        r.drawViewModelCylinder(kx, ky - 0.010, kz - 0.034, 0.023, 0.023, 0.013, rotX + 1.57, rotY, rotZ, kx, ky, kz, 14, ringGold);
+        r.drawViewModelCylinder(kx, ky - 0.010, kz + 0.026, 0.015, 0.019, 0.108, rotX + 0.12, rotY, rotZ, kx, ky, kz, 12, handle);
+        r.drawViewModelBox(kx, ky - 0.006, kz + 0.026, 0.034, 0.008, 0.075, rotX + 0.12, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, ringGold);
+        // Реальный хват керамбита: кулак поверх рукояти, клинок-клешня идёт ВНИЗ-ВПЕРЁД
+        r.drawViewModelBox(kx, ky - 0.030, kz + 0.105, 0.009, 0.034, 0.078, rotX + 0.42, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
+        r.drawViewModelBox(kx, ky - 0.058, kz + 0.168, 0.008, 0.029, 0.072, rotX + 0.72, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeSteel);
+        r.drawViewModelBox(kx, ky - 0.088, kz + 0.218, 0.007, 0.023, 0.064, rotX + 1.02, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
+        r.drawViewModelBox(kx, ky - 0.112, kz + 0.252, 0.005, 0.013, 0.046, rotX + 1.28, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
     }
 
     // ===================== 11.0: GLB-ОРУЖИЕ И РУКИ ОТ 1-ГО ЛИЦА =====================
