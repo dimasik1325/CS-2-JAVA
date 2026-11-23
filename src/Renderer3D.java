@@ -208,7 +208,7 @@ public class Renderer3D {
     private final double[] outX = new double[8], outY = new double[8], outZ = new double[8];
     private final double[] outU = new double[8], outV = new double[8], outL = new double[8];
     private final double[] boxVx = new double[8], boxVy = new double[8], boxVz = new double[8];
-    private final double[] vp0A = new double[3], vp1A = new double[3], vp0B = new double[3], vp1B = new double[3];
+    private final double[] vp0A = new double[3], vp1A = new double[3], vp0B = new double[3], vp1B = new double[3], vpCenter = new double[3];
 
     public Renderer3D(int width, int height, double verticalFovDegrees) {
         ensureSharedTexturesInitialized();
@@ -1893,11 +1893,23 @@ public class Renderer3D {
 
             double s0p = Math.max(0.0, s0), s1p = Math.max(0.0, s1);
             double s0p2 = s0p * s0p, s1p2 = s1p * s1p;
-            double l0 = 0.64 + 0.36 * Math.max(0.0, s0 * 0.78 + c0 * 0.38) + 0.14 * (s0p2 * s0p2);
-            double l1 = 0.64 + 0.36 * Math.max(0.0, s1 * 0.78 + c1 * 0.38) + 0.14 * (s1p2 * s1p2);
+            double spec0 = (s0p2 * s0p2) * 0.24;
+            double spec1 = (s1p2 * s1p2) * 0.24;
+            double l0 = 0.58 + 0.40 * Math.max(0.0, s0 * 0.78 + c0 * 0.38) + spec0;
+            double l1 = 0.58 + 0.40 * Math.max(0.0, s1 * 0.78 + c1 * 0.38) + spec1;
 
             submitViewSpaceGouraudTri(vp0A[0], vp0A[1], vp0A[2], l0, vp1A[0], vp1A[1], vp1A[2], l1, vp1B[0], vp1B[1], vp1B[2], l1, tinted);
             submitViewSpaceGouraudTri(vp0A[0], vp0A[1], vp0A[2], l0, vp1B[0], vp1B[1], vp1B[2], l1, vp0B[0], vp0B[1], vp0B[2], l0, tinted);
+        }
+
+        // Торцевая крышка ближнего края (для оптических прицелов, барабанов и затворов)
+        if (radBack > 0.004) {
+            transformViewPoint(cx, cy, cz - halfL, cxR, sxR, cyR, syR, czR, szR, pivotX, pivotY, pivotZ, vpCenter);
+            for (int i = 0; i < seg; i++) {
+                transformViewPoint(cx + cosT[i] * radBack,     cy + sinT[i] * radBack,     cz - halfL, cxR, sxR, cyR, syR, czR, szR, pivotX, pivotY, pivotZ, vp0A);
+                transformViewPoint(cx + cosT[i + 1] * radBack, cy + sinT[i + 1] * radBack, cz - halfL, cxR, sxR, cyR, syR, czR, szR, pivotX, pivotY, pivotZ, vp1A);
+                submitViewSpaceGouraudTri(vpCenter[0], vpCenter[1], vpCenter[2], 0.86, vp1A[0], vp1A[1], vp1A[2], 0.78, vp0A[0], vp0A[1], vp0A[2], 0.78, tinted);
+            }
         }
     }
 
@@ -1917,66 +1929,152 @@ public class Renderer3D {
     }
 
     /**
-     * Героическая 3D-модель бойца спецназа CT в центре Главного Меню Panorama 7.0!
+     * Ультра-детализированный 3D-оперативник спецназа CT (SAS / SEAL Team 6) в Главном Меню CS-2 JAVA 8.0:
+     * шлем Ops-Core FAST с 4-трубчатым панорамным ПНВ GPNVG-18, активные наушники Peltor ComTac,
+     * плитоносец Crye JPC с подсумками магазинов STANAG, рацией PRC-152, кобурой, наколенниками и оружием игрока!
      */
     public void drawMenuOperatorShowcase(double animTime, GameSettings.WeaponSkin skin, Weapon.Type weaponType) {
-        double fwdDist = 2.48;
-        double sideDist = -0.78;
+        double fwdDist = 2.42;
+        double sideDist = -0.82;
         double wx = camX + sinYaw * fwdDist + cosYaw * sideDist;
         double wz = camZ + cosYaw * fwdDist - sinYaw * sideDist;
         double wy = camY - 1.38;
         double camYawAngle = Math.atan2(sinYaw, cosYaw);
-        double opYaw = camYawAngle + Math.PI - 0.34 + Math.sin(animTime * 0.9) * 0.05;
-        drawMenuOperatorShowcase(wx, wy, wz, opYaw, animTime, skin);
+        double opYaw = camYawAngle + Math.PI - 0.32 + Math.sin(animTime * 0.85) * 0.045;
+        drawMenuOperatorShowcase(wx, wy, wz, opYaw, animTime, skin, weaponType);
     }
 
     public void drawMenuOperatorShowcase(double wx, double wy, double wz, double yaw, double animTime) {
-        drawMenuOperatorShowcase(wx, wy, wz, yaw, animTime, GameSettings.WeaponSkin.ASIIMOV);
+        drawMenuOperatorShowcase(wx, wy, wz, yaw, animTime, GameSettings.WeaponSkin.ASIIMOV, Weapon.Type.M4A1S);
     }
 
     public void drawMenuOperatorShowcase(double wx, double wy, double wz, double yaw, double animTime,
                                          GameSettings.WeaponSkin skin) {
-        double breathe = Math.sin(animTime * 2.1) * 0.015;
-        int armorNavy = 0x243B5C;
-        int armorTrim = 0x3A6294;
-        int vestDark = 0x182334;
-        int visorGlow = 0x38D6FF;
-        int skinGlove = 0x161B24;
-        int gunBody = (skin != null && skin != GameSettings.WeaponSkin.STANDARD) ? skin.primary : 0x2C3440;
-        int gunAccent = (skin != null && skin != GameSettings.WeaponSkin.STANDARD) ? skin.accent : 0xE8A838;
+        drawMenuOperatorShowcase(wx, wy, wz, yaw, animTime, skin, Weapon.Type.M4A1S);
+    }
+
+    public void drawMenuOperatorShowcase(double wx, double wy, double wz, double yaw, double animTime,
+                                         GameSettings.WeaponSkin skin, Weapon.Type weaponType) {
+        double breathe = Math.sin(animTime * 2.0) * 0.012;
+        double sway = Math.sin(animTime * 1.1) * 0.018;
+
+        int bduSlate   = 0x263547; // Тактическая форма спецназа SAS (тёмный графитово-синий рипстоп)
+        int plateTan   = 0x4A5448; // Оливково-рейнджерский плитоносец JPC и шлем Ops-Core
+        int pouchDark  = 0x2B332C; // Подсумки Cordura и ремни MOLLE
+        int carbonBlk  = 0x161B22; // Карбоновые щитки, кобура, подошвы Lowa и наушники
+        int skinTone   = 0xC99878; // Переносица / участок кожи вокруг балаклавы
+        int glassSmoke = 0x1D2D3E; // Тонированные баллистические очки Oakley
+        int nvgLens    = 0x2EFFB8; // Изумрудно-фосфорные линзы квадро-ПНВ GPNVG-18
+        int patchGold  = 0xE8B43C; // Шеврон спецназа CT
+
+        boolean hasCustomSkin = (skin != null && skin != GameSettings.WeaponSkin.STANDARD);
+        int gunBody   = hasCustomSkin ? skin.primary : 0x28303A;
+        int gunAccent = hasCustomSkin ? skin.accent  : 0x4C5866;
+        int gunTrim   = hasCustomSkin ? skin.trim    : 0x171C22;
 
         double cy = Math.cos(yaw), sy = Math.sin(yaw);
         double rx = cy, rz = -sy;
         double fx = sy, fz = cy;
 
-        // Тактические ботинки и наколенники
-        drawWorldCylinder(wx - rx * 0.16, wy, wz - rz * 0.16, 0.105, 0.095, 0.78, 14, TEX_SOLID, armorNavy);
-        drawWorldCylinder(wx + rx * 0.16, wy, wz + rz * 0.16, 0.105, 0.095, 0.78, 14, TEX_SOLID, armorNavy);
-        drawWorldEllipsoid(wx - rx * 0.16 + fx * 0.05, wy + 0.42, wz - rz * 0.16 + fz * 0.05, 0.08, 0.09, 0.08, 10, 6, vestDark);
-        drawWorldEllipsoid(wx + rx * 0.16 + fx * 0.05, wy + 0.42, wz + rz * 0.16 + fz * 0.05, 0.08, 0.09, 0.08, 10, 6, vestDark);
+        // 1. Ботинки Lowa Zephyr + голени + карбоновые наколенники + бёдра + набедренная кобура!
+        for (int side = -1; side <= 1; side += 2) {
+            double lx = wx + rx * (side * 0.155) + fx * (side > 0 ? -0.03 : 0.03);
+            double lz = wz + rz * (side * 0.155) + fz * (side > 0 ? -0.03 : 0.03);
+            // Подошва и ботинок с носком
+            drawOrientedWorldBox(lx + fx * 0.05, wy + 0.06, lz + fz * 0.05, 0.13, 0.12, 0.28, yaw + side * 0.08, 0.0, TEX_SOLID, carbonBlk);
+            drawWorldCylinder(lx, wy + 0.10, lz, 0.088, 0.082, 0.34, 14, TEX_SOLID, bduSlate);
+            // Анатомическое бедро
+            drawWorldCylinder(lx, wy + 0.44, lz, 0.095, 0.112, 0.42, 14, TEX_SOLID, bduSlate);
+            // Выпуклый тактический наколенник Arc'teryx
+            drawWorldEllipsoid(lx + fx * 0.075, wy + 0.45, lz + fz * 0.075, 0.068, 0.082, 0.052, 12, 6, carbonBlk);
+        }
+        // Набедренная тактическая кобура с пистолетом на правом бедре
+        drawOrientedWorldBox(wx + rx * 0.27, wy + 0.66, wz + rz * 0.27, 0.06, 0.19, 0.13, yaw, 0.0, TEX_SOLID, carbonBlk);
+        // Разгрузочный тактический пояс с подсумком сброса
+        drawWorldCylinder(wx, wy + 0.83, wz, 0.235, 0.235, 0.085, 16, TEX_SOLID, pouchDark);
 
-        // Бронежилет и наплечники спецназа GIGN / SAS
-        drawWorldEllipsoid(wx, wy + 1.08 + breathe, wz, 0.27, 0.36, 0.20, 16, 10, armorNavy);
-        drawWorldEllipsoid(wx + fx * 0.04, wy + 1.10 + breathe, wz + fz * 0.04, 0.24, 0.26, 0.19, 14, 8, vestDark);
-        drawWorldEllipsoid(wx - rx * 0.30, wy + 1.30 + breathe, wz - rz * 0.30, 0.12, 0.11, 0.12, 12, 7, armorTrim);
-        drawWorldEllipsoid(wx + rx * 0.30, wy + 1.30 + breathe, wz + rz * 0.30, 0.12, 0.11, 0.12, 12, 7, armorTrim);
+        // 2. Торс, боевая рубаха и бронежилет-плитоносец Crye JPC 2.0 с 3 магазинами STANAG и рацией!
+        drawWorldEllipsoid(wx, wy + 1.12 + breathe, wz, 0.245, 0.33, 0.165, 18, 10, bduSlate);
+        // Передняя и задняя бронеплиты SAPI в чехле JPC
+        drawOrientedWorldBox(wx + fx * 0.11, wy + 1.13 + breathe, wz + fz * 0.11, 0.31, 0.34, 0.08, yaw, -0.05, TEX_SOLID, plateTan);
+        drawOrientedWorldBox(wx - fx * 0.11, wy + 1.14 + breathe, wz - fz * 0.11, 0.30, 0.34, 0.08, yaw, 0.04, TEX_SOLID, plateTan);
+        // Плечевые лямки бронежилета и шеврон спецназа на груди
+        drawOrientedWorldBox(wx - rx * 0.11, wy + 1.34 + breathe, wz - rz * 0.11, 0.07, 0.08, 0.24, yaw, 0.0, TEX_SOLID, plateTan);
+        drawOrientedWorldBox(wx + rx * 0.11, wy + 1.34 + breathe, wz + rz * 0.11, 0.07, 0.08, 0.24, yaw, 0.0, TEX_SOLID, plateTan);
+        drawOrientedWorldBox(wx + fx * 0.155, wy + 1.24 + breathe, wz + fz * 0.155, 0.12, 0.055, 0.02, yaw, -0.05, TEX_SOLID, patchGold);
+        // 3 объёмных подсумка с винтовочными магазинами STANAG на животе!
+        for (int m = -1; m <= 1; m++) {
+            double mx = wx + fx * 0.162 + rx * (m * 0.088);
+            double mz = wz + fz * 0.162 + rz * (m * 0.088);
+            drawOrientedWorldBox(mx, wy + 1.03 + breathe, mz, 0.068, 0.145, 0.052, yaw, -0.05, TEX_SOLID, pouchDark);
+            drawOrientedWorldBox(mx, wy + 1.11 + breathe, mz, 0.052, 0.045, 0.038, yaw, -0.05, TEX_SOLID, 0x3A4048);
+        }
+        // Рация AN/PRC-152 на левом плече + высокая гибкая антенна!
+        drawOrientedWorldBox(wx - rx * 0.13 + fx * 0.14, wy + 1.24 + breathe, wz - rz * 0.13 + fz * 0.14, 0.055, 0.13, 0.045, yaw, 0.0, TEX_SOLID, carbonBlk);
+        drawWorldCylinder(wx - rx * 0.145 + fx * 0.12, wy + 1.30 + breathe, wz - rz * 0.145 + fz * 0.12, 0.008, 0.005, 0.34, 6, TEX_SOLID, carbonBlk);
 
-        // Руки, удерживающие штурмовую винтовку Asiimov на груди
-        drawOrientedWorldCylinder(wx - rx * 0.25 + fx * 0.14, wy + 1.12 + breathe, wz - rz * 0.25 + fz * 0.14, 0.075, 0.068, 0.44, yaw + 0.45, 0.55, 12, armorNavy);
-        drawOrientedWorldCylinder(wx + rx * 0.24 + fx * 0.16, wy + 1.10 + breathe, wz + rz * 0.24 + fz * 0.16, 0.075, 0.068, 0.44, yaw - 0.52, 0.62, 12, armorNavy);
-        drawWorldEllipsoid(wx + fx * 0.28, wy + 1.02 + breathe, wz + fz * 0.28, 0.065, 0.065, 0.065, 10, 6, skinGlove);
+        // Воротник боевой рубахи и шея в балаклаве
+        drawWorldCylinder(wx, wy + 1.37 + breathe, wz, 0.115, 0.098, 0.10, 14, TEX_SOLID, carbonBlk);
 
-        // Шлем спецназа с неоново-голубым тактическим забралом и ПНВ
-        drawWorldEllipsoid(wx, wy + 1.59 + breathe, wz, 0.175, 0.185, 0.180, 18, 11, armorNavy);
-        drawWorldEllipsoid(wx + fx * 0.10, wy + 1.59 + breathe, wz + fz * 0.10, 0.135, 0.068, 0.11, 14, 7, visorGlow);
-        drawWorldCylinder(wx - rx * 0.18, wy + 1.54 + breathe, wz - rz * 0.18, 0.04, 0.04, 0.09, 10, TEX_SOLID, vestDark);
-        drawWorldCylinder(wx + rx * 0.18, wy + 1.54 + breathe, wz + rz * 0.18, 0.04, 0.04, 0.09, 10, TEX_SOLID, vestDark);
+        // 3. Дельтовидные плечи + двусоставные руки (плечо -> налокотник -> предплечье -> тактические перчатки Oakley)!
+        drawWorldEllipsoid(wx - rx * 0.285, wy + 1.29 + breathe, wz - rz * 0.285, 0.095, 0.105, 0.095, 12, 7, bduSlate);
+        drawWorldEllipsoid(wx + rx * 0.285, wy + 1.29 + breathe, wz + rz * 0.285, 0.095, 0.105, 0.095, 12, 7, bduSlate);
+        // Правая рука (держит пистолетную рукоять у груди)
+        drawOrientedWorldCylinder(wx + rx * 0.27 + fx * 0.06, wy + 1.15 + breathe, wz + rz * 0.27 + fz * 0.06, 0.066, 0.058, 0.30, yaw - 0.18, 0.42, 12, bduSlate);
+        drawOrientedWorldCylinder(wx + rx * 0.17 + fx * 0.20, wy + 1.04 + breathe, wz + rz * 0.17 + fz * 0.20, 0.056, 0.048, 0.28, yaw - 0.85, 0.22, 12, bduSlate);
+        drawWorldEllipsoid(wx + rx * 0.07 + fx * 0.27, wy + 1.03 + breathe, wz + rz * 0.07 + fz * 0.27, 0.052, 0.048, 0.055, 10, 6, carbonBlk);
+        // Левая рука (поддерживает цевьё оружия спереди)
+        drawOrientedWorldCylinder(wx - rx * 0.27 + fx * 0.08, wy + 1.14 + breathe, wz - rz * 0.27 + fz * 0.08, 0.066, 0.058, 0.30, yaw + 0.25, 0.52, 12, bduSlate);
+        drawOrientedWorldCylinder(wx - rx * 0.20 + fx * 0.24, wy + 1.01 + breathe, wz - rz * 0.20 + fz * 0.24, 0.056, 0.048, 0.28, yaw + 0.55, -0.10, 12, bduSlate);
+        drawWorldEllipsoid(wx - rx * 0.16 + fx * 0.32, wy + 0.99 + breathe, wz - rz * 0.16 + fz * 0.32, 0.052, 0.048, 0.055, 10, 6, carbonBlk);
 
-        // Винтовка в руках оператора
-        double gx = wx + fx * 0.26, gy = wy + 1.05 + breathe, gz = wz + fz * 0.26;
-        drawOrientedWorldBox(gx, gy, gz, 0.07, 0.11, 0.56, yaw + 0.62, -0.18, TEX_SOLID, gunBody);
-        drawOrientedWorldBox(gx + rx * 0.06, gy + 0.03, gz + rz * 0.06, 0.075, 0.045, 0.34, yaw + 0.62, -0.18, TEX_SOLID, gunAccent);
-        drawOrientedWorldCylinder(gx + rx * 0.24 + fx * 0.16, gy - 0.04, gz + rz * 0.24 + fz * 0.16, 0.022, 0.022, 0.42, yaw + 0.62, -0.18, 12, 0x1A202C);
+        // 4. Голова в балаклаве, баллистические очки, шлем Ops-Core FAST, наушники ComTac и 4-линзовый ПНВ GPNVG-18!
+        double hy = wy + 1.565 + breathe;
+        // Голова в тёмной балаклаве + участок переносицы + тёмные стрелковые очки Oakley M-Frame
+        drawWorldEllipsoid(wx, hy, wz, 0.128, 0.152, 0.136, 16, 10, carbonBlk);
+        drawWorldEllipsoid(wx + fx * 0.108, hy + 0.015, wz + fz * 0.108, 0.088, 0.032, 0.045, 10, 5, skinTone);
+        drawOrientedWorldBox(wx + fx * 0.122, hy + 0.020, wz + fz * 0.122, 0.185, 0.052, 0.055, yaw, 0.04, TEX_SOLID, glassSmoke);
+        // Купол шлема Ops-Core FAST High-Cut + боковые рельсы ARC + задний батарейный блок
+        drawWorldEllipsoid(wx - fx * 0.01, hy + 0.065, wz - fz * 0.01, 0.148, 0.122, 0.158, 18, 10, plateTan);
+        drawOrientedWorldBox(wx - fx * 0.155, hy + 0.055, wz - fz * 0.155, 0.095, 0.075, 0.045, yaw, 0.0, TEX_SOLID, pouchDark);
+        // Активные тактические наушники Peltor ComTac по бокам головы
+        drawWorldEllipsoid(wx - rx * 0.142, hy - 0.005, wz - rz * 0.142, 0.036, 0.064, 0.052, 10, 6, pouchDark);
+        drawWorldEllipsoid(wx + rx * 0.142, hy - 0.005, wz + rz * 0.142, 0.036, 0.064, 0.052, 10, 6, pouchDark);
+
+        // Знаменитый 4-трубчатый панорамный ПНВ GPNVG-18 на кронштейне Wilcox (откинут на лоб шлема)!
+        drawOrientedWorldBox(wx + fx * 0.138, hy + 0.105, wz + fz * 0.138, 0.21, 0.036, 0.045, yaw, -0.22, TEX_SOLID, pouchDark);
+        double[] nvgOffsets = {-0.078, -0.026, 0.026, 0.078};
+        for (double noff : nvgOffsets) {
+            double tx = wx + fx * 0.168 + rx * noff;
+            double tz = wz + fz * 0.168 + rz * noff;
+            drawOrientedWorldCylinder(tx, hy + 0.102, tz, 0.021, 0.023, 0.095, yaw, -0.25, 10, carbonBlk);
+            drawWorldEllipsoid(tx + fx * 0.046, hy + 0.114, tz + fz * 0.046, 0.016, 0.016, 0.012, 8, 5, nvgLens);
+        }
+
+        // 5. Детализированное 3D-оружие выбранного типа (M4A1-S / AK-47 / AWP / RPG-7 / M249) в руках оператора!
+        double gYaw = yaw - 1.08 + sway;
+        double gPitch = 0.20;
+        double gx = wx + fx * 0.28 - rx * 0.04;
+        double gy = wy + 1.03 + breathe;
+        double gz = wz + fz * 0.28 - rz * 0.04;
+        double gfx = Math.sin(gYaw), gfz = Math.cos(gYaw);
+
+        if (weaponType == Weapon.Type.AWP) {
+            drawOrientedWorldBox(gx, gy, gz, 0.058, 0.105, 0.68, gYaw, gPitch, TEX_SOLID, hasCustomSkin ? gunBody : 0x354B34);
+            drawOrientedWorldCylinder(gx + gfx * 0.48, gy - 0.08, gz + gfz * 0.48, 0.018, 0.016, 0.56, gYaw, gPitch, 10, gunTrim);
+            drawOrientedWorldCylinder(gx + gfx * 0.04, gy + 0.095, gz + gfz * 0.04, 0.028, 0.032, 0.34, gYaw, gPitch, 12, gunTrim);
+        } else if (weaponType == Weapon.Type.RPG7) {
+            drawOrientedWorldCylinder(gx, gy, gz, 0.038, 0.042, 0.82, gYaw, gPitch, 12, 0x5E4028);
+            drawOrientedWorldCylinder(gx + gfx * 0.48, gy - 0.09, gz + gfz * 0.48, 0.028, 0.072, 0.26, gYaw, gPitch, 12, 0x4E5E3A);
+        } else {
+            // Приклад + ресивер + цевьё + изогнутый магазин + коллиматор + тактический глушитель / ствол!
+            drawOrientedWorldBox(gx - gfx * 0.26, gy + 0.04, gz - gfz * 0.26, 0.048, 0.105, 0.22, gYaw, gPitch, TEX_SOLID, gunTrim);
+            drawOrientedWorldBox(gx, gy, gz, 0.062, 0.105, 0.36, gYaw, gPitch, TEX_SOLID, gunBody);
+            drawOrientedWorldBox(gx + gfx * 0.22, gy - 0.03, gz + gfz * 0.22, 0.054, 0.072, 0.26, gYaw, gPitch, TEX_SOLID, gunAccent);
+            drawOrientedWorldBox(gx + gfx * 0.05, gy - 0.13, gz + gfz * 0.05, 0.042, 0.18, 0.075, gYaw, gPitch + 0.28, TEX_SOLID, weaponType == Weapon.Type.AK47 && !hasCustomSkin ? 0xA85828 : gunTrim);
+            drawOrientedWorldBox(gx - gfx * 0.02, gy + 0.078, gz - gfz * 0.02, 0.048, 0.052, 0.11, gYaw, gPitch, TEX_SOLID, gunTrim);
+            drawOrientedWorldCylinder(gx + gfx * 0.45, gy - 0.08, gz + gfz * 0.45, 0.022, 0.022, 0.34, gYaw, gPitch, 12, gunTrim);
+        }
     }
 
     /**
@@ -1995,29 +2093,44 @@ public class Renderer3D {
         double yaw = heli.yaw;
         boolean flash = heli.hitFlashTimer > 0.0;
 
-        int hullCol = flash ? 0xFF6B5B : 0x26313D;
-        int glassCol = 0x3CE0FF;
-        int podCol = flash ? 0xFF9478 : 0x3B4959;
-        int rotorCol = 0x151920;
+        int hullCol  = flash ? 0xFF6B5B : 0x26313D;
+        int armorCol = flash ? 0xFF8470 : 0x344252;
+        int glassCol = 0x38D4F8;
+        int podCol   = flash ? 0xFF9478 : 0x3F4E5E;
+        int rotorCol = 0x14181F;
 
-        drawWorldEllipsoid(x, y, z, 1.38, 0.96, 2.55, 16, 9, hullCol);
         double fx = Math.sin(yaw), fz = Math.cos(yaw);
         double rx = Math.cos(yaw), rz = -Math.sin(yaw);
 
-        drawWorldEllipsoid(x + fx * 1.18, y + 0.06, z + fz * 1.18, 0.92, 0.66, 1.05, 14, 8, glassCol);
-        drawOrientedWorldCylinder(x - fx * 2.6, y + 0.22, z - fz * 2.6, 0.45, 0.18, 3.3, yaw, 0.06, 12, hullCol);
-        drawOrientedWorldBox(x - fx * 4.0, y + 0.72, z - fz * 4.0, 0.14, 1.25, 0.65, yaw, 0.0, TEX_SOLID, podCol);
+        // Ударный бронекорпус типа AH-64 Apache с тандемной гранёной кабиной и двумя турбинами!
+        drawWorldEllipsoid(x, y, z, 1.28, 0.92, 2.75, 16, 9, hullCol);
+        drawOrientedWorldBox(x + fx * 1.15, y + 0.12, z + fz * 1.15, 1.15, 0.78, 1.85, yaw, 0.08, TEX_SOLID, glassCol);
+        drawOrientedWorldBox(x + fx * 1.16, y + 0.14, z + fz * 1.16, 1.20, 0.10, 1.88, yaw, 0.08, TEX_SOLID, hullCol); // Переплёт фонаря кабины
+        // Носовой шар оптико-электронной системы TADS/FLIR и подфюзеляжная 30-мм автопушка!
+        drawWorldEllipsoid(x + fx * 2.38, y - 0.18, z + fz * 2.38, 0.36, 0.32, 0.38, 12, 7, podCol);
+        drawWorldEllipsoid(x + fx * 2.58, y - 0.18, z + fz * 2.58, 0.15, 0.15, 0.12, 8, 5, 0xFF4B3A);
+        drawOrientedWorldCylinder(x + fx * 1.65, y - 0.68, z + fz * 1.65, 0.09, 0.07, 1.35, yaw, 0.12, 10, rotorCol);
 
-        drawOrientedWorldBox(x, y + 0.10, z, 3.8, 0.16, 0.72, yaw, 0.0, TEX_SOLID, podCol);
-        drawOrientedWorldCylinder(x - rx * 1.65, y - 0.12, z - rz * 1.65, 0.28, 0.28, 1.35, yaw, 0.0, 12, 0x4A5868);
-        drawOrientedWorldCylinder(x + rx * 1.65, y - 0.12, z + rz * 1.65, 0.28, 0.28, 1.35, yaw, 0.0, 12, 0x4A5868);
-        drawWorldEllipsoid(x - rx * 1.85, y + 0.12, z - rz * 1.85, 0.14, 0.14, 0.14, 8, 6, 0xFF3B30);
-        drawWorldEllipsoid(x + rx * 1.85, y + 0.12, z + rz * 1.85, 0.14, 0.14, 0.14, 8, 6, 0x34C759);
+        // Два боковых турбовальных двигателя с экранно-выхлопными устройствами
+        drawOrientedWorldCylinder(x - rx * 0.98 - fx * 0.25, y + 0.42, z - rz * 0.98 - fz * 0.25, 0.40, 0.34, 2.15, yaw, 0.0, 12, armorCol);
+        drawOrientedWorldCylinder(x + rx * 0.98 - fx * 0.25, y + 0.42, z + rz * 0.98 - fz * 0.25, 0.40, 0.34, 2.15, yaw, 0.0, 12, armorCol);
 
-        drawWorldCylinder(x, y + 0.88, z, 0.22, 0.18, 0.42, 10, TEX_SOLID, 0x627080);
-        drawOrientedWorldBox(x, y + 1.28, z, 7.6, 0.06, 0.34, heli.rotorPhase, 0.0, TEX_SOLID, rotorCol);
-        drawOrientedWorldBox(x, y + 1.28, z, 0.34, 0.06, 7.6, heli.rotorPhase, 0.0, TEX_SOLID, rotorCol);
-        drawOrientedWorldBox(x - fx * 4.1 + rx * 0.16, y + 0.75, z - fz * 4.1 + rz * 0.16, 0.06, 1.45, 0.18, yaw, heli.rotorPhase * 1.6, TEX_SOLID, rotorCol);
+        // Хвостовая балка и киль с рулевым винтом
+        drawOrientedWorldCylinder(x - fx * 2.75, y + 0.24, z - fz * 2.75, 0.46, 0.18, 3.55, yaw, 0.06, 12, hullCol);
+        drawOrientedWorldBox(x - fx * 4.25, y + 0.78, z - fz * 4.25, 0.16, 1.38, 0.72, yaw, -0.15, TEX_SOLID, podCol);
+
+        // Пилоны крыльев + блоки НАР Hydra-70 + ПТУР Hellfire + навигационные БАНО!
+        drawOrientedWorldBox(x, y + 0.08, z, 4.15, 0.16, 0.76, yaw, 0.0, TEX_SOLID, podCol);
+        drawOrientedWorldCylinder(x - rx * 1.68, y - 0.16, z - rz * 1.68, 0.29, 0.29, 1.42, yaw, 0.0, 12, 0x4A5868);
+        drawOrientedWorldCylinder(x + rx * 1.68, y - 0.16, z + rz * 1.68, 0.29, 0.29, 1.42, yaw, 0.0, 12, 0x4A5868);
+        drawWorldEllipsoid(x - rx * 2.08, y + 0.10, z - rz * 2.08, 0.13, 0.13, 0.13, 8, 6, 0xFF3B30);
+        drawWorldEllipsoid(x + rx * 2.08, y + 0.10, z + rz * 2.08, 0.13, 0.13, 0.13, 8, 6, 0x34C759);
+
+        // Втулка и 4-лопастной несущий винт + рулевой винт
+        drawWorldCylinder(x, y + 0.88, z, 0.24, 0.18, 0.44, 10, TEX_SOLID, 0x627080);
+        drawOrientedWorldBox(x, y + 1.30, z, 8.2, 0.055, 0.34, heli.rotorPhase, 0.0, TEX_SOLID, rotorCol);
+        drawOrientedWorldBox(x, y + 1.30, z, 0.34, 0.055, 8.2, heli.rotorPhase, 0.0, TEX_SOLID, rotorCol);
+        drawOrientedWorldBox(x - fx * 4.35 + rx * 0.16, y + 0.82, z - fz * 4.35 + rz * 0.16, 0.06, 1.55, 0.18, yaw, heli.rotorPhase * 1.7, TEX_SOLID, rotorCol);
     }
 
     public void drawSentryTurret(Vec3.SentryTurret t) {
@@ -3084,18 +3197,74 @@ public class Renderer3D {
     private double computeSmoothLightFactor(double nx, double ny, double nz) {
         double dot = nx * sunDir.x + ny * sunDir.y + nz * sunDir.z;
         double diff = Math.max(0.0, dot);
-        double d2 = diff * diff;
-        double spec = (d2 * d2 * d2) * 0.16;
-        double hemi = 0.09 * (ny + 1.0);
+        // Blinn-Phong полувектор между Солнцем и взглядом камеры для живых металлических и оптических бликов!
+        double hx = sunDir.x - sinYaw * cosPitch;
+        double hy = sunDir.y - sinPitch + 0.35;
+        double hz = sunDir.z - cosYaw * cosPitch;
+        double invH = 1.0 / Math.max(0.001, Math.sqrt(hx * hx + hy * hy + hz * hz));
+        double ndh = Math.max(0.0, (nx * hx + ny * hy + nz * hz) * invH);
+        double ndh2 = ndh * ndh;
+        double spec = (ndh2 * ndh2 * ndh2 * ndh2) * 0.24;
+        double hemi = 0.10 * (ny + 1.0) + Math.max(0.0, -dot) * 0.06;
         return ambientStrength + diff * diffuseStrength + hemi + spec;
     }
 
     private int applyDirectionalLight(int baseRgb, double nx, double ny, double nz) {
         double dot = nx * sunDir.x + ny * sunDir.y + nz * sunDir.z;
-        double intensity = ambientStrength + Math.max(0.0, dot) * diffuseStrength;
-        if (ny < -0.5) intensity = ambientStrength * 0.74;
-        int lit = shadeColor(baseRgb, intensity);
-        return multiplyColors(lit, lightTintColor);
+        double sunTerm = Math.max(0.0, dot);
+        double shadowTerm = 1.0 - sunTerm;
+        double hemi = 0.05 * Math.max(0.0, ny);
+        double intensity = ambientStrength + sunTerm * diffuseStrength + hemi;
+        if (ny < -0.5) intensity = ambientStrength * 0.72;
+
+        // Реалистичный цветовой контраст Source 2: тёплый солнечный свет vs прохладный небесный рефлекс в тени!
+        double rMul = intensity * (1.0 + sunTerm * 0.045 - shadowTerm * 0.045);
+        double gMul = intensity * (1.0 + sunTerm * 0.010);
+        double bMul = intensity * (1.0 - sunTerm * 0.035 + shadowTerm * 0.065);
+
+        int r = Math.min(255, Math.max(0, (int) (((baseRgb >> 16) & 0xFF) * rMul)));
+        int g = Math.min(255, Math.max(0, (int) (((baseRgb >> 8) & 0xFF) * gMul)));
+        int b = Math.min(255, Math.max(0, (int) ((baseRgb & 0xFF) * bMul)));
+        return multiplyColors((r << 16) | (g << 8) | b, lightTintColor);
+    }
+
+    /**
+     * Сверхбыстрый SWAR-шейдер матового стекла Source 2 Panorama UI (< 0.08 мс на карточку HUD/Меню!):
+     * размывает реальный живой 3D-кадр под панелью и накладывает глубокую тонировку стекла без потери FPS!
+     */
+    public static void frostImageRect(BufferedImage img, int rx, int ry, int rw, int rh, int tintRgb, int tintAlpha256) {
+        if (img == null || rw <= 2 || rh <= 2) return;
+        if (!(img.getRaster().getDataBuffer() instanceof DataBufferInt)) return;
+        int imgW = img.getWidth();
+        int imgH = img.getHeight();
+        int x0 = Math.max(3, rx);
+        int y0 = Math.max(3, ry);
+        int x1 = Math.min(imgW - 4, rx + rw);
+        int y1 = Math.min(imgH - 4, ry + rh);
+        if (x1 <= x0 || y1 <= y0) return;
+
+        int[] buf = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+        int a = Math.max(0, Math.min(256, tintAlpha256));
+        int ia = 256 - a;
+        int trRB = (tintRgb & 0xFF00FF) * a;
+        int trG  = (tintRgb & 0x00FF00) * a;
+        int stride3 = imgW * 3;
+
+        for (int y = y0; y < y1; y++) {
+            int row = y * imgW;
+            for (int x = x0; x < x1; x++) {
+                int idx = row + x;
+                int cL = buf[idx - 3];
+                int cR = buf[idx + 3];
+                int cU = buf[idx - stride3];
+                int cD = buf[idx + stride3];
+                int blurRB = (((cL & 0xFF00FF) + (cR & 0xFF00FF) + (cU & 0xFF00FF) + (cD & 0xFF00FF)) >>> 2) & 0xFF00FF;
+                int blurG  = (((cL & 0x00FF00) + (cR & 0x00FF00) + (cU & 0x00FF00) + (cD & 0x00FF00)) >>> 2) & 0x00FF00;
+                int outRB  = ((blurRB * ia + trRB) >>> 8) & 0xFF00FF;
+                int outG   = ((blurG  * ia + trG)  >>> 8) & 0x00FF00;
+                buf[idx] = outRB | outG;
+            }
+        }
     }
 
     public static int multiplyColors(int c1, int c2) {

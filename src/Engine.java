@@ -171,6 +171,7 @@ public class Engine extends JPanel implements Runnable {
     private BufferedImage frameBufferB = null;
     private boolean nextBufferIsA = true;
     private volatile BufferedImage displayedFrame = null;
+    private BufferedImage lastPresentedFrame = null;
     private volatile Rectangle clickFlashRect = null;
     private double clickFlashTimer = 0.0;
 
@@ -810,7 +811,7 @@ public class Engine extends JPanel implements Runnable {
         }
         Vec3 eye = player.getEyePosition();
         Vec3 dir = player.getLookDirection();
-        Vec3.RayHit hit = map.raycast(eye, dir, 75.0);
+        Vec3.RayHit hit = map.raycast(eye, dir, 128.0);
         Vec3 target;
         if (hit != null) {
             target = new Vec3(
@@ -2502,9 +2503,9 @@ public class Engine extends JPanel implements Runnable {
             bossHelicopter.hitFlashTimer = Math.max(0.0, bossHelicopter.hitFlashTimer - dt);
         }
 
-        double rx = Math.cos(bossHelicopter.orbitAngle) * 14.2;
-        double rz = Math.sin(bossHelicopter.orbitAngle * 0.85) * 13.5;
-        double ry = 11.4 + Math.sin(bossHelicopter.orbitAngle * 2.1) * 0.85;
+        double rx = Math.cos(bossHelicopter.orbitAngle) * 21.5;
+        double rz = Math.sin(bossHelicopter.orbitAngle * 0.85) * 20.2;
+        double ry = 14.8 + Math.sin(bossHelicopter.orbitAngle * 2.1) * 0.85;
         double vx = -Math.sin(bossHelicopter.orbitAngle);
         double vz = Math.cos(bossHelicopter.orbitAngle * 0.85) * 0.85;
         bossHelicopter.pos.set(rx, ry, rz);
@@ -2565,8 +2566,8 @@ public class Engine extends JPanel implements Runnable {
                             dir.x + rng.nextGaussian() * 0.045,
                             dir.y + rng.nextGaussian() * 0.045,
                             dir.z + rng.nextGaussian() * 0.045).normalize();
-                    Vec3.RayHit wh = map.raycast(gunMuzzle, spreadDir, 55.0);
-                    Vec3 endPt = (wh != null) ? wh.point : gunMuzzle.add(spreadDir.scale(40.0));
+                    Vec3.RayHit wh = map.raycast(gunMuzzle, spreadDir, 105.0);
+                    Vec3 endPt = (wh != null) ? wh.point : gunMuzzle.add(spreadDir.scale(75.0));
                     tracers.add(new Vec3.Tracer(gunMuzzle, endPt, 0xFF5630, 0.10));
                     soundSystem.playBotShot(gunMuzzle.dist(player.getPosition()) * 0.65);
 
@@ -2716,7 +2717,7 @@ public class Engine extends JPanel implements Runnable {
     }
 
     /**
-     * Полный рендер кадра CS-2 JAVA 7.0 (Hyper-Turbo Analytic Rasterizer + Deferred Skybox + Parallel Post-FX).
+     * Полный рендер кадра CS-2 JAVA 8.0 (Hyper-Turbo Analytic Rasterizer + Deferred Skybox + Parallel Post-FX).
      */
     public void renderCompleteFrame(Graphics2D g, int outW, int outH) {
         buildingUiClickables.clear();
@@ -2747,17 +2748,46 @@ public class Engine extends JPanel implements Runnable {
                 globalAnimTime
         );
 
-        // Установка камеры (от первого лица в бою или плавный кинематографический облет в меню)
+        // Установка камеры (от первого лица в бою или кинематографическая панорама знаковой точки выбранной 68x68м карты!)
         if (currentScreen == AppScreen.IN_GAME || (currentScreen == AppScreen.SETTINGS && settingsOpenedFromGame)) {
             Vec3 eye = player.getEyePosition();
             renderer.setCamera(eye.x, eye.y, eye.z, player.getEffectiveYaw(), player.getEffectivePitch());
         } else {
-            double orbitAngle = globalAnimTime * 0.14;
-            double camX = Math.sin(orbitAngle) * 14.2;
-            double camZ = Math.cos(orbitAngle) * 14.2 - 3.0;
-            double camY = 4.4 + Math.sin(globalAnimTime * 0.32) * 0.55;
-            double lookYaw = Math.atan2(-camX, 2.5 - camZ);
-            renderer.setCamera(camX, camY, camZ, lookYaw, -0.15);
+            double swayA = Math.sin(globalAnimTime * 0.25);
+            double swayB = Math.cos(globalAnimTime * 0.20);
+            double camX, camY, camZ, lookX, lookY, lookZ;
+            switch (settings.mapTheme) {
+                case INFERNO:
+                    camX = -17.5 + swayA * 2.3;
+                    camY = 3.65 + Math.sin(globalAnimTime * 0.34) * 0.32;
+                    camZ = 14.2 + swayB * 1.7;
+                    lookX = -21.5; lookY = 4.5; lookZ = 24.5;
+                    break;
+                case DUST_II:
+                    camX = 18.8 + swayA * 2.2;
+                    camY = 3.90 + Math.sin(globalAnimTime * 0.32) * 0.32;
+                    camZ = 2.5 + swayB * 2.1;
+                    lookX = 23.5; lookY = 2.9; lookZ = 24.0;
+                    break;
+                case MIRAGE:
+                    camX = -5.5 + swayA * 2.4;
+                    camY = 3.85 + Math.sin(globalAnimTime * 0.33) * 0.32;
+                    camZ = -10.5 + swayB * 1.9;
+                    lookX = 5.5; lookY = 3.5; lookZ = 10.5;
+                    break;
+                case NUKE:
+                default:
+                    camX = -19.2 + swayA * 1.7;
+                    camY = 4.20 + Math.sin(globalAnimTime * 0.32) * 0.32;
+                    camZ = -18.5 + swayB * 2.0;
+                    lookX = -24.5; lookY = 4.3; lookZ = 15.0;
+                    break;
+            }
+            double dx = lookX - camX;
+            double dy = lookY - camY;
+            double dz = lookZ - camZ;
+            double horiz = Math.sqrt(dx * dx + dz * dz);
+            renderer.setCamera(camX, camY, camZ, Math.atan2(dx, dz), Math.atan2(dy, Math.max(0.01, horiz)));
         }
 
         // Очистка ТОЛЬКО Z-буфера (~0.1 мс) перед непрозрачной геометрией!
@@ -2898,18 +2928,17 @@ public class Engine extends JPanel implements Runnable {
             renderer.flushRasterQueue();
         }
 
-        // 8. Многопоточный Post-FX конвейер 7.0: FXAA Turbo / Span 3.11 + CAS резкость + Насыщенность + Яркость + Виньетка!
+        // 8. Многопоточный Post-FX конвейер 8.0: FXAA Turbo / Span 3.11 + CAS резкость + Насыщенность + Яркость + Виньетка!
         renderer.applyPostProcessingPass();
 
-        // Многопоточный SWAR-апскейлер/даунскейлер + прямой 1:1 блит (в 15x быстрее Java2D drawImage!)
-        g.drawImage(renderer.getPresentedImage(outW, outH, settings.bilinearFiltering), 0, 0, null);
+        // Многопоточный SWAR-апскейлер/даунскейлер + прямой 1:1 блит + живой буфер матового стекла Panorama 8.0!
+        this.lastPresentedFrame = renderer.getPresentedImage(outW, outH, settings.bilinearFiltering);
+        g.drawImage(this.lastPresentedFrame, 0, 0, null);
 
-        boolean fastCombatHud = (currentScreen == AppScreen.IN_GAME && !buyMenuOpen && matchState == MatchState.PLAYING);
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                fastCombatHud ? RenderingHints.VALUE_ANTIALIAS_OFF : RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        // Отрисовка текущего экрана Panorama Glass UI 7.0
+        // Отрисовка текущего экрана Panorama Glass UI 8.0
         if (currentScreen == AppScreen.MAIN_MENU) {
             drawMainMenuScreen(g, outW, outH);
         } else if (currentScreen == AppScreen.SKIN_ARMORY) {
@@ -2949,39 +2978,259 @@ public class Engine extends JPanel implements Runnable {
         g.drawImage(cachedVignette, 0, 0, null);
     }
 
+    /**
+     * Сверхбыстрый рендер живой матово-стеклянной карточки Source 2 Panorama 8.0 (~0.05 мс на панель).
+     * Размывает реальный 3D-кадр под панелью через SWAR Box-Blur и добавляет тонкую стеклянную кромку!
+     */
+    private void drawFrostedGlassPanel(Graphics2D g, int x, int y, int w, int h,
+                                       int tintRgb, int alpha256, Color borderCol, Color accentTop) {
+        if (lastPresentedFrame != null) {
+            int imgW = lastPresentedFrame.getWidth();
+            int imgH = lastPresentedFrame.getHeight();
+            int x0 = Math.max(0, Math.min(imgW, x));
+            int y0 = Math.max(0, Math.min(imgH, y));
+            int x1 = Math.max(0, Math.min(imgW, x + w));
+            int y1 = Math.max(0, Math.min(imgH, y + h));
+            if (x1 > x0 && y1 > y0) {
+                Renderer3D.frostImageRect(lastPresentedFrame, x0, y0, x1 - x0, y1 - y0, tintRgb, alpha256);
+                g.drawImage(lastPresentedFrame, x0, y0, x1, y1, x0, y0, x1, y1, null);
+            }
+        } else {
+            g.setColor(new Color((tintRgb >> 16) & 255, (tintRgb >> 8) & 255, tintRgb & 255, Math.min(255, alpha256)));
+            g.fillRect(x, y, w, h);
+        }
+        // Стеклянный внутренний блик сверху + чёткий бордюр
+        g.setColor(new Color(255, 255, 255, 26));
+        g.drawLine(x + 1, y + 1, x + w - 2, y + 1);
+        if (borderCol != null) {
+            g.setColor(borderCol);
+            g.drawRect(x, y, w - 1, h - 1);
+        }
+        if (accentTop != null) {
+            g.setColor(accentTop);
+            g.fillRect(x + 1, y + 1, w - 2, 2);
+        }
+    }
+
+    /** Обрезает строку по пиксельной ширине с многоточием (Panorama 8.0 — без вылезающего текста). */
+    private static String fitTextToWidth(Graphics2D g, String text, int maxW) {
+        FontMetrics fm = g.getFontMetrics();
+        if (text == null || fm.stringWidth(text) <= maxW) return text;
+        String t = text;
+        while (t.length() > 1 && fm.stringWidth(t + "…") > maxW) {
+            t = t.substring(0, t.length() - 1);
+        }
+        return t.trim() + "…";
+    }
+
+    /**
+     * Векторная киберспортивная иконка-силуэт всех 11 видов оружия CS2 для HUD, Меню и Магазина [B]!
+     */
+    private void drawWeaponSilhouette(Graphics2D g, Weapon.Type type, int x, int y, int w, int h, Color bodyCol, Color accentCol) {
+        int cy = y + h / 2;
+        g.setColor(bodyCol);
+        switch (type) {
+            case AK47: {
+                // Приклад + ресивер + газоотвод + длинный ствол + изогнутый рожок Калашникова
+                g.fillPolygon(new int[]{x + 2, x + 20, x + 22, x + 4}, new int[]{cy + 5, cy - 1, cy + 7, cy + 12}, 4);
+                g.fillRect(x + 20, cy - 4, 34, 8);
+                g.fillRect(x + 54, cy - 3, 28, 3);
+                g.fillRect(x + 54, cy - 6, 18, 2);
+                g.fillRect(x + 79, cy - 7, 3, 6);
+                g.fillPolygon(new int[]{x + 25, x + 31, x + 27, x + 21}, new int[]{cy + 4, cy + 4, cy + 14, cy + 14}, 4);
+                g.setColor(accentCol);
+                g.fillPolygon(new int[]{x + 41, x + 48, x + 54, x + 46}, new int[]{cy + 4, cy + 4, cy + 16, cy + 17}, 4);
+                break;
+            }
+            case M4A1S: {
+                // Приклад SOPMOD + ресивер + коллиматор + цевьё RIS + длинный глушитель
+                g.fillRect(x + 2, cy - 2, 16, 8);
+                g.fillRect(x + 18, cy - 5, 34, 9);
+                g.fillRect(x + 52, cy - 4, 18, 6);
+                g.fillPolygon(new int[]{x + 25, x + 31, x + 28, x + 22}, new int[]{cy + 4, cy + 4, cy + 14, cy + 14}, 4);
+                g.fillPolygon(new int[]{x + 39, x + 46, x + 48, x + 41}, new int[]{cy + 4, cy + 4, cy + 15, cy + 15}, 4);
+                g.setColor(accentCol);
+                g.fillRect(x + 29, cy - 10, 12, 5);
+                g.fillRoundRect(x + 70, cy - 3, 22, 5, 2, 2);
+                break;
+            }
+            case AWP: {
+                // Ложа с отверстием + длинный ствол + ДТК + сошки + большой оптический прицел
+                g.fillPolygon(new int[]{x + 1, x + 24, x + 24, x + 1}, new int[]{cy - 2, cy - 4, cy + 7, cy + 9}, 4);
+                g.fillRect(x + 24, cy - 4, 34, 8);
+                g.fillRect(x + 58, cy - 3, 32, 3);
+                g.fillRect(x + 88, cy - 5, 5, 7);
+                g.fillRect(x + 37, cy + 4, 9, 8);
+                g.drawLine(x + 62, cy + 1, x + 56, cy + 10);
+                g.setColor(accentCol);
+                g.fillRect(x + 28, cy - 11, 28, 5);
+                g.fillPolygon(new int[]{x + 24, x + 30, x + 30, x + 24}, new int[]{cy - 12, cy - 10, cy - 7, cy - 5}, 4);
+                g.fillPolygon(new int[]{x + 54, x + 61, x + 61, x + 54}, new int[]{cy - 10, cy - 12, cy - 5, cy - 7}, 4);
+                break;
+            }
+            case M249: {
+                // Тяжёлый пулемёт с коробом на 100 патронов и сошками
+                g.fillRect(x + 2, cy - 2, 16, 9);
+                g.fillRect(x + 18, cy - 6, 40, 11);
+                g.fillRect(x + 58, cy - 4, 28, 4);
+                g.fillRect(x + 24, cy + 5, 6, 10);
+                g.setColor(accentCol);
+                g.fillRoundRect(x + 35, cy + 5, 17, 13, 3, 3);
+                g.drawLine(x + 66, cy, x + 60, cy + 12);
+                break;
+            }
+            case RPG7: {
+                // Труба гранатомёта + раструб + оптика ПГО-7 + конусная граната ПГ-7В
+                g.fillRect(x + 12, cy - 3, 56, 6);
+                g.fillPolygon(new int[]{x + 2, x + 12, x + 12, x + 2}, new int[]{cy - 6, cy - 3, cy + 3, cy + 6}, 4);
+                g.fillRect(x + 30, cy + 3, 5, 11);
+                g.fillRect(x + 44, cy + 3, 5, 10);
+                g.fillRect(x + 34, cy - 9, 10, 6);
+                g.setColor(accentCol);
+                g.fillPolygon(new int[]{x + 68, x + 80, x + 92, x + 80, x + 68},
+                        new int[]{cy - 2, cy - 8, cy, cy + 8, cy + 2}, 5);
+                break;
+            }
+            case XM1014: {
+                // Тактический дробовик: приклад + ресивер + ствол и подствольный трубчатый магазин
+                g.fillPolygon(new int[]{x + 3, x + 22, x + 22, x + 5}, new int[]{cy + 2, cy - 3, cy + 5, cy + 10}, 4);
+                g.fillRect(x + 22, cy - 4, 28, 8);
+                g.fillRect(x + 50, cy - 4, 34, 3);
+                g.setColor(accentCol);
+                g.fillRect(x + 50, cy, 31, 3);
+                g.fillRect(x + 54, cy + 2, 16, 4);
+                break;
+            }
+            case MP9: {
+                // Компактный ПП со складным прикладом, передней рукоятью, длинным магазином и глушителем
+                g.drawLine(x + 8, cy - 1, x + 24, cy - 1);
+                g.drawLine(x + 8, cy + 2, x + 24, cy + 2);
+                g.fillRect(x + 24, cy - 5, 32, 9);
+                g.fillRect(x + 34, cy + 4, 6, 14);
+                g.fillRect(x + 49, cy + 4, 5, 10);
+                g.setColor(accentCol);
+                g.fillRect(x + 32, cy - 10, 10, 5);
+                g.fillRoundRect(x + 56, cy - 4, 22, 6, 2, 2);
+                break;
+            }
+            case DEAGLE: {
+                // Массивный пистолет Desert Eagle .50 AE
+                g.fillPolygon(new int[]{x + 26, x + 68, x + 66, x + 26}, new int[]{cy - 7, cy - 7, cy + 2, cy + 2}, 4);
+                g.fillPolygon(new int[]{x + 26, x + 36, x + 31, x + 21}, new int[]{cy + 2, cy + 2, cy + 15, cy + 15}, 4);
+                g.setColor(accentCol);
+                g.drawRect(x + 34, cy + 2, 8, 5);
+                break;
+            }
+            case GLOCK: {
+                // Пистолет Glock-18 с тактическим фонарём
+                g.fillRect(x + 28, cy - 6, 36, 7);
+                g.fillPolygon(new int[]{x + 28, x + 37, x + 33, x + 24}, new int[]{cy + 1, cy + 1, cy + 14, cy + 14}, 4);
+                g.setColor(accentCol);
+                g.fillRect(x + 50, cy + 1, 11, 4);
+                break;
+            }
+            case ZEUS: {
+                // Электрошокер Zeus x27 с молнией
+                g.fillRoundRect(x + 26, cy - 6, 34, 10, 3, 3);
+                g.fillPolygon(new int[]{x + 28, x + 36, x + 33, x + 25}, new int[]{cy + 4, cy + 4, cy + 14, cy + 14}, 4);
+                g.setColor(accentCol);
+                g.drawLine(x + 62, cy - 3, x + 72, cy - 6);
+                g.drawLine(x + 62, cy + 1, x + 72, cy + 4);
+                break;
+            }
+            case KNIFE:
+            default: {
+                // Изогнутый коготь Керамбита с кольцом под палец
+                g.drawOval(x + 20, cy + 2, 10, 10);
+                g.fillRoundRect(x + 29, cy - 2, 18, 7, 3, 3);
+                g.setColor(accentCol);
+                g.fillPolygon(new int[]{x + 47, x + 66, x + 74, x + 60, x + 47},
+                        new int[]{cy - 2, cy - 5, cy + 6, cy + 5, cy + 4}, 5);
+                break;
+            }
+        }
+    }
+
+    /**
+     * Мини-схема уникальной геометрии каждой из 4 карт 8.0 на карточках выбора карты в Главном Меню!
+     */
+    private void drawMiniMapBlueprint(Graphics2D g, GameSettings.MapTheme th, int x, int y, int s, Color accent) {
+        g.setColor(new Color(10, 15, 24, 210));
+        g.fillRoundRect(x, y, s, s, 8, 8);
+        g.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 120));
+        g.drawRoundRect(x, y, s, s, 8, 8);
+        g.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 195));
+        switch (th) {
+            case INFERNO:
+                // Узкая изогнутая улица Банан слева + Фонтан B + Апартаменты справа
+                g.fillRect(x + 6, y + 6, 12, 12); // Плент B + Фонтан
+                g.drawOval(x + 9, y + 9, 6, 6);
+                g.fillRect(x + 8, y + 18, 5, 18); // Банан
+                g.fillRect(x + 17, y + 15, 6, 20); // Мид
+                g.fillRect(x + 26, y + 9, 12, 12); // Плент A + Балкон
+                g.fillRect(x + 28, y + 23, 9, 13); // 2-эт. Апартаменты
+                break;
+            case DUST_II:
+                // Классический 4-квадрантный крест Dust II: Длина A, Коробка, Мид, Тёмка B
+                g.fillRect(x + 26, y + 6, 12, 12); // Плато A
+                g.fillRect(x + 29, y + 18, 7, 18); // Длина A + Коробка
+                g.fillRect(x + 18, y + 8, 6, 28);  // Каньон Мида + Ворота
+                g.fillRect(x + 6, y + 6, 10, 12);  // Плент B
+                g.fillRect(x + 7, y + 20, 9, 14);  // Тёмка (Туннель B)
+                break;
+            case MIRAGE:
+                // Открытая площадь Мида + Окно Снайпера + Королевский Дворец + Апартаменты B
+                g.fillRect(x + 14, y + 14, 14, 14); // Открытый Мид
+                g.drawRect(x + 17, y + 7, 8, 6);    // Окно Снайпера
+                g.fillRect(x + 28, y + 7, 10, 11);  // Плент A
+                g.fillRect(x + 30, y + 20, 8, 15);  // Дворец
+                g.fillRect(x + 6, y + 7, 9, 12);    // Плент B + Маркет
+                g.fillRect(x + 6, y + 21, 7, 14);   // Ковры B
+                break;
+            case NUKE:
+            default:
+                // Улица с Силосом слева + двухэтажный реакторный зал с мостками Девятка в центре!
+                g.fillOval(x + 6, y + 7, 9, 9);     // Градирня / Силос
+                g.fillRect(x + 7, y + 18, 6, 18);   // Улица (Outside)
+                g.drawRect(x + 16, y + 8, 22, 26);  // Главный корпус АЭС
+                g.fillOval(x + 22, y + 14, 10, 10); // Ядерный реактор A/B
+                g.drawLine(x + 16, y + 12, x + 38, y + 12); // Мостки Heaven
+                break;
+        }
+    }
+
     // =========================================================================
-    //  1. ГЛАВНОЕ МЕНЮ COUNTER-STRIKE 2 (PANORAMA GLASS UI 6.0)
+    //  1. ГЛАВНОЕ МЕНЮ COUNTER-STRIKE 2 (SOURCE 2 FROSTED PANORAMA UI 8.0)
     // =========================================================================
     private void drawMainMenuScreen(Graphics2D g, int outW, int outH) {
-        // 1. ВЕРХНЯЯ НАВИГАЦИОННАЯ ПАНЕЛЬ PANORAMA UI (матовое тёмное стекло + неоновый акцент)
-        int navH = 64;
-        GradientPaint topGrad = new GradientPaint(0, 0, new Color(10, 15, 24, 236), 0, navH, new Color(14, 21, 34, 212));
-        g.setPaint(topGrad);
-        g.fillRect(0, 0, outW, navH);
-        g.setColor(new Color(248, 192, 68, 175));
+        // 1. ВЕРХНЯЯ КОМАНДНАЯ ШАПКА PANORAMA 8.0 (настоящее матовое стекло поверх 3D-мира!)
+        int navH = 66;
+        drawFrostedGlassPanel(g, 0, 0, outW, navH, 0x090E18, 206,
+                new Color(255, 255, 255, 28), new Color(252, 196, 68, 215));
+        g.setColor(new Color(252, 192, 64, 180));
         g.fillRect(0, navH - 2, outW, 2);
 
         // Скошенный киберспортивный щит-логотип CS2 слева
         Polygon crest = new Polygon(
-                new int[]{18, 72, 64, 18},
-                new int[]{10, 10, 54, 54}, 4);
-        g.setPaint(new GradientPaint(18, 10, new Color(255, 206, 78), 64, 54, new Color(224, 134, 24)));
+                new int[]{18, 74, 65, 18},
+                new int[]{10, 10, 56, 56}, 4);
+        g.setPaint(new GradientPaint(18, 10, new Color(255, 214, 84), 65, 56, new Color(224, 128, 20)));
         g.fillPolygon(crest);
         g.setColor(new Color(14, 18, 26));
         g.setFont(uiFont("SansSerif", Font.BOLD, 21));
-        g.drawString("CS2", 22, 39);
+        g.drawString("CS2", 22, 40);
 
         g.setColor(Color.WHITE);
         g.setFont(uiFont("SansSerif", Font.BOLD, 21));
-        g.drawString("CS-2 JAVA 7.0", 80, 33);
-        g.setColor(new Color(108, 216, 255));
+        g.drawString("CS-2 JAVA 8.0", 82, 33);
+        g.setColor(new Color(102, 222, 255));
         g.setFont(uiFont("SansSerif", Font.BOLD, 10));
-        g.drawString("HYPER-TURBO • PRO STUDIO", 81, 49);
+        g.drawString("SOURCE 2 • 68×68 М", 83, 50);
 
-        // Центральные вкладки навигации Panorama UI
-        int tabsStartX = 256;
+        // Центральные вкладки навигации Panorama UI 8.0
+        int tabsStartX = 270;
         int tabGap = 6;
-        String[] navLabels = {"★ ИГРАТЬ", "3D СКИНЫ", "ГРАФИКА", "УПРАВЛЕНИЕ", "АУДИО", "СПРАВКА", "F11 ЭКРАН", "ВЫХОД"};
+        String[] navLabels = {"▶ ИГРАТЬ", "3D СКИНЫ", "ГРАФИКА", "УПРАВЛЕНИЕ", "АУДИО", "АРСЕНАЛ", "F11 ЭКРАН", "ВЫХОД"};
         Runnable[] navActions = {
             this::launchMatchFromMenu,
             () -> currentScreen = AppScreen.SKIN_ARMORY,
@@ -2992,38 +3241,39 @@ public class Engine extends JPanel implements Runnable {
             this::toggleFullscreenMode,
             this::shutdownAndExit
         };
-        int availNavW = Math.max(440, outW - tabsStartX - 278);
-        int navBtnW = Math.min(106, (availNavW - (navLabels.length - 1) * tabGap) / navLabels.length);
+        int availNavW = Math.max(430, outW - tabsStartX - 278);
+        int navBtnW = Math.min(104, (availNavW - (navLabels.length - 1) * tabGap) / navLabels.length);
         for (int i = 0; i < navLabels.length; i++) {
             int tx = tabsStartX + i * (navBtnW + tabGap);
-            Rectangle tr = new Rectangle(tx, 12, navBtnW, 40);
+            Rectangle tr = new Rectangle(tx, 13, navBtnW, 40);
             boolean hov = tr.contains(mouseClientX, mouseClientY);
             boolean primary = (i == 0);
             boolean danger = (i == navLabels.length - 1);
-            Color bg = primary ? (hov ? new Color(248, 174, 46) : new Color(228, 148, 30))
-                    : (danger ? (hov ? new Color(168, 52, 58) : new Color(112, 36, 42, 210))
-                    : (hov ? new Color(42, 62, 92, 235) : new Color(24, 34, 50, 195)));
+            Color bg = primary ? (hov ? new Color(255, 192, 56) : new Color(238, 158, 30))
+                    : (danger ? (hov ? new Color(184, 54, 62) : new Color(118, 34, 42, 210))
+                    : (hov ? new Color(46, 68, 102, 236) : new Color(20, 30, 46, 185)));
             g.setColor(bg);
             g.fillRoundRect(tr.x, tr.y, tr.width, tr.height, 8, 8);
+            g.setColor(primary ? new Color(255, 242, 185, 210) : new Color(255, 255, 255, hov ? 95 : 32));
+            g.drawRoundRect(tr.x, tr.y, tr.width, tr.height, 8, 8);
             if (primary || hov) {
-                g.setColor(primary ? new Color(255, 238, 168) : new Color(110, 212, 255));
-                g.fillRect(tr.x + 6, tr.y + tr.height - 3, tr.width - 12, 3);
+                g.setColor(primary ? new Color(255, 246, 192) : new Color(96, 220, 255));
+                g.fillRect(tr.x + 8, tr.y + tr.height - 3, tr.width - 16, 3);
             }
             drawCenteredText(g, navLabels[i], tr.x + tr.width / 2, tr.y + 25,
                     uiFont("SansSerif", Font.BOLD, 11),
-                    primary ? new Color(16, 18, 24) : Color.WHITE);
+                    primary ? new Color(14, 16, 22) : Color.WHITE);
             uiRegisterClickable(tr, navActions[i]);
         }
 
         // Карточка Профиля и Воинского Звания CS2 справа в шапке
-        int profW = 252, profX = outW - profW - 14, profY = 8;
-        g.setColor(new Color(18, 26, 40, 226));
+        int profW = 254, profX = outW - profW - 14, profY = 9;
+        g.setColor(new Color(14, 22, 34, 228));
         g.fillRoundRect(profX, profY, profW, 48, 10, 10);
         Color rankCol = settings.getRankColor();
-        g.setColor(new Color(rankCol.getRed(), rankCol.getGreen(), rankCol.getBlue(), 185));
+        g.setColor(new Color(rankCol.getRed(), rankCol.getGreen(), rankCol.getBlue(), 200));
         g.drawRoundRect(profX, profY, profW, 48, 10, 10);
 
-        // Герб-эмблема ранга
         int sx = profX + 22, sy = profY + 24;
         Polygon shield = new Polygon(
                 new int[]{sx, sx + 13, sx + 10, sx, sx - 10, sx - 13},
@@ -3037,96 +3287,118 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(Color.WHITE);
         g.drawString(settings.getRankTitle(), profX + 42, profY + 20);
         g.setFont(uiFont("SansSerif", Font.PLAIN, 10));
-        g.setColor(new Color(176, 194, 216));
+        g.setColor(new Color(180, 198, 220));
         g.drawString("XP: " + settings.careerXp + " • Фрагов: " + settings.careerKills, profX + 42, profY + 34);
 
-        // Полоса прогресса до следующего звания
         int xpBarX = profX + 42, xpBarW = profW - 54;
-        g.setColor(new Color(34, 46, 64));
+        g.setColor(new Color(30, 42, 58));
         g.fillRoundRect(xpBarX, profY + 39, xpBarW, 5, 4, 4);
         g.setColor(rankCol);
         g.fillRoundRect(xpBarX, profY + 39, (int) (xpBarW * settings.getRankProgress()), 5, 4, 4);
 
-        // 2. ПЛАВАЮЩАЯ ВИТРИНА 3D-ОПЕРАТИВНИКА СПЕЦНАЗА SAS (СЛЕВА СНИЗУ ПОД 3D- БОЙЦОМ)
-        int opCardX = 24;
-        int opCardW = 356;
-        int opCardH = 108;
-        int opCardY = outH - opCardH - 42;
-        g.setPaint(new GradientPaint(opCardX, opCardY, new Color(12, 18, 28, 224),
-                opCardX + opCardW, opCardY + opCardH, new Color(18, 28, 44, 206)));
-        g.fillRoundRect(opCardX, opCardY, opCardW, opCardH, 14, 14);
-        g.setColor(new Color(88, 196, 255, 155));
-        g.drawRoundRect(opCardX, opCardY, opCardW, opCardH, 14, 14);
+        // 2. МАТОВО-СТЕКЛЯННАЯ ВИТРИНА 3D-ОПЕРАТИВНИКА СПЕЦНАЗА SAS CT + ВЕКТОРНЫЙ СИЛУЭТ ПУШКИ!
+        int opCardX = 22;
+        int opCardW = 378;
+        int opCardH = 122;
+        int opCardY = outH - opCardH - 40;
+        drawFrostedGlassPanel(g, opCardX, opCardY, opCardW, opCardH, 0x0A121E, 198,
+                new Color(88, 206, 255, 145), new Color(76, 204, 255, 220));
 
         Weapon showcaseW = armoryShowcaseWeapons[armoryWeaponIdx];
-        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
-        g.setColor(new Color(102, 208, 255));
-        g.drawString("◆ ОПЕРАТИВНИК СПЕЦНАЗА SAS CT (3D PREVIEW)", opCardX + 16, opCardY + 22);
+        g.setFont(uiFont("SansSerif", Font.BOLD, 10));
+        g.setColor(new Color(98, 218, 255));
+        g.drawString("◆ СПЕЦНАЗ SAS CT • GPNVG-18", opCardX + 14, opCardY + 20);
         g.setFont(uiFont("SansSerif", Font.BOLD, 16));
         g.setColor(Color.WHITE);
-        g.drawString(showcaseW.getDisplayName() + "  |  " + settings.weaponSkin.label, opCardX + 16, opCardY + 45);
+        g.drawString(showcaseW.getDisplayName(), opCardX + 14, opCardY + 42);
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
+        g.setColor(new Color(252, 206, 92));
+        g.drawString("СКИН: " + settings.weaponSkin.label.toUpperCase(), opCardX + 14, opCardY + 59);
 
-        addMenuButton(g, new Rectangle(opCardX + 16, opCardY + 58, 156, 36),
-                "⟳ СМЕНИТЬ ОРУЖИЕ", new Color(36, 58, 86), false,
+        // Чёткий векторный силуэт выбранного оружия справа в карточке оперативника!
+        g.setColor(new Color(14, 22, 34, 190));
+        g.fillRoundRect(opCardX + opCardW - 114, opCardY + 12, 100, 50, 8, 8);
+        g.setColor(new Color(92, 208, 255, 85));
+        g.drawRoundRect(opCardX + opCardW - 114, opCardY + 12, 100, 50, 8, 8);
+        drawWeaponSilhouette(g, showcaseW.getType(), opCardX + opCardW - 110, opCardY + 15, 92, 44,
+                new Color(226, 236, 248), new Color(255, 196, 72));
+
+        addMenuButton(g, new Rectangle(opCardX + 14, opCardY + 72, 170, 38),
+                "⟳ СМЕНИТЬ ОРУЖИЕ", new Color(34, 58, 88), false,
                 () -> armoryWeaponIdx = (armoryWeaponIdx + 1) % armoryShowcaseWeapons.length);
-        addMenuButton(g, new Rectangle(opCardX + 182, opCardY + 58, 158, 36),
-                "★ 3D СКИНЫ (" + GameSettings.WeaponSkin.values().length + ")", new Color(124, 52, 164), false,
+        addMenuButton(g, new Rectangle(opCardX + 194, opCardY + 72, 170, 38),
+                "★ 3D СКИНЫ (" + GameSettings.WeaponSkin.values().length + ")", new Color(124, 52, 168), false,
                 () -> currentScreen = AppScreen.SKIN_ARMORY);
 
-        // 3. ПРАВАЯ КОМАНДНАЯ ПАНЕЛЬ ЗАПУСКА СПЕЦОПЕРАЦИИ (КАРТОЧКИ 4 КАРТ + РЕЖИМЫ + НАСТРОЙКИ БОЯ)
-        int deckW = Math.min(548, outW - 418);
-        int deckH = Math.min(542, outH - navH - 46);
-        int deckX = outW - deckW - 22;
-        int deckY = navH + 14;
+        // Живой бейдж текущей точки обзора 68×68м карты слева сверху под шапкой!
+        drawFrostedGlassPanel(g, 22, navH + 14, 348, 44, 0x09101B, 185,
+                new Color(255, 255, 255, 42), new Color(252, 196, 68, 190));
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
+        g.setColor(new Color(252, 206, 86));
+        g.drawString("◉ ЖИВАЯ 3D-ПАНОРАМА • " + settings.mapTheme.codeName + " (68×68 М)", 34, navH + 32);
+        g.setFont(uiFont("SansSerif", Font.PLAIN, 11));
+        g.setColor(new Color(204, 220, 238));
+        g.drawString(settings.mapTheme.layoutBadge, 34, navH + 49);
 
-        g.setPaint(new GradientPaint(deckX, deckY, new Color(11, 16, 26, 232),
-                deckX, deckY + deckH, new Color(15, 22, 36, 238)));
-        g.fillRoundRect(deckX, deckY, deckW, deckH, 18, 18);
-        g.setColor(new Color(255, 255, 255, 52));
-        g.drawRoundRect(deckX, deckY, deckW, deckH, 18, 18);
+        // 3. ПРАВАЯ КОМАНДНАЯ ПАНЕЛЬ ЗАПУСКА СПЕЦОПЕРАЦИИ (МАТОВОЕ СТЕКЛО + 4 АРХИТЕКТУРНЫЕ КАРТЫ!)
+        int deckW = Math.min(564, outW - 422);
+        int deckH = Math.min(554, outH - navH - 44);
+        int deckX = outW - deckW - 20;
+        int deckY = navH + 12;
 
-        g.setFont(uiFont("SansSerif", Font.BOLD, 15));
-        g.setColor(new Color(252, 204, 84));
-        g.drawString("ВЫБЕРИТЕ КАРТУ ОПЕРАЦИИ (ЖИВОЙ 3D-ПРЕДПРОСМОТР)", deckX + 20, deckY + 26);
+        drawFrostedGlassPanel(g, deckX, deckY, deckW, deckH, 0x0A101C, 212,
+                new Color(255, 255, 255, 58), new Color(252, 196, 68, 225));
 
-        // Интерактивная сетка 2×2 карточек 3D-карт CS2!
+        g.setFont(uiFont("SansSerif", Font.BOLD, 14));
+        g.setColor(new Color(255, 210, 88));
+        g.drawString(fitTextToWidth(g, "ВЫБОР 3D-КАРТЫ • 4 УНИКАЛЬНЫЕ ПЛАНИРОВКИ", deckW - 36), deckX + 18, deckY + 24);
+
+        // Интерактивная сетка 2×2 карточек масштабных 3D-карт CS2 с мини-схемами планировки!
         GameSettings.MapTheme[] themes = GameSettings.MapTheme.values();
         String[] mapNames = {"INFERNO", "DUST II", "MIRAGE", "NUKE"};
-        String[] mapSubs = {"Фонтан • Колокольня", "Длина A • Тоннель B", "Дворец • Арки Мида", "Ядерные силосы A/B"};
         Color[] mapAccents = {
-            new Color(236, 118, 54), new Color(228, 178, 76),
-            new Color(214, 122, 86), new Color(68, 168, 242)
+            new Color(244, 122, 56), new Color(238, 186, 76),
+            new Color(224, 128, 92), new Color(68, 184, 255)
         };
         int mCols = 2;
         int mGap = 10;
-        int mCardW = (deckW - 40 - mGap) / mCols;
-        int mCardH = 54;
-        int mStartY = deckY + 36;
+        int mCardW = (deckW - 36 - mGap) / mCols;
+        int mCardH = 58;
+        int mStartY = deckY + 34;
         for (int i = 0; i < themes.length; i++) {
             final GameSettings.MapTheme th = themes[i];
             int mc = i % mCols, mr = i / mCols;
-            Rectangle mrRect = new Rectangle(deckX + 20 + mc * (mCardW + mGap), mStartY + mr * (mCardH + 8), mCardW, mCardH);
+            Rectangle mrRect = new Rectangle(deckX + 18 + mc * (mCardW + mGap), mStartY + mr * (mCardH + 8), mCardW, mCardH);
             boolean active = (settings.mapTheme == th);
             boolean hov = mrRect.contains(mouseClientX, mouseClientY);
 
-            Color cTop = active ? new Color(mapAccents[i].getRed() / 3 + 22, mapAccents[i].getGreen() / 3 + 26, mapAccents[i].getBlue() / 3 + 36, 242)
-                    : (hov ? new Color(32, 44, 64, 232) : new Color(20, 28, 42, 218));
+            Color cTop = active ? new Color(mapAccents[i].getRed() / 3 + 18, mapAccents[i].getGreen() / 3 + 22, mapAccents[i].getBlue() / 3 + 34, 238)
+                    : (hov ? new Color(32, 46, 68, 228) : new Color(16, 24, 38, 206));
             g.setColor(cTop);
             g.fillRoundRect(mrRect.x, mrRect.y, mrRect.width, mrRect.height, 10, 10);
             g.setColor(mapAccents[i]);
             g.fillRoundRect(mrRect.x, mrRect.y, 6, mrRect.height, 6, 6);
 
+            // Мини-чертеж уникальной геометрии карты справа на карточке!
+            drawMiniMapBlueprint(g, th, mrRect.x + mrRect.width - 50, mrRect.y + 7, 44, mapAccents[i]);
+
             g.setStroke(new BasicStroke(active ? 2.0f : 1.0f));
-            g.setColor(active ? mapAccents[i] : new Color(255, 255, 255, 38));
+            g.setColor(active ? mapAccents[i] : new Color(255, 255, 255, hov ? 85 : 36));
             g.drawRoundRect(mrRect.x, mrRect.y, mrRect.width, mrRect.height, 10, 10);
             g.setStroke(new BasicStroke(1.0f));
 
             g.setFont(uiFont("SansSerif", Font.BOLD, 14));
-            g.setColor(active ? Color.WHITE : new Color(224, 232, 244));
-            g.drawString((active ? "★ " : "") + mapNames[i], mrRect.x + 16, mrRect.y + 23);
-            g.setFont(uiFont("SansSerif", Font.PLAIN, 11));
-            g.setColor(active ? new Color(255, 232, 176) : new Color(162, 178, 198));
-            g.drawString(mapSubs[i], mrRect.x + 16, mrRect.y + 42);
+            g.setColor(active ? Color.WHITE : new Color(226, 234, 246));
+            g.drawString((active ? "★ " : "") + mapNames[i], mrRect.x + 14, mrRect.y + 22);
+
+            g.setFont(uiFont("Monospaced", Font.BOLD, 9));
+            g.setColor(mapAccents[i]);
+            g.drawString("68×68М", mrRect.x + mrRect.width - 96, mrRect.y + 21);
+
+            g.setFont(uiFont("SansSerif", Font.PLAIN, 10));
+            g.setColor(active ? new Color(255, 234, 182) : new Color(168, 184, 206));
+            String badge = fitTextToWidth(g, th.layoutBadge.replace("68×68м • ", ""), mrRect.width - 64);
+            g.drawString(badge, mrRect.x + 14, mrRect.y + 43);
 
             uiRegisterClickable(mrRect, () -> {
                 settings.mapTheme = th;
@@ -3136,24 +3408,24 @@ public class Engine extends JPanel implements Runnable {
         }
 
         // Интерактивные таблетки выбора режима игры
-        int modeY = mStartY + 2 * (mCardH + 8) + 8;
-        g.setFont(uiFont("SansSerif", Font.BOLD, 12));
-        g.setColor(new Color(176, 194, 216));
-        g.drawString("РЕЖИМ СПЕЦОПЕРАЦИИ:", deckX + 20, modeY + 12);
+        int modeY = mStartY + 2 * (mCardH + 8) + 6;
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
+        g.setColor(new Color(178, 198, 222));
+        g.drawString("РЕЖИМ СПЕЦОПЕРАЦИИ:", deckX + 18, modeY + 11);
 
         GameSettings.GameMode[] modes = GameSettings.GameMode.values();
         String[] shortModes = {"ОСАДА: БОСС", "БОМБА C4", "ГОНКА ПУШЕК", "ЗАЧИСТКА", "БОЙ НАСМЕРТЬ"};
-        int modePillY = modeY + 18;
+        int modePillY = modeY + 16;
         int mpGap = 6;
-        int mpW = (deckW - 40 - (modes.length - 1) * mpGap) / modes.length;
+        int mpW = (deckW - 36 - (modes.length - 1) * mpGap) / modes.length;
         for (int i = 0; i < modes.length; i++) {
             final GameSettings.GameMode gm = modes[i];
-            Rectangle pr = new Rectangle(deckX + 20 + i * (mpW + mpGap), modePillY, mpW, 32);
+            Rectangle pr = new Rectangle(deckX + 18 + i * (mpW + mpGap), modePillY, mpW, 32);
             boolean sel = (settings.gameMode == gm);
             boolean hov = pr.contains(mouseClientX, mouseClientY);
-            g.setColor(sel ? new Color(46, 132, 216) : (hov ? new Color(36, 50, 72) : new Color(22, 31, 46)));
+            g.setColor(sel ? new Color(38, 128, 218) : (hov ? new Color(36, 52, 76) : new Color(18, 27, 42)));
             g.fillRoundRect(pr.x, pr.y, pr.width, pr.height, 8, 8);
-            g.setColor(sel ? new Color(148, 224, 255) : new Color(255, 255, 255, 36));
+            g.setColor(sel ? new Color(148, 228, 255) : new Color(255, 255, 255, 38));
             g.drawRoundRect(pr.x, pr.y, pr.width, pr.height, 8, 8);
             drawCenteredText(g, shortModes[i], pr.x + pr.width / 2, pr.y + 20,
                     uiFont("SansSerif", Font.BOLD, 10), Color.WHITE);
@@ -3165,31 +3437,31 @@ public class Engine extends JPanel implements Runnable {
         }
 
         // Компактные переключатели параметров отряда и атмосферы
-        int rowY = modePillY + 42;
-        int stepH = 37;
+        int rowY = modePillY + 40;
+        int stepH = 36;
         String allyLabel = (settings.allyCount == 0) ? "Соло (Без ботов CT)" : (settings.allyCount + " спецназовца CT");
-        drawOptionStepperRow(g, deckX + 20, rowY, deckW - 40, "Союзники спецназа CT", allyLabel, () -> {
+        drawOptionStepperRow(g, deckX + 18, rowY, deckW - 36, "Союзники спецназа CT", allyLabel, () -> {
             settings.allyCount = (settings.allyCount + 1) % 5;
             settings.save();
             startNewMatch();
         });
         rowY += stepH;
 
-        drawOptionStepperRow(g, deckX + 20, rowY, deckW - 40, "Силы противника T", settings.botCount + " бойцов T", () -> {
+        drawOptionStepperRow(g, deckX + 18, rowY, deckW - 36, "Силы противника T", settings.botCount + " бойцов T", () -> {
             settings.botCount = (settings.botCount >= 8) ? 3 : settings.botCount + 1;
             settings.save();
             startNewMatch();
         });
         rowY += stepH;
 
-        drawOptionStepperRow(g, deckX + 20, rowY, deckW - 40, "Уровень ИИ и тактики", settings.botDifficulty.label, () -> {
+        drawOptionStepperRow(g, deckX + 18, rowY, deckW - 36, "Уровень ИИ и тактики", settings.botDifficulty.label, () -> {
             int ord = (settings.botDifficulty.ordinal() + 1) % GameSettings.BotDifficulty.values().length;
             settings.botDifficulty = GameSettings.BotDifficulty.values()[ord];
             settings.save();
         });
         rowY += stepH;
 
-        drawOptionStepperRow(g, deckX + 20, rowY, deckW - 40, "Время суток и свет", settings.timeOfDay.label, () -> {
+        drawOptionStepperRow(g, deckX + 18, rowY, deckW - 36, "Время суток и свет", settings.timeOfDay.label, () -> {
             int ord = (settings.timeOfDay.ordinal() + 1) % GameSettings.TimeOfDay.values().length;
             settings.timeOfDay = GameSettings.TimeOfDay.values()[ord];
             renderer.applyTimeOfDay(settings.timeOfDay);
@@ -3197,52 +3469,51 @@ public class Engine extends JPanel implements Runnable {
         });
         rowY += stepH;
 
-        drawOptionStepperRow(g, deckX + 20, rowY, deckW - 40, "Атмосферная 3D-погода", settings.weatherMode.label, () -> {
+        drawOptionStepperRow(g, deckX + 18, rowY, deckW - 36, "Атмосферная 3D-погода", settings.weatherMode.label, () -> {
             int ord = (settings.weatherMode.ordinal() + 1) % GameSettings.WeatherMode.values().length;
             settings.weatherMode = GameSettings.WeatherMode.values()[ord];
             settings.save();
         });
         rowY += stepH + 8;
 
-        // ГЛАВНАЯ КНОПКА ЗАПУСКА МАТЧА С ЯРКИМ ГРАДИЕНТОМ CS2!
-        int ctaH = Math.max(44, deckY + deckH - rowY - 14);
-        Rectangle playRect = new Rectangle(deckX + 20, rowY, deckW - 40, Math.min(54, ctaH));
+        // ГЛАВНАЯ КНОПКА ЗАПУСКА СПЕЦОПЕРАЦИИ С ЗОЛОТЫМ СВЕЧЕНИЕМ CS2!
+        int ctaH = Math.max(44, deckY + deckH - rowY - 12);
+        Rectangle playRect = new Rectangle(deckX + 18, rowY, deckW - 36, Math.min(54, ctaH));
         boolean playHov = playRect.contains(mouseClientX, mouseClientY);
         g.setPaint(new GradientPaint(playRect.x, playRect.y,
-                playHov ? new Color(255, 206, 74) : new Color(242, 168, 38),
+                playHov ? new Color(255, 214, 84) : new Color(248, 178, 42),
                 playRect.x + playRect.width, playRect.y + playRect.height,
-                playHov ? new Color(246, 138, 28) : new Color(216, 108, 20)));
+                playHov ? new Color(248, 142, 26) : new Color(218, 108, 18)));
         g.fillRoundRect(playRect.x, playRect.y, playRect.width, playRect.height, 12, 12);
-        g.setColor(new Color(255, 244, 196));
+        g.setColor(new Color(255, 248, 206));
         g.drawRoundRect(playRect.x, playRect.y, playRect.width, playRect.height, 12, 12);
-        drawCenteredText(g, "▶   НАЧАТЬ СПЕЦОПЕРАЦИЮ  •  " + settings.mapTheme.name().replace("_", " "),
+        drawCenteredText(g, "▶   НАЧАТЬ СПЕЦОПЕРАЦИЮ  •  " + settings.mapTheme.codeName,
                 playRect.x + playRect.width / 2, playRect.y + playRect.height / 2 + 6,
-                uiFont("SansSerif", Font.BOLD, 17), new Color(16, 18, 24));
+                uiFont("SansSerif", Font.BOLD, 17), new Color(14, 16, 22));
         uiRegisterClickable(playRect, this::launchMatchFromMenu);
 
-        // 4. НИЖНЯЯ СТРОКА ТЕЛЕМЕТРИИ ДВИЖКА 6.0
-        g.setColor(new Color(10, 14, 22, 216));
-        g.fillRect(0, outH - 28, outW, 28);
+        // 4. НИЖНЯЯ СТРОКА ТЕЛЕМЕТРИИ ДВИЖКА 8.0
+        drawFrostedGlassPanel(g, 0, outH - 28, outW, 28, 0x080C14, 214, null, new Color(255, 255, 255, 26));
         g.setFont(uiFont("SansSerif", Font.BOLD, 11));
-        g.setColor(new Color(122, 228, 164));
-        String perfInfo = String.format("● %d FPS (%.1f мс | 1%%: %d)  •  3D: %dx%d  •  %s  •  Потоков: %d  •  Culling: %d",
+        g.setColor(new Color(118, 236, 164));
+        String perfInfo = String.format("● %d FPS (%.1f мс | 1%%: %d)  •  3D: %dx%d  •  %s  •  Потоков: %d  •  Арена: 68×68 м",
                 currentFps, lastFrameMs, onePercentLowFps, renderer.getWidth(), renderer.getHeight(),
-                settings.qualityPreset.name(), renderer.getWorkerThreads(), renderer.getLastFrameCulledObjects());
+                settings.qualityPreset.name(), renderer.getWorkerThreads());
         g.drawString(perfInfo, 22, outH - 10);
 
-        String hotkeysHint = "[Alt] Тактический рывок  •  [U] Авиаудар  •  [J] Авто-Турель  •  [K] Босс-Вертолёт";
-        g.setColor(new Color(210, 222, 238));
+        String hotkeysHint = "[Alt] Рывок  •  [B] Арсенал  •  [U] Авиаудар  •  [J] Авто-Турель  •  [K] Босс-Вертолёт";
+        g.setColor(new Color(214, 226, 242));
         g.drawString(hotkeysHint, outW - g.getFontMetrics().stringWidth(hotkeysHint) - 22, outH - 10);
     }
 
     // =========================================================================
-    //  1.5. 3D ОРУЖЕЙНАЯ СКИНОВ CS2 (PANORAMA GLASS ARMORY 6.0)
+    //  1.5. 3D ОРУЖЕЙНАЯ СКИНОВ CS2 (SOURCE 2 FROSTED ARMORY 8.0)
     // =========================================================================
     private void drawSkinArmoryScreen(Graphics2D g, int outW, int outH) {
         int panelW = 438;
-        g.setPaint(new GradientPaint(0, 0, new Color(10, 15, 25, 238), panelW, 0, new Color(16, 22, 36, 224)));
-        g.fillRect(0, 0, panelW, outH);
-        g.setColor(new Color(196, 108, 255, 185));
+        drawFrostedGlassPanel(g, 0, 0, panelW, outH, 0x090F1A, 218,
+                new Color(196, 108, 255, 120), new Color(196, 108, 255, 220));
+        g.setColor(new Color(196, 108, 255, 195));
         g.fillRect(panelW - 2, 0, 2, outH);
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 24));
@@ -3366,7 +3637,7 @@ public class Engine extends JPanel implements Runnable {
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 7.0", px + 28, py + 36);
+        g.drawString("СТУДИЯ ГРАФИКИ И ДВИЖКА CS-2 JAVA 8.0", px + 28, py + 36);
 
         String engineBadge = String.format("HYPER-TURBO • %d ПОТОКОВ CPU • %d FPS (%.1f мс)",
                 renderer.getWorkerThreads(), currentFps, lastFrameMs);
@@ -3399,7 +3670,7 @@ public class Engine extends JPanel implements Runnable {
             g.drawString("ПРОФИЛЬ:", listX + 4, rowY + 21);
 
             GameSettings.QualityPreset[] presets = GameSettings.QualityPreset.values();
-            String[] shortPresetNames = {"⚡ КИБЕРСПОРТ", "▸ НИЗКОЕ", "⚖ БАЛАНС HD", "★ ВЫСОКОЕ", "♦ УЛЬТРА 7.0"};
+            String[] shortPresetNames = {"⚡ КИБЕРСПОРТ", "▸ НИЗКОЕ", "⚖ БАЛАНС HD", "★ ВЫСОКОЕ", "♦ УЛЬТРА 8.0"};
             int pStartX = listX + 86;
             int pGap = 7;
             int pBtnW = (listW - 86 - pGap * (presets.length - 1)) / presets.length;
@@ -3597,7 +3868,7 @@ public class Engine extends JPanel implements Runnable {
                 rowY += cardStepY;
             }
 
-            // ЖИВОЙ ОСЦИЛЛОГРАФ ПРОИЗВОДИТЕЛЬНОСТИ И СТАТИСТИКА HYPER-TURBO 7.0 ВНИЗУ СТУДИИ!
+            // ЖИВОЙ ОСЦИЛЛОГРАФ ПРОИЗВОДИТЕЛЬНОСТИ И СТАТИСТИКА HYPER-TURBO 8.0 ВНИЗУ СТУДИИ!
             drawStudioTelemetryMonitor(g, listX, rowY + 4, listW, 88);
 
         } else if (settingsTab == 1) {
@@ -3740,7 +4011,7 @@ public class Engine extends JPanel implements Runnable {
     }
 
     /**
-     * Панель живой телеметрии и осциллограф времени кадра (мс) внутри Студии Графики 7.0!
+     * Панель живой телеметрии и осциллограф времени кадра (мс) внутри Студии Графики 8.0!
      */
     private void drawStudioTelemetryMonitor(Graphics2D g, int x, int y, int w, int h) {
         g.setColor(new Color(10, 16, 26, 232));
@@ -3820,7 +4091,7 @@ public class Engine extends JPanel implements Runnable {
     }
 
     // =========================================================================
-    //  3. СПРАВОЧНИК АРСЕНАЛА И ТАКТИКИ (CS-2 JAVA 7.0)
+    //  3. СПРАВОЧНИК АРСЕНАЛА И ТАКТИКИ (CS-2 JAVA 8.0)
     // =========================================================================
     private void drawArsenalGuideScreen(Graphics2D g, int outW, int outH) {
         g.setColor(new Color(8, 12, 18, 204));
@@ -3836,7 +4107,7 @@ public class Engine extends JPanel implements Runnable {
         g.setColor(new Color(245, 194, 72, 175));
         g.drawRoundRect(px, py, pw, ph, 18, 18);
 
-        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 7.0", outW / 2, py + 42,
+        drawCenteredText(g, "ТАКТИЧЕСКИЙ СПРАВОЧНИК И НОВИНКИ CS-2 JAVA 8.0", outW / 2, py + 42,
                 uiFont("SansSerif", Font.BOLD, 22), new Color(252, 208, 88));
 
         String[] leftLines = {
@@ -3853,13 +4124,13 @@ public class Engine extends JPanel implements Runnable {
         };
 
         String[] rightLines = {
-            "НОВИНКИ HYPER-TURBO 7.0 (ОПТИМИЗАЦИЯ И ГРАФИКА):",
-            "• O(1) Аналитический растеризатор + Early-Z отсечение спанов!",
-            "• Deferred Skybox: небо рисуется только там, где нет стен/пола",
-            "• Авто-LOD 3D-сфер/цилиндров + отсечение тыльных граней",
-            "• Студия Графики: 24 параметра + 5 пресетов (Киберспорт..Ультра)",
-            "• Авто-FPS (Динамическое 3D-разрешение 60/120 FPS) + AMD CAS",
-            "• Насыщенность Digital Vibrance + Гамма LUT + Живой график мс!",
+            "НОВИНКИ CS-2 JAVA 8.0 (КАРТЫ, МОДЕЛИ И ИНТЕРФЕЙС):",
+            "• 4 огромные карты 68×68 м: Inferno, Dust II, Mirage, Nuke",
+            "• Лестницы, 2-е этажи, балконы, мостки, крыши и техника",
+            "• 3D-модели спецназа SAS / Phoenix + перчатки и часы в руках",
+            "• Blinn-Phong свет: тёплое солнце + холодное небо + блики",
+            "• Матовое стекло Panorama: HUD, Магазин [B], Главное меню",
+            "• Радар с высотами, Плентами A/B и названием зоны карты",
             "",
             "СИСТЕМНЫЕ КЛАВИШИ:",
             "• Tab — Счет команд • F5 — Рестарт • F11 — Полный экран"
@@ -3973,22 +4244,19 @@ public class Engine extends JPanel implements Runnable {
     }
 
     private void drawBuyMenuOverlay(Graphics2D g, int outW, int outH) {
-        g.setColor(new Color(7, 11, 18, 204));
-        g.fillRect(0, 0, outW, outH);
-
         int bw = Math.min(1040, outW - 44);
         int bh = Math.min(548, outH - 48);
         int bx = outW / 2 - bw / 2;
         int by = outH / 2 - bh / 2;
 
-        g.setPaint(new GradientPaint(bx, by, new Color(12, 18, 30, 246), bx, by + bh, new Color(16, 24, 38, 246)));
-        g.fillRoundRect(bx, by, bw, bh, 18, 18);
-        g.setColor(new Color(92, 232, 148, 180));
-        g.drawRoundRect(bx, by, bw, bh, 18, 18);
+        // Живое матовое стекло Panorama 8.0: затемнённый размытый бой за спиной + плотная стеклянная карточка
+        g.setColor(new Color(7, 11, 18, 150));
+        g.fillRect(0, 0, outW, outH);
+        drawFrostedGlassPanel(g, bx, by, bw, bh, 0x0C1220, 178, new Color(92, 232, 148, 150), new Color(92, 232, 148));
 
         g.setFont(uiFont("SansSerif", Font.BOLD, 22));
         g.setColor(Color.WHITE);
-        g.drawString("МАГАЗИН ВООРУЖЕНИЯ СПЕЦНАЗА CS2", bx + 26, by + 38);
+        g.drawString("МАГАЗИН ВООРУЖЕНИЯ CS-2 JAVA 8.0", bx + 26, by + 38);
 
         boolean freeDm = (settings.gameMode == GameSettings.GameMode.DEATHMATCH);
         String cashStr = freeDm ? "РЕЖИМ DM: $ БЕСПЛАТНО" : ("БАЛАНС: $ " + player.getMoney());
@@ -4010,26 +4278,26 @@ public class Engine extends JPanel implements Runnable {
         drawBuyColumnHeader(g, c1X, colY, colW, "ВИНТОВКИ И ТОЧНОСТЬ", new Color(76, 178, 255));
         int y1 = colY + 36;
         drawBuyCard(g, c1X, y1, colW, "1", "AK-47", "Штурмовая • 142 ур. в голову (Ваншот!)", freeDm ? 0 : 2700, new Color(76, 178, 255),
-                () -> tryPurchaseWeapon(Weapon.Type.AK47)); y1 += 88;
+                Weapon.Type.AK47, () -> tryPurchaseWeapon(Weapon.Type.AK47)); y1 += 88;
         drawBuyCard(g, c1X, y1, colW, "2", "M4A1-S", "С глушителем • Кучная стрельба CT", freeDm ? 0 : 2900, new Color(76, 178, 255),
-                () -> tryPurchaseWeapon(Weapon.Type.M4A1S)); y1 += 88;
+                Weapon.Type.M4A1S, () -> tryPurchaseWeapon(Weapon.Type.M4A1S)); y1 += 88;
         drawBuyCard(g, c1X, y1, colW, "3", "AWP Снайперская", "Оптика 2.8x/6x ПКМ • Урон 115/440", freeDm ? 0 : 4750, new Color(188, 118, 255),
-                () -> tryPurchaseWeapon(Weapon.Type.AWP)); y1 += 88;
+                Weapon.Type.AWP, () -> tryPurchaseWeapon(Weapon.Type.AWP)); y1 += 88;
         drawBuyCard(g, c1X, y1, colW, "7", "Desert Eagle .50", "Крупный калибр • 168 ур. в голову", freeDm ? 0 : 700, new Color(76, 178, 255),
-                () -> tryPurchaseWeapon(Weapon.Type.DEAGLE));
+                Weapon.Type.DEAGLE, () -> tryPurchaseWeapon(Weapon.Type.DEAGLE));
 
         // Колонка 2: Тяжёлое оружие и RPG
         int c2X = c1X + colW + colGap;
         drawBuyColumnHeader(g, c2X, colY, colW, "ТЯЖЁЛОЕ И ОСАДНОЕ", new Color(248, 158, 56));
         int y2 = colY + 36;
         drawBuyCard(g, c2X, y2, colW, "4", "M249 Para (Пулемёт)", "Короб 100 патронов • Подавление волн!", freeDm ? 0 : 5200, new Color(248, 158, 56),
-                () -> tryPurchaseWeapon(Weapon.Type.M249)); y2 += 88;
+                Weapon.Type.M249, () -> tryPurchaseWeapon(Weapon.Type.M249)); y2 += 88;
         drawBuyCard(g, c2X, y2, colW, "5", "RPG-7 Гранатомёт", "3D-ракеты против Вертолёта и толп!", freeDm ? 0 : 4500, new Color(252, 92, 68),
-                () -> tryPurchaseWeapon(Weapon.Type.RPG7)); y2 += 88;
+                Weapon.Type.RPG7, () -> tryPurchaseWeapon(Weapon.Type.RPG7)); y2 += 88;
         drawBuyCard(g, c2X, y2, colW, "6", "XM1014 Дробовик", "Автоматический • 8 картечин за залп", freeDm ? 0 : 2000, new Color(248, 158, 56),
-                () -> tryPurchaseWeapon(Weapon.Type.XM1014)); y2 += 88;
+                Weapon.Type.XM1014, () -> tryPurchaseWeapon(Weapon.Type.XM1014)); y2 += 88;
         drawBuyCard(g, c2X, y2, colW, "M", "MP9 Тактический ПП", "Скорострельность 850 в/мин • $600/фраг", freeDm ? 0 : 1250, new Color(248, 158, 56),
-                () -> tryPurchaseWeapon(Weapon.Type.MP9));
+                Weapon.Type.MP9, () -> tryPurchaseWeapon(Weapon.Type.MP9));
 
         // Колонка 3: Гранаты и Спецсредства CT
         int c3X = c2X + colW + colGap;
@@ -4071,16 +4339,30 @@ public class Engine extends JPanel implements Runnable {
 
     private void drawBuyCard(Graphics2D g, int x, int y, int w, String keyBadge, String name, String desc,
                              int cost, Color accent, Runnable onBuy) {
+        drawBuyCard(g, x, y, w, keyBadge, name, desc, cost, accent, null, onBuy);
+    }
+
+    private void drawBuyCard(Graphics2D g, int x, int y, int w, String keyBadge, String name, String desc,
+                             int cost, Color accent, Weapon.Type iconType, Runnable onBuy) {
         Rectangle rect = new Rectangle(x, y, w, 78);
         boolean hovered = rect.contains(mouseClientX, mouseClientY);
         boolean canAfford = player.getMoney() >= cost;
 
-        g.setColor(hovered ? new Color(36, 52, 76, 238) : new Color(22, 31, 46, 224));
+        g.setColor(hovered ? new Color(40, 58, 84, 200) : new Color(22, 31, 46, 168));
         g.fillRoundRect(x, y, w, 78, 10, 10);
         g.setColor(accent);
         g.fillRoundRect(x, y + 8, 4, 62, 4, 4);
         g.setColor(hovered ? new Color(252, 206, 86) : new Color(255, 255, 255, 38));
         g.drawRoundRect(x, y, w, 78, 10, 10);
+
+        // Векторный силуэт оружия справа (водяной знак карточки, ярче при наведении)
+        if (iconType != null) {
+            int iw = Math.min(150, w / 2), ih = 30;
+            int alpha = hovered ? 190 : (canAfford ? 96 : 52);
+            drawWeaponSilhouette(g, iconType, x + w - iw - 14, y + 36, iw, ih,
+                    new Color(226, 234, 246, alpha),
+                    new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), alpha));
+        }
 
         // Клавиша быстрого вызова
         g.setColor(new Color(38, 52, 72));
@@ -4097,7 +4379,9 @@ public class Engine extends JPanel implements Runnable {
         g.drawString(priceTag, x + w - g.getFontMetrics().stringWidth(priceTag) - 14, y + 29);
 
         g.setFont(uiFont("SansSerif", Font.PLAIN, 11));
-        g.setColor(new Color(176, 192, 214));
+        g.setColor(new Color(0, 0, 0, 150));
+        g.drawString(desc, x + 15, y + 59);
+        g.setColor(new Color(196, 210, 230));
         g.drawString(desc, x + 14, y + 58);
 
         uiRegisterClickable(rect, onBuy);
@@ -4296,7 +4580,20 @@ public class Engine extends JPanel implements Runnable {
     private static final Color COL_HUD_T_PIP = new Color(248, 168, 56);
     private static final Color COL_HUD_TRACK = new Color(34, 44, 58);
 
-    private static void drawFastHudPanel(Graphics2D g, int x, int y, int w, int h, Color accentTop) {
+    private static final Color COL_HUD_GLASS_BORDER = new Color(150, 186, 222, 70);
+
+    /**
+     * Панель Боевого HUD Panorama 8.0: живое матовое стекло поверх реального 3D-кадра (SWAR blur + тонировка).
+     */
+    private void drawFastHudPanel(Graphics2D g, int x, int y, int w, int h, Color accentTop) {
+        if (lastPresentedFrame != null) {
+            drawFrostedGlassPanel(g, x, y, w, h, 0x0A1019, 150, COL_HUD_GLASS_BORDER, accentTop);
+            return;
+        }
+        drawSolidHudPanel(g, x, y, w, h, accentTop);
+    }
+
+    private static void drawSolidHudPanel(Graphics2D g, int x, int y, int w, int h, Color accentTop) {
         int half = h >> 1;
         g.setColor(COL_HUD_BG_DARK);
         g.fillRect(x, y, w, half);
@@ -4310,8 +4607,73 @@ public class Engine extends JPanel implements Runnable {
         }
     }
 
+    /** 10-сегментная шкала (HP / Броня) с подсветкой частично заполненного сегмента. */
+    private static void drawSegmentedBar(Graphics2D g, int x, int y, int w, int h, double frac, Color col) {
+        frac = Math.max(0.0, Math.min(1.0, frac));
+        final int segs = 10, gap = 3;
+        int segW = (w - gap * (segs - 1)) / segs;
+        double filled = frac * segs;
+        for (int i = 0; i < segs; i++) {
+            int sx = x + i * (segW + gap);
+            g.setColor(COL_HUD_TRACK);
+            g.fillRect(sx, y, segW, h);
+            double part = Math.max(0.0, Math.min(1.0, filled - i));
+            if (part > 0.0) {
+                g.setColor(col);
+                g.fillRect(sx, y, Math.max(1, (int) Math.round(segW * part)), h);
+                if (part >= 1.0) {
+                    g.setColor(new Color(255, 255, 255, 60));
+                    g.fillRect(sx, y, segW, Math.max(1, h / 3));
+                }
+            }
+        }
+    }
+
+    /** Ряд индивидуальных латунных гильз-патронов магазина (CS2 Panorama 8.0). */
+    private static void drawBrassCartridgePips(Graphics2D g, int x, int y, int w, int h, int mag, int maxMag, boolean low) {
+        if (maxMag <= 0) return;
+        if (maxMag > 50) {
+            // Коробчатый магазин (M249): 25 укрупнённых ячеек по 4 патрона
+            int cells = 25;
+            int perCell = (maxMag + cells - 1) / cells;
+            int cw = Math.max(2, w / cells);
+            for (int i = 0; i < cells; i++) {
+                boolean loaded = i * perCell < mag;
+                int px = x + i * cw;
+                g.setColor(loaded ? (low ? new Color(236, 92, 72) : new Color(214, 170, 82)) : new Color(40, 46, 56));
+                g.fillRect(px, y + 3, cw - 1, h - 3);
+                if (loaded) {
+                    g.setColor(new Color(176, 98, 52));
+                    g.fillRect(px, y, cw - 1, 3);
+                }
+            }
+            return;
+        }
+        int pitch = Math.max(3, Math.min(13, w / maxMag));
+        int pw = Math.max(2, pitch - (pitch >= 6 ? 2 : 1));
+        int totalW = pitch * maxMag;
+        int startX = x + w - totalW;
+        int tip = Math.max(2, h / 3);
+        for (int i = 0; i < maxMag; i++) {
+            int px = startX + i * pitch;
+            boolean loaded = i >= maxMag - mag;
+            if (loaded) {
+                g.setColor(low ? new Color(236, 96, 74) : new Color(222, 178, 86)); // латунная гильза
+                g.fillRect(px, y + tip, pw, h - tip);
+                g.setColor(new Color(255, 230, 160, 120));
+                g.fillRect(px, y + tip, 1, h - tip);
+                g.setColor(new Color(184, 104, 56)); // медная пуля
+                g.fillRect(px, y + 1, pw, tip);
+                if (pw >= 4) g.fillRect(px + 1, y, pw - 2, 1);
+            } else {
+                g.setColor(new Color(42, 48, 60));
+                g.fillRect(px, y + tip, pw, h - tip);
+            }
+        }
+    }
+
     private void drawTacticalHud(Graphics2D g, int outW, int outH) {
-        // 1. ВЕРХНИЙ КИБЕРСПОРТИВНЫЙ ТАБЛО-ХЕДЕР PANORAMA 7.0 (0 аллокаций GradientPaint/Polygon!)
+        // 1. ВЕРХНИЙ КИБЕРСПОРТИВНЫЙ ТАБЛО-ХЕДЕР PANORAMA 8.0 (матовое стекло + скошенные крылья CT/T)
         int topW = 468, topH = 60;
         int topX = outW / 2 - topW / 2, topY = 12;
 
@@ -4409,7 +4771,7 @@ public class Engine extends JPanel implements Runnable {
         // Баннер активной радиокоманды спецназу CT [Z]
         if (radioBannerTimer > 0.0 && !radioBannerText.isEmpty()) {
             int rw = 510, rh = 30;
-            int rx = 20, ry = 206;
+            int rx = 20, ry = (settings.telemetryMode == GameSettings.HudTelemetryMode.FULL_GRAPH) ? 288 : 246;
             drawFastHudPanel(g, rx, ry, rw, rh, COL_HUD_CT_PIP);
             g.setFont(uiFont("SansSerif", Font.BOLD, 12));
             g.setColor(new Color(148, 232, 255));
@@ -4471,30 +4833,32 @@ public class Engine extends JPanel implements Runnable {
         g.setFont(uiFont("SansSerif", Font.BOLD, 10));
         g.drawString(dashReadyTxt, hpX + 16, hpY + 78);
 
+        // 10-сегментные биометрические шкалы HP / AP в стиле CS2 Panorama 8.0
         int barStartX = hpX + 132, barWidth = 186;
-        g.setColor(COL_HUD_TRACK);
-        g.fillRect(barStartX, hpY + 15, barWidth, 10);
-        g.setColor(hpColor);
-        g.fillRect(barStartX, hpY + 15, (int) (barWidth * (hp / 100.0)), 10);
+        drawSegmentedBar(g, barStartX, hpY + 13, barWidth, 12, hp / 100.0, hpColor);
 
         int ap = player.getArmor();
-        g.setColor(new Color(98, 184, 255));
+        Color apColor = new Color(78, 172, 252);
+        // Иконка бронежилета (щит)
+        hudPolyX4[0] = barStartX;      hudPolyX4[1] = barStartX + 10; hudPolyX4[2] = barStartX + 10; hudPolyX4[3] = barStartX;
+        hudPolyY4[0] = hpY + 31;       hudPolyY4[1] = hpY + 31;       hudPolyY4[2] = hpY + 38;       hudPolyY4[3] = hpY + 38;
+        g.setColor(apColor);
+        g.fillPolygon(hudPolyX4, hudPolyY4, 4);
+        g.fillOval(barStartX, hpY + 34, 10, 9);
+        g.setColor(new Color(150, 206, 255));
         g.setFont(uiFont("SansSerif", Font.BOLD, 12));
         String stance = player.isCrouching() ? " • ПРИСЕД" : (player.isSilentWalking() ? " • ШАГ" : "");
-        g.drawString("БРОНЯ: " + ap + " AP" + stance, barStartX, hpY + 42);
-        g.setColor(COL_HUD_TRACK);
-        g.fillRect(barStartX, hpY + 48, barWidth, 7);
-        g.setColor(new Color(78, 172, 252));
-        g.fillRect(barStartX, hpY + 48, (int) (barWidth * (ap / 100.0)), 7);
+        g.drawString("БРОНЯ " + ap + " AP" + (player.hasDefuseKit() ? " • KIT" : "") + stance, barStartX + 16, hpY + 42);
+        drawSegmentedBar(g, barStartX, hpY + 47, barWidth, 8, ap / 100.0, apColor);
 
         // Индикатор перезарядки Тактического рывка [Alt]
         g.setColor(COL_HUD_TRACK);
-        g.fillRect(barStartX, hpY + 68, barWidth, 6);
+        g.fillRect(barStartX, hpY + 68, barWidth, 5);
         g.setColor(new Color(72, 228, 255));
-        g.fillRect(barStartX, hpY + 68, (int) (barWidth * player.getDashReadyProgress()), 6);
+        g.fillRect(barStartX, hpY + 68, (int) (barWidth * player.getDashReadyProgress()), 5);
 
-        // 3. ПАНЕЛЬ ОРУЖИЯ, ШКАЛЫ МАГАЗИНА, STATTRAK™ И 4 ГРАНАТ CS2 (СНИЗУ СПРАВА)
-        int amW = 356, amH = 132;
+        // 3. ПАНЕЛЬ ОРУЖИЯ PANORAMA 8.0: ВЕКТОРНЫЙ СИЛУЭТ, ЛАТУННЫЕ ПАТРОНЫ, STATTRAK™ И 4 ГРАНАТЫ (СНИЗУ СПРАВА)
+        int amW = 372, amH = 156;
         int amX = outW - amW - 20, amY = outH - amH - 20;
 
         drawFastHudPanel(g, amX, amY, amW, amH, COL_HUD_T_PIP);
@@ -4505,7 +4869,7 @@ public class Engine extends JPanel implements Runnable {
         g.drawString(activeWeapon.getDisplayName().toUpperCase(), amX + 16, amY + 23);
 
         // Цифровой LED-счетчик StatTrak™
-        g.setColor(new Color(44, 24, 12));
+        g.setColor(new Color(44, 24, 12, 220));
         g.fillRect(amX + amW - 140, amY + 7, 126, 21);
         g.setColor(new Color(220, 124, 38));
         g.drawRect(amX + amW - 140, amY + 7, 125, 20);
@@ -4513,44 +4877,51 @@ public class Engine extends JPanel implements Runnable {
         g.setFont(uiFont("Monospaced", Font.BOLD, 11));
         g.drawString(String.format("StatTrak™ %04d", player.getKills()), amX + amW - 132, amY + 21);
 
+        // Векторный силуэт активного оружия (справа, как в CS2)
+        int silX = amX + 170, silY = amY + 32, silW = amW - 186, silH = 32;
+        drawWeaponSilhouette(g, activeWeapon.getType(), silX, silY, silW, silH,
+                new Color(232, 238, 248, 230), new Color(252, 196, 72));
+
         if (activeWeapon.isMelee()) {
-            g.setFont(uiFont("SansSerif", Font.BOLD, 20));
+            g.setFont(uiFont("SansSerif", Font.BOLD, 18));
             g.setColor(Color.WHITE);
-            g.drawString("КЕРАМБИТ • [F] ВРАЩЕНИЕ", amX + 16, amY + 55);
+            g.drawString("∞  БЛИЖНИЙ БОЙ", amX + 16, amY + 56);
+            g.setFont(uiFont("SansSerif", Font.PLAIN, 10));
+            g.setColor(new Color(168, 186, 208));
+            g.drawString("[ЛКМ] Удар  •  [F] Вращение  •  [H] Скин", amX + 16, amY + 80);
         } else {
             int mag = activeWeapon.getMagAmmo();
             int maxMag = Math.max(1, activeWeapon.getMaxMagAmmo());
+            boolean low = mag <= Math.max(2, maxMag / 4);
             g.setFont(uiFont("Monospaced", Font.BOLD, 34));
-            g.setColor(mag <= Math.max(2, maxMag / 4) ? COL_FPS_BAD : Color.WHITE);
-            g.drawString(String.format("%2d", mag), amX + 16, amY + 58);
+            g.setColor(low ? COL_FPS_BAD : Color.WHITE);
+            String magStr = String.format("%2d", mag);
+            g.drawString(magStr, amX + 16, amY + 62);
+            int magW = g.getFontMetrics().stringWidth(magStr);
 
-            g.setFont(uiFont("Monospaced", Font.BOLD, 19));
+            g.setFont(uiFont("Monospaced", Font.BOLD, 18));
             g.setColor(new Color(175, 190, 210));
-            int reserveX = (mag >= 100) ? (amX + 86) : (amX + 68);
-            g.drawString("/ " + activeWeapon.getReserveAmmo(), reserveX, amY + 56);
+            g.drawString("/ " + activeWeapon.getReserveAmmo(), amX + 22 + magW, amY + 60);
 
-            // Визуальная шкала наполненности магазина
-            int mbX = amX + 158, mbW = amW - 174;
-            g.setColor(COL_HUD_TRACK);
-            g.fillRect(mbX, amY + 38, mbW, 8);
-            g.setColor(mag <= Math.max(2, maxMag / 4) ? COL_FPS_BAD : COL_FPS_WARN);
-            g.fillRect(mbX, amY + 38, (int) (mbW * Math.min(1.0, (double) mag / maxMag)), 8);
-
-            g.setFont(uiFont("SansSerif", Font.PLAIN, 10));
-            g.setColor(new Color(168, 186, 208));
-            g.drawString("[ПКМ] Зум  •  [F] Осмотр  •  [H] Скин", mbX, amY + 59);
+            // Индивидуальные латунные патроны магазина
+            drawBrassCartridgePips(g, amX + 16, amY + 70, amW - 32, 13, mag, maxMag, low);
         }
 
         // Индивидуальные цветные плашки 4 гранат CS2
         String[] gTags = {"[G] HE:" + player.getHeGrenades(), "[Q] Дым:" + player.getSmokeGrenades(),
                           "[V] Флеш:" + player.getFlashGrenades(), "[X] Огонь:" + player.getMolotovGrenades()};
         int[] gCounts = {player.getHeGrenades(), player.getSmokeGrenades(), player.getFlashGrenades(), player.getMolotovGrenades()};
+        Color[] gAccents = {new Color(120, 200, 96), new Color(176, 188, 204), new Color(240, 236, 170), new Color(255, 120, 52)};
         int gpW = (amW - 30 - 15) / 4;
         for (int i = 0; i < 4; i++) {
             int gx = amX + 15 + i * (gpW + 5);
-            int gy = amY + 69;
-            g.setColor(gCounts[i] > 0 ? new Color(30, 46, 66) : new Color(20, 26, 36));
+            int gy = amY + 92;
+            g.setColor(gCounts[i] > 0 ? new Color(30, 46, 66, 215) : new Color(20, 26, 36, 190));
             g.fillRect(gx, gy, gpW, 22);
+            if (gCounts[i] > 0) {
+                g.setColor(gAccents[i]);
+                g.fillRect(gx, gy + 20, gpW, 2);
+            }
             drawCenteredText(g, gTags[i], gx + gpW / 2, gy + 15, uiFont("SansSerif", Font.BOLD, 10),
                     gCounts[i] > 0 ? new Color(224, 238, 255) : new Color(118, 130, 146));
         }
@@ -4562,9 +4933,9 @@ public class Engine extends JPanel implements Runnable {
         int slotW = (amW - 30 - (slotCount - 1) * slotGap) / slotCount;
         for (int i = 0; i < slotCount; i++) {
             int sx = amX + 15 + i * (slotW + slotGap);
-            int sy = amY + 98;
+            int sy = amY + 120;
             boolean sel = (i == player.getCurrentWeaponIndex());
-            g.setColor(sel ? new Color(248, 192, 66) : new Color(30, 40, 54));
+            g.setColor(sel ? new Color(248, 192, 66) : new Color(30, 40, 54, 215));
             g.fillRect(sx, sy, slotW, 24);
             String keyNum = (i == 3) ? "T" : String.valueOf(i + 1);
             String shortName = (i == 2) ? "Керамбит" : (i == 3 ? "Zeus"
@@ -4604,21 +4975,62 @@ public class Engine extends JPanel implements Runnable {
         cachedRadarTheme = map.getCurrentTheme();
         cachedRadarBase = new BufferedImage(inner, inner, BufferedImage.TYPE_INT_RGB);
         Graphics2D rg = cachedRadarBase.createGraphics();
-        rg.setColor(new Color(20, 26, 36));
+        rg.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        rg.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        rg.setColor(new Color(18, 24, 33));
         rg.fillRect(0, 0, inner, inner);
+        // Тонкая тактическая сетка 8×8
+        rg.setColor(new Color(34, 44, 58));
+        for (int i = 1; i < 8; i++) {
+            int p = i * inner / 8;
+            rg.drawLine(p, 0, p, inner);
+            rg.drawLine(0, p, inner, p);
+        }
 
         double span = Map.MAX_X - Map.MIN_X;
-        List<Vec3.Box> boxes = map.getBoxes();
-        for (int i = 0; i < boxes.size(); i++) {
-            Vec3.Box b = boxes.get(i);
+        // Мульти-уровневая цветовая кодировка: низкие ступени/укрытия → средние стены → высокие здания/2-е этажи
+        List<Vec3.Box> sorted = new ArrayList<>(map.getBoxes());
+        sorted.sort((p, q) -> Double.compare(p.maxY, q.maxY));
+        for (int i = 0; i < sorted.size(); i++) {
+            Vec3.Box b = sorted.get(i);
             if (!b.collidable) continue;
             int bx0 = (int) (((b.minX - Map.MIN_X) / span) * inner);
             int bz0 = (int) (((Map.MAX_Z - b.maxZ) / span) * inner);
             int bw = Math.max(2, (int) (((b.maxX - b.minX) / span) * inner));
             int bh = Math.max(2, (int) (((b.maxZ - b.minZ) / span) * inner));
-            rg.setColor(b.maxY > 2.2 ? new Color(156, 140, 108) : new Color(98, 90, 72));
+            Color c;
+            if (b.maxY <= 0.62)      c = new Color(70, 92, 84);    // ступени / бордюры
+            else if (b.maxY <= 1.35) c = new Color(112, 100, 74);  // ящики / укрытия по пояс
+            else if (b.maxY <= 2.6)  c = new Color(150, 132, 96);  // стены / балконы
+            else if (b.maxY <= 4.4)  c = new Color(186, 166, 122); // 2-е этажи
+            else                     c = new Color(214, 200, 162); // высотки / башни
+            rg.setColor(c);
             rg.fillRect(bx0, bz0, bw, bh);
+            if (bw > 5 && bh > 5) {
+                rg.setColor(new Color(0, 0, 0, 70));
+                rg.drawRect(bx0, bz0, bw - 1, bh - 1);
+            }
         }
+
+        // Маркеры Плентов A / B
+        Vec3[] sites = {map.getBombsiteASpot(), map.getBombsiteBSpot()};
+        String[] siteNames = {"A", "B"};
+        rg.setFont(uiFont("SansSerif", Font.BOLD, 13));
+        FontMetrics sfm = rg.getFontMetrics();
+        for (int i = 0; i < 2; i++) {
+            Vec3 s = sites[i];
+            if (s == null) continue;
+            int sx = (int) (((s.x - Map.MIN_X) / span) * inner);
+            int sz = (int) (((Map.MAX_Z - s.z) / span) * inner);
+            int r = Math.max(8, (int) ((4.4 / span) * inner));
+            rg.setColor(new Color(236, 88, 64, 70));
+            rg.fillOval(sx - r, sz - r, r * 2, r * 2);
+            rg.setColor(new Color(255, 120, 86, 210));
+            rg.drawOval(sx - r, sz - r, r * 2, r * 2);
+            rg.setColor(new Color(255, 236, 214));
+            rg.drawString(siteNames[i], sx - sfm.stringWidth(siteNames[i]) / 2, sz + 5);
+        }
+
         rg.setFont(uiFont("SansSerif", Font.BOLD, 9));
         rg.setColor(new Color(156, 186, 220));
         rg.drawString("N", inner / 2 - 3, 9);
@@ -4740,7 +5152,31 @@ public class Engine extends JPanel implements Runnable {
                     currentFps, lastFrameMs, onePercentLowFps), rx + 10, ry + totalH - 8);
         }
         if (showGraph) {
-            drawFrameTimeGraphBox(g, rx, ry + totalH + 6, size, 38, false);
+            drawFrameTimeGraphBox(g, rx, ry + totalH + 32, size, 38, false);
+        }
+
+        // Живой callout-пилюля под радаром: текущая зона карты + уровень высоты (CS2 Panorama 8.0)
+        Vec3 pp = player.getPosition();
+        String callout = map.getCalloutName(pp.x, pp.y, pp.z);
+        if (callout == null || callout.isEmpty()) callout = map.getCurrentTheme().codeName;
+        String levelTag = pp.y > 2.2 ? "▲2" : (pp.y > 0.7 ? "▲1" : "");
+        g.setFont(uiFont("SansSerif", Font.BOLD, 11));
+        FontMetrics cfm = g.getFontMetrics();
+        String pillTxt = callout.toUpperCase();
+        int maxTxtW = size - 30 - (levelTag.isEmpty() ? 0 : 22);
+        while (cfm.stringWidth(pillTxt) > maxTxtW && pillTxt.length() > 4) {
+            pillTxt = pillTxt.substring(0, pillTxt.length() - 2);
+        }
+        int pillW = Math.min(size, cfm.stringWidth(pillTxt) + 26 + (levelTag.isEmpty() ? 0 : 22));
+        int pillX = rx + (size - pillW) / 2, pillY = ry + totalH + 5;
+        drawFrostedGlassPanel(g, pillX, pillY, pillW, 21, 0x0A1019, 160, COL_HUD_GLASS_BORDER, null);
+        g.setColor(new Color(90, 248, 156));
+        g.fillOval(pillX + 9, pillY + 8, 6, 6);
+        g.setColor(new Color(236, 242, 250));
+        g.drawString(pillTxt, pillX + 20, pillY + 15);
+        if (!levelTag.isEmpty()) {
+            g.setColor(new Color(252, 200, 78));
+            g.drawString(levelTag, pillX + pillW - 22, pillY + 15);
         }
     }
 

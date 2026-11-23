@@ -5,7 +5,7 @@ Embeds:
   - CS-2-JAVA.jar directly inside CS-2-JAVA.exe (.rdata) for single-file execution
   - Multi-resolution 32-bit ARGB CS2 icon (16, 32, 48, 64 DIB + 256 PNG)
   - Windows 10/11 UAC asInvoker + PerMonitorV2 DPI + CommonControls v6 XML Manifest
-  - Win32 VERSIONINFO metadata (7.0.0.0)
+  - Win32 VERSIONINFO metadata (8.0.0.0)
 """
 import os
 import shutil
@@ -121,19 +121,19 @@ def build_version_info_bytes():
     fixed = struct.pack(
         "<IIIIIIIIIIIII",
         0xFEEF04BD, 0x00010000,
-        (7 << 16) | 0, (0 << 16) | 0,
-        (7 << 16) | 0, (0 << 16) | 0,
+        (8 << 16) | 0, (0 << 16) | 0,
+        (8 << 16) | 0, (0 << 16) | 0,
         0x3F, 0x0, 0x00040004, 0x00000001, 0x0, 0, 0
     )
     strings = [
         ("CompanyName", "CS-2 JAVA Studio"),
-        ("FileDescription", "CS-2 JAVA 7.0 — Hyper-Turbo Tactical 3D Shooter"),
-        ("FileVersion", "7.0.0.0"),
+        ("FileDescription", "CS-2 JAVA 8.0 — Source 2 Panorama Tactical 3D Shooter"),
+        ("FileVersion", "8.0.0.0"),
         ("InternalName", "CS-2-JAVA"),
         ("LegalCopyright", "Copyright (C) 2026 CS-2 JAVA Open Engine"),
         ("OriginalFilename", "CS-2-JAVA.exe"),
-        ("ProductName", "CS-2 JAVA 7.0 (Windows 10/11 x64)"),
-        ("ProductVersion", "7.0.0.0"),
+        ("ProductName", "CS-2 JAVA 8.0 (Windows 10/11 x64)"),
+        ("ProductVersion", "8.0.0.0"),
     ]
     str_nodes = [
         vs_node(k, v.encode("utf-16le") + b"\x00\x00", True)
@@ -194,8 +194,8 @@ def build_ico_and_res(icon_dir, jar_path, out_ico_path, out_res_path):
     manifest_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">'
-        '<assemblyIdentity version="7.0.0.0" processorArchitecture="amd64" name="CS2Java.HyperTurbo.Game" type="win32"/>'
-        '<description>CS-2 JAVA 7.0 Tactical 3D Shooter</description>'
+        '<assemblyIdentity version="8.0.0.0" processorArchitecture="amd64" name="CS2Java.HyperTurbo.Game" type="win32"/>'
+        '<description>CS-2 JAVA 8.0 Tactical 3D Shooter</description>'
         '<dependency><dependentAssembly>'
         '<assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" '
         'processorArchitecture="amd64" publicKeyToken="6595b64144ccf1df" language="*"/>'
@@ -258,7 +258,7 @@ def main():
 
     jar_path = os.path.join(ROOT, "CS-2-JAVA.jar")
     with zipfile.ZipFile(jar_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as jf:
-        manifest = "Manifest-Version: 1.0\r\nMain-Class: Main\r\nCreated-By: CS-2 JAVA 7.0 Hyper-Turbo\r\n\r\n"
+        manifest = "Manifest-Version: 1.0\r\nMain-Class: Main\r\nCreated-By: CS-2 JAVA 8.0 Panorama\r\n\r\n"
         jf.writestr("META-INF/MANIFEST.MF", manifest)
         for fn in sorted(os.listdir(bin_dir)):
             if fn.endswith(".class"):

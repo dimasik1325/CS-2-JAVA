@@ -26,7 +26,7 @@ import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
 /**
- * Точка входа в игру CS-2 JAVA 7.0 (Hyper-Turbo Multi-Core Engine • Pro Graphics Studio Edition).
+ * Точка входа в игру CS-2 JAVA 8.0 (Hyper-Turbo Multi-Core Engine • Pro Graphics Studio Edition).
  * Управляет окном JFrame, безрамочным полноэкранным режимом F11 / Alt+Enter (без чёрного экрана!)
  * и запуском сверхбыстрого многоядерного 3D-движка Engine.
  */
@@ -60,7 +60,7 @@ public class Main {
         }
 
         SwingUtilities.invokeLater(() -> {
-            final JFrame frame = new JFrame("CS-2 JAVA 7.0 | Hyper-Turbo Engine • Pro Graphics Studio • 1:1 HD");
+            final JFrame frame = new JFrame("CS-2 JAVA 8.0 | Source 2 Panorama • 4 Multi-Level Maps 68×68 м • Realistic Models");
             frame.setIconImages(createAppIcons());
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             frame.setLayout(new BorderLayout());
@@ -165,7 +165,7 @@ public class Main {
     }
 
     /**
-     * Автономная проверка CS-2 JAVA 7.0: Hyper-Turbo аналитический растеризатор, Deferred Skybox,
+     * Автономная проверка CS-2 JAVA 8.0: Hyper-Turbo аналитический растеризатор, Deferred Skybox,
      * Студия Графики (24 настройки + 5 пресетов), живой осциллограф FPS/мс, динамическое Авто-FPS разрешение,
      * а также проверка Wallbang и стресс-тест 1000 кликов!
      */
@@ -192,7 +192,7 @@ public class Main {
             engine.getSettings().weatherMode = GameSettings.WeatherMode.CLEAR;
             engine.getSettings().syncDerivedFlags();
 
-            // 1. Главное меню Panorama Glass 7.0
+            // 1. Главное меню Panorama Glass 8.0
             engine.getSettings().mapTheme = GameSettings.MapTheme.INFERNO;
             engine.getSettings().gameMode = GameSettings.GameMode.SIEGE_WAVES;
             engine.getSettings().weaponSkin = GameSettings.WeaponSkin.PRINTSTREAM;
@@ -202,17 +202,17 @@ public class Main {
                 engine.updateGame(1.0 / 60.0);
                 engine.renderOffscreenForTest(1280, 720);
             }
-            saveTestScreenshot(engine, new File(dir, "01_main_menu_v7.png"));
+            saveTestScreenshot(engine, new File(dir, "01_main_menu_v8.png"));
 
-            // 2. Студия Графики 7.0 — Страница 1 (Экран, FPS, Сглаживание, CAS, LOD, Дальность)
+            // 2. Студия Графики 8.0 — Страница 1 (Экран, FPS, Сглаживание, CAS, LOD, Дальность)
             engine.openSettingsForTest(0, 0);
-            saveTestScreenshot(engine, new File(dir, "02_graphics_studio_page1_v7.png"));
+            saveTestScreenshot(engine, new File(dir, "02_graphics_studio_page1_v8.png"));
 
-            // 3. Студия Графики 7.0 — Страница 2 (Тени, Gouraud AO, Vibrance, Яркость, Туман, Виньетка, Частицы)
+            // 3. Студия Графики 8.0 — Страница 2 (Тени, Gouraud AO, Vibrance, Яркость, Туман, Виньетка, Частицы)
             engine.openSettingsForTest(0, 1);
-            saveTestScreenshot(engine, new File(dir, "03_graphics_studio_page2_v7.png"));
+            saveTestScreenshot(engine, new File(dir, "03_graphics_studio_page2_v8.png"));
 
-            // 4. Боевой HUD Panorama 7.0 + Живой график мс под радаром + Керамбит + Авиаудар + Авто-Турель + Босс!
+            // 4. Боевой HUD Panorama 8.0 + Живой график мс под радаром + Керамбит + Авиаудар + Авто-Турель + Босс!
             engine.launchMatchFromMenu();
             player.addMoney(9000);
             player.addAirstrikeCharge(2);
@@ -238,7 +238,7 @@ public class Main {
                 }
             }
             player.setAngles(0.24, 0.16);
-            saveTestScreenshot(engine, new File(dir, "04_combat_hud_graph_v7.png"));
+            saveTestScreenshot(engine, new File(dir, "04_combat_hud_graph_v8.png"));
 
             // 5. Проверка чёткости CAS + 512x512 Mip0 вплотную + M4A1-S Printstream
             player.equipPurchasedWeapon(Weapon.Type.M4A1S);
@@ -246,7 +246,35 @@ public class Main {
             for (int i = 0; i < 16; i++) engine.updateGame(1.0 / 60.0);
             player.getPosition().set(-2.5, 0.0, -7.5);
             player.setAngles(0.55, -0.10);
-            saveTestScreenshot(engine, new File(dir, "05_closeup_cas_crisp_v7.png"));
+            saveTestScreenshot(engine, new File(dir, "05_closeup_cas_crisp_v8.png"));
+
+            // 6. Тур по всем 4 многоуровневым картам 8.0: Боевой HUD + Радар с callout-зонами
+            GameSettings.MapTheme[] tourMaps = {GameSettings.MapTheme.INFERNO, GameSettings.MapTheme.DUST_II,
+                    GameSettings.MapTheme.MIRAGE, GameSettings.MapTheme.NUKE};
+            Weapon.Type[] tourGuns = {Weapon.Type.AK47, Weapon.Type.AWP, Weapon.Type.M4A1S, Weapon.Type.M249};
+            for (int mi = 0; mi < tourMaps.length; mi++) {
+                engine.getSettings().mapTheme = tourMaps[mi];
+                engine.getSettings().gameMode = GameSettings.GameMode.BOMB_DEFUSAL;
+                engine.getSettings().weaponSkin = GameSettings.WeaponSkin.STANDARD;
+                engine.launchMatchFromMenu();
+                player.equipPurchasedWeapon(tourGuns[mi]);
+                for (int i = 0; i < 40; i++) engine.updateGame(1.0 / 60.0);
+                Vec3 sp = engine.getMap().getPlayerSpawn();
+                Vec3 site = engine.getMap().getBombsiteASpot();
+                player.getPosition().set(sp.x, sp.y, sp.z);
+                double dx = site.x - sp.x, dz = site.z - sp.z;
+                player.setAngles(Math.atan2(dx, dz), -0.02);
+                for (int i = 0; i < 6; i++) {
+                    engine.updateGame(1.0 / 60.0);
+                    engine.renderOffscreenForTest(1280, 720);
+                }
+                saveTestScreenshot(engine, new File(dir, "06_map_" + tourMaps[mi].name().toLowerCase() + "_v8.png"));
+                if (mi == 0) {
+                    engine.setBuyMenuOpen(true);
+                    saveTestScreenshot(engine, new File(dir, "07_buy_menu_v8.png"));
+                    engine.setBuyMenuOpen(false);
+                }
+            }
 
             // Проверка механики Wallbang на Dust II
             engine.getSettings().mapTheme = GameSettings.MapTheme.DUST_II;
@@ -275,7 +303,7 @@ public class Main {
                 }
             }
 
-            // Бенчмарк НАТИВНОГО HD 1280x720 с Hyper-Turbo 7.0!
+            // Бенчмарк НАТИВНОГО HD 1280x720 с Hyper-Turbo 8.0!
             BufferedImage benchImg = new BufferedImage(1280, 720, BufferedImage.TYPE_INT_RGB);
             Graphics2D bg = benchImg.createGraphics();
             engine.getSettings().mapTheme = GameSettings.MapTheme.INFERNO;
@@ -342,7 +370,7 @@ public class Main {
                 throw new IllegalStateException("Lost UI clicks under load! Registered " + registeredClicks + "/1000");
             }
 
-            // Возвращаем дефолтную чистую конфигурацию 7.0 для игрока
+            // Возвращаем дефолтную чистую конфигурацию 8.0 для игрока
             engine.getSettings().applyGraphicsPreset(GameSettings.QualityPreset.HIGH);
             engine.getSettings().mapTheme = GameSettings.MapTheme.INFERNO;
             engine.getSettings().gameMode = GameSettings.GameMode.SIEGE_WAVES;
@@ -353,7 +381,7 @@ public class Main {
             engine.getSettings().saveSync();
 
             System.out.printf(
-                    "CS-2 JAVA 7.0 HYPER-TURBO SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
+                    "CS-2 JAVA 8.0 PANORAMA SELF-TEST PASSED! Native-720p HIGH: %d frames in %d ms (%.1f FPS avg) | ESPORTS: %d ms (%.1f FPS avg) | %d/1000 async clicks hit!%n",
                     benchFrames, elapsedMs, (benchFrames * 1000.0) / Math.max(1L, elapsedMs),
                     esportsMs, (benchFrames * 1000.0) / Math.max(1L, esportsMs),
                     registeredClicks);
@@ -433,7 +461,7 @@ public class Main {
                 Font sub = new Font("SansSerif", Font.BOLD, Math.max(8, (int) (size * 0.125)));
                 g.setFont(sub);
                 FontMetrics sfm = g.getFontMetrics();
-                String subTxt = "7.0 HD";
+                String subTxt = "8.0 HD";
                 g.setColor(new Color(98, 240, 162));
                 g.drawString(subTxt, cx - sfm.stringWidth(subTxt) / 2, pad + inset + innerBox - Math.max(4, size / 14));
             }

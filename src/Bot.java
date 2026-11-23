@@ -380,7 +380,7 @@ public class Bot {
             double dx = c4TargetSpot.x - position.x;
             double dz = c4TargetSpot.z - position.z;
             double dist = Math.sqrt(dx * dx + dz * dz);
-            if (dist < 1.75) {
+            if (dist < 1.85) {
                 c4PlantTimer += dt;
                 yaw += dt * 1.2;
                 if (c4PlantTimer >= 2.6) {
@@ -388,10 +388,14 @@ public class Bot {
                 }
             } else {
                 c4PlantTimer = 0.0;
-                double targetYaw = Math.atan2(dx, dz);
+                Vec3 navGoal = resolveNavStepTowards(map, c4TargetSpot);
+                double ndx = navGoal.x - position.x;
+                double ndz = navGoal.z - position.z;
+                double ndist = Math.max(0.01, Math.hypot(ndx, ndz));
+                double targetYaw = Math.atan2(ndx, ndz);
                 yaw = turnSmoothly(yaw, targetYaw, dt * 5.6);
-                moveX = (dx / dist) * (PATROL_SPEED * 1.18);
-                moveZ = (dz / dist) * (PATROL_SPEED * 1.18);
+                moveX = (ndx / ndist) * (PATROL_SPEED * 1.18);
+                moveZ = (ndz / ndist) * (PATROL_SPEED * 1.18);
             }
         } else if (team == Team.COUNTER_TERRORIST && radioOrder == RadioOrder.FOLLOW_PLAYER && player != null && player.isAlive()) {
             double dx = player.getPosition().x - position.x;
@@ -553,6 +557,35 @@ public class Bot {
         return map.hasLineOfSight(eye, targetEye, smokes);
     }
 
+    private Vec3 resolveNavStepTowards(Map map, Vec3 goal) {
+        Vec3 fromChest = new Vec3(position.x, position.y + 1.05, position.z);
+        Vec3 goalChest = new Vec3(goal.x, goal.y + 1.05, goal.z);
+        if (map.hasLineOfSight(fromChest, goalChest)) {
+            return goal;
+        }
+        List<Vec3> wps = map.getPatrolWaypoints();
+        double goalDistNow = position.distXZ(goal);
+        Vec3 bestWp = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int i = 0, n = wps.size(); i < n; i++) {
+            Vec3 wp = wps.get(i);
+            double dToMe = position.distXZ(wp);
+            if (dToMe < 1.5) continue;
+            double wpToGoal = wp.distXZ(goal);
+            if (wpToGoal < goalDistNow + 4.0) {
+                Vec3 wpChest = new Vec3(wp.x, wp.y + 1.05, wp.z);
+                if (map.hasLineOfSight(fromChest, wpChest)) {
+                    double score = wpToGoal + dToMe * 0.45;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestWp = wp;
+                    }
+                }
+            }
+        }
+        return bestWp != null ? bestWp : goal;
+    }
+
     private ShotEvent fireAtTarget(Map map, Player player, boolean targetIsPlayer, Bot targetBot,
                                    Vec3 aimTarget, GameSettings.BotDifficulty difficulty) {
         muzzleFlashTimer = 0.075;
@@ -571,9 +604,9 @@ public class Bot {
             baseDir.z + rng.nextGaussian() * spread
         ).normalize();
 
-        Vec3.RayHit wallHit = map.raycast(muzzle, shotDir, 72.0);
-        double maxDist = (wallHit != null) ? wallHit.distance : 72.0;
-        Vec3 endPos = (wallHit != null) ? wallHit.point : muzzle.add(shotDir.scale(72.0));
+        Vec3.RayHit wallHit = map.raycast(muzzle, shotDir, 118.0);
+        double maxDist = (wallHit != null) ? wallHit.distance : 118.0;
+        Vec3 endPos = (wallHit != null) ? wallHit.point : muzzle.add(shotDir.scale(118.0));
 
         if (targetIsPlayer && player != null && player.isAlive()) {
             Vec3 pPos = player.getPosition();
@@ -688,7 +721,7 @@ public class Bot {
 
     public void render(Renderer3D r) {
         double s = getModelScale();
-        if (!r.isSphereVisible(position.x, position.y + 0.90 * s, position.z, 1.55 * s)) {
+        if (!r.isSphereVisible(position.x, position.y + 0.92 * s, position.z, 1.62 * s)) {
             return;
         }
         boolean flashing = hitFlashTimer > 0.0 && alive;
@@ -696,98 +729,207 @@ public class Bot {
         boolean jug = (archetype == Archetype.JUGGERNAUT);
         boolean sniper = (archetype == Archetype.SNIPER);
 
-        int pantsColor = flashing ? 0xFF5555 : (jug ? 0x1F242C : (ct ? 0x223650 : 0x3D4652));
-        int bootsColor = flashing ? 0xFF4444 : 0x181C22;
-        int shirtColor = flashing ? 0xFF7070 : (jug ? 0x2D3540 : (ct ? 0x2C5E96 : (sniper ? 0x6E3834 : 0xBA8D5A)));
-        int vestColor  = flashing ? 0xFF3B3B : (jug ? 0x161A20 : (ct ? 0x18283C : 0x2D3529));
-        int packColor  = flashing ? 0xFF4A4A : (ct ? 0x20344E : 0x4C3D2D);
-        int visorColor = flashing ? 0xFF9090 : (jug ? 0xFF3628 : (ct ? 0x5CE0FF : (sniper ? 0xFF543E : 0xD2A079)));
-        int helmetCol  = flashing ? 0xFF4848 : (jug ? 0x222832 : (ct ? 0x21426B : (sniper ? 0xA82428 : 0x2C2624)));
-        int gunColor   = 0x22262E;
-        int gunAccent  = jug ? 0x44603C : (ct ? 0x365C82 : 0x8B4A22);
+        // Реалистичные армейские палитры спецназа SAS/GIGN (CT) и оперативников Phoenix/Elite Crew (T)
+        int pantsColor = flashing ? 0xFF5555 : (jug ? 0x1D222A : (ct ? 0x253548 : (sniper ? 0x463E36 : 0x3A433C)));
+        int bootsColor = flashing ? 0xFF4444 : 0x16191E;
+        int shirtColor = flashing ? 0xFF7070 : (jug ? 0x2A323D : (ct ? 0x2D4866 : (sniper ? 0x6A3A32 : 0x8E7454)));
+        int vestColor  = flashing ? 0xFF3B3B : (jug ? 0x181D24 : (ct ? 0x444E42 : 0x2E342A));
+        int pouchColor = flashing ? 0xFF4A4A : (ct ? 0x2A312A : 0x4A3A28);
+        int skinTone   = flashing ? 0xFFAAAA : 0xC89676;
+        int helmetCol  = flashing ? 0xFF4848 : (jug ? 0x242C34 : (ct ? 0x465246 : (sniper ? 0x9C2C2C : 0x242222)));
+        int goggleCol  = flashing ? 0xFF9090 : (jug ? 0xFF3B28 : (ct ? 0x1E3246 : 0x181C22));
+        int gunMetal   = 0x20262E;
+        int gunBody    = jug ? 0x364434 : (ct ? 0x2B3440 : (sniper ? 0x364C34 : 0x8C4C26));
 
         if (!alive) {
             double fallAngle = deathAnimProgress * (Math.PI * 0.48);
             double sinF = Math.sin(fallAngle);
             double cosF = Math.cos(fallAngle);
-            double baseY = position.y + 0.16 * sinF;
+            double baseY = position.y + 0.14 * sinF;
 
-            drawPartFallen(r, 0.0, 0.42 * s, -0.14 * s, 0.18 * s, 0.72 * s, 0.19 * s, fallAngle, sinF, cosF, baseY, pantsColor);
-            drawPartFallen(r, 0.0, 0.42 * s,  0.14 * s, 0.18 * s, 0.72 * s, 0.19 * s, fallAngle, sinF, cosF, baseY, pantsColor);
-            drawPartFallen(r, 0.0, 1.04 * s,  0.00,     0.30 * s, 0.62 * s, 0.46 * s, fallAngle, sinF, cosF, baseY, vestColor);
-            r.drawWorldEllipsoid(position.x - Math.sin(yaw) * 1.48 * s * sinF, baseY + Math.max(0.14, 1.54 * s * cosF),
-                    position.z - Math.cos(yaw) * 1.48 * s * sinF, 0.19 * s, 0.19 * s, 0.19 * s, 10, 5, helmetCol);
-            double gx = position.x + Math.cos(yaw) * 0.45 * s;
-            double gz = position.z - Math.sin(yaw) * 0.45 * s;
-            r.drawOrientedWorldCylinder(gx, position.y + 0.06, gz, 0.045, 0.68, yaw + 0.5, 0.0, 8, gunColor);
+            drawPartFallen(r, 0.0, 0.42 * s, -0.15 * s, 0.17 * s, 0.74 * s, 0.18 * s, fallAngle, sinF, cosF, baseY, pantsColor);
+            drawPartFallen(r, 0.0, 0.42 * s,  0.15 * s, 0.17 * s, 0.74 * s, 0.18 * s, fallAngle, sinF, cosF, baseY, pantsColor);
+            drawPartFallen(r, 0.0, 1.05 * s,  0.00,     0.28 * s, 0.60 * s, 0.44 * s, fallAngle, sinF, cosF, baseY, vestColor);
+            r.drawWorldEllipsoid(position.x - Math.sin(yaw) * 1.48 * s * sinF, baseY + Math.max(0.14, 1.55 * s * cosF),
+                    position.z - Math.cos(yaw) * 1.48 * s * sinF, 0.15 * s, 0.16 * s, 0.15 * s, 10, 6, helmetCol);
+            double gx = position.x + Math.cos(yaw) * 0.46 * s;
+            double gz = position.z - Math.sin(yaw) * 0.46 * s;
+            r.drawOrientedWorldBox(gx, position.y + 0.05, gz, 0.06, 0.10, 0.56, yaw + 0.55, 0.0, Renderer3D.TEX_SOLID, gunBody);
+            r.drawOrientedWorldCylinder(gx + Math.sin(yaw + 0.55) * 0.36, position.y + 0.06, gz + Math.cos(yaw + 0.55) * 0.36, 0.022, 0.38, yaw + 0.55, 0.0, 8, gunMetal);
             return;
         }
 
-        double legSwing = Math.sin(walkPhase) * 0.38;
+        double stride = Math.sin(walkPhase) * 0.34;
         double sinY = Math.sin(yaw);
         double cosY = Math.cos(yaw);
         double rightX = cosY;
         double rightZ = -sinY;
         double bx = position.x, by = position.y, bz = position.z;
 
-        // Гладкие цилиндрические ноги и закруглённые ботинки
-        r.drawOrientedWorldCylinder(bx - rightX * 0.14 * s, by + 0.42 * s, bz - rightZ * 0.14 * s,
-                0.095 * s, 0.72 * s, yaw, Math.PI * 0.5 + legSwing, 8, pantsColor);
-        r.drawOrientedWorldCylinder(bx + rightX * 0.14 * s, by + 0.42 * s, bz + rightZ * 0.14 * s,
-                0.095 * s, 0.72 * s, yaw, Math.PI * 0.5 - legSwing, 8, pantsColor);
-        r.drawWorldEllipsoid(bx - rightX * 0.14 * s, by + 0.08 * s, bz - rightZ * 0.14 * s, 0.10 * s, 0.08 * s, 0.14 * s, 8, 4, bootsColor);
-        r.drawWorldEllipsoid(bx + rightX * 0.14 * s, by + 0.08 * s, bz + rightZ * 0.14 * s, 0.10 * s, 0.08 * s, 0.14 * s, 8, 4, bootsColor);
+        // 1. Анатомические двусоставные ноги (бедро -> тактический наколенник -> голень -> армейский ботинок с подошвой)!
+        for (int side = -1; side <= 1; side += 2) {
+            double sw = (side < 0) ? stride : -stride;
+            double kneeBend = Math.max(0.0, -sw) * 0.45;
+            double hipX = bx + rightX * (side * 0.145 * s);
+            double hipZ = bz + rightZ * (side * 0.145 * s);
 
-        // Торс, бронежилет и круглые наплечники (у Джаггернаута — массивная титановая броня!)
-        r.drawOrientedWorldBox(bx, by + 1.06 * s, bz, 0.44 * s, 0.62 * s, 0.27 * s, yaw, 0.0, Renderer3D.TEX_SOLID, shirtColor);
-        r.drawOrientedWorldBox(bx, by + 1.08 * s, bz, 0.47 * s, 0.48 * s, 0.31 * s, yaw, 0.0, Renderer3D.TEX_SOLID, vestColor);
-        r.drawWorldEllipsoid(bx - rightX * 0.28 * s, by + 1.30 * s, bz - rightZ * 0.28 * s,
-                (jug ? 0.18 : 0.12) * s, (jug ? 0.16 : 0.11) * s, (jug ? 0.18 : 0.12) * s, 9, 5, jug ? vestColor : shirtColor);
-        r.drawWorldEllipsoid(bx + rightX * 0.28 * s, by + 1.30 * s, bz + rightZ * 0.28 * s,
-                (jug ? 0.18 : 0.12) * s, (jug ? 0.16 : 0.11) * s, (jug ? 0.18 : 0.12) * s, 9, 5, jug ? vestColor : shirtColor);
+            double thighFwd = Math.sin(sw) * 0.11 * s;
+            r.drawOrientedWorldCylinder(hipX + sinY * thighFwd, by + 0.63 * s, hipZ + cosY * thighFwd,
+                    0.098 * s, 0.084 * s, 0.40 * s, yaw, Math.PI * 0.5 + sw * 0.85, 9, pantsColor);
 
-        r.drawOrientedWorldBox(bx - sinY * 0.20 * s, by + 1.10 * s, bz - cosY * 0.20 * s, 0.30 * s, 0.38 * s, 0.14 * s, yaw, 0.0, Renderer3D.TEX_SOLID, packColor);
+            double kneeX = hipX + sinY * (thighFwd * 1.7);
+            double kneeZ = hipZ + cosY * (thighFwd * 1.7);
+            r.drawWorldEllipsoid(kneeX + sinY * 0.05 * s, by + 0.44 * s, kneeZ + cosY * 0.05 * s,
+                    0.066 * s, 0.076 * s, 0.058 * s, 9, 5, bootsColor);
+
+            double shinPitch = Math.PI * 0.5 + sw * 0.65 - kneeBend;
+            double ankleFwd = thighFwd * 1.9 - kneeBend * 0.18 * s;
+            r.drawOrientedWorldCylinder(hipX + sinY * ankleFwd, by + 0.24 * s, hipZ + cosY * ankleFwd,
+                    0.082 * s, 0.072 * s, 0.36 * s, yaw, shinPitch, 9, pantsColor);
+
+            r.drawOrientedWorldBox(hipX + sinY * (ankleFwd + 0.05 * s), by + 0.06 * s, hipZ + cosY * (ankleFwd + 0.05 * s),
+                    0.125 * s, 0.11 * s, 0.25 * s, yaw, 0.0, Renderer3D.TEX_SOLID, bootsColor);
+        }
+
+        // Тактический ремень и набедренная кобура на правом бедре
+        r.drawWorldCylinder(bx, by + 0.81 * s, bz, 0.215 * s, 0.215 * s, 0.08 * s, 12, Renderer3D.TEX_SOLID, pouchColor);
+        r.drawOrientedWorldBox(bx + rightX * 0.235 * s, by + 0.65 * s, bz + rightZ * 0.235 * s,
+                0.055 * s, 0.17 * s, 0.11 * s, yaw, 0.0, Renderer3D.TEX_SOLID, bootsColor);
+
+        // 2. Торс, бронежилет-плитоносец JPC / разгрузка Chicom с 3 подсумками магазинов и рюкзаком!
+        r.drawWorldEllipsoid(bx, by + 1.10 * s, bz, 0.225 * s, 0.31 * s, 0.155 * s, 12, 7, shirtColor);
+        r.drawOrientedWorldBox(bx + sinY * 0.095 * s, by + 1.11 * s, bz + cosY * 0.095 * s,
+                (jug ? 0.38 : 0.30) * s, 0.33 * s, 0.09 * s, yaw, -0.04, Renderer3D.TEX_SOLID, vestColor);
+        r.drawOrientedWorldBox(bx - sinY * 0.095 * s, by + 1.12 * s, bz - cosY * 0.095 * s,
+                0.29 * s, 0.33 * s, 0.08 * s, yaw, 0.04, Renderer3D.TEX_SOLID, vestColor);
+
+        // 3 объёмных подсумка магазинов на груди + рюкзак
+        for (int m = -1; m <= 1; m++) {
+            double mx = bx + sinY * 0.152 * s + rightX * (m * 0.082 * s);
+            double mz = bz + cosY * 0.152 * s + rightZ * (m * 0.082 * s);
+            r.drawOrientedWorldBox(mx, by + 1.02 * s, mz, 0.062 * s, 0.135 * s, 0.048 * s, yaw, -0.04, Renderer3D.TEX_SOLID, pouchColor);
+        }
+        r.drawOrientedWorldBox(bx - sinY * 0.19 * s, by + 1.12 * s, bz - cosY * 0.19 * s,
+                0.26 * s, 0.34 * s, 0.12 * s, yaw, 0.0, Renderer3D.TEX_SOLID, pouchColor);
+
+        // Наплечники (у Джаггернаута — тяжёлые титановые щитки и броневоротник!)
+        r.drawWorldEllipsoid(bx - rightX * 0.265 * s, by + 1.28 * s, bz - rightZ * 0.265 * s,
+                (jug ? 0.16 : 0.095) * s, (jug ? 0.14 : 0.10) * s, (jug ? 0.16 : 0.095) * s, 9, 5, jug ? vestColor : shirtColor);
+        r.drawWorldEllipsoid(bx + rightX * 0.265 * s, by + 1.28 * s, bz + rightZ * 0.265 * s,
+                (jug ? 0.16 : 0.095) * s, (jug ? 0.14 : 0.10) * s, (jug ? 0.16 : 0.095) * s, 9, 5, jug ? vestColor : shirtColor);
+        if (jug) {
+            r.drawWorldCylinder(bx, by + 1.33 * s, bz, 0.22 * s, 0.20 * s, 0.11 * s, 12, Renderer3D.TEX_SOLID, vestColor);
+        }
+
         if (carryingC4) {
-            r.drawOrientedWorldBox(bx - sinY * 0.28 * s, by + 1.12 * s, bz - cosY * 0.28 * s, 0.24, 0.18, 0.10, yaw, 0.0, Renderer3D.TEX_SOLID, 0xC2A35E);
-            r.drawTranslucentSphereSprite(bx - sinY * 0.34 * s, by + 1.16 * s, bz - cosY * 0.34 * s, 0.06, 0xFF3322, 0.90);
+            r.drawOrientedWorldBox(bx - sinY * 0.27 * s, by + 1.13 * s, bz - cosY * 0.27 * s, 0.22, 0.16, 0.09, yaw, 0.0, Renderer3D.TEX_SOLID, 0xC2A35E);
+            r.drawTranslucentSphereSprite(bx - sinY * 0.33 * s, by + 1.17 * s, bz - cosY * 0.33 * s, 0.055, 0xFF3322, 0.90);
         }
 
-        // Гладкие цилиндрические руки
+        // 3. Двуручный стрелковый хват (плечо -> предплечье -> перчатка на цевье и рукояти!)
         if (blindTimer > 0.15) {
-            r.drawOrientedWorldCylinder(bx - rightX * 0.18 * s + sinY * 0.22 * s, by + 1.54 * s, bz - rightZ * 0.18 * s + cosY * 0.22 * s,
-                    0.075 * s, 0.36 * s, yaw + 1.2, 0.20, 8, shirtColor);
+            r.drawOrientedWorldCylinder(bx - rightX * 0.18 * s + sinY * 0.20 * s, by + 1.50 * s, bz - rightZ * 0.18 * s + cosY * 0.20 * s,
+                    0.068 * s, 0.34 * s, yaw + 1.15, 0.22, 8, shirtColor);
         } else {
-            r.drawOrientedWorldCylinder(bx - rightX * 0.27 * s + sinY * 0.15 * s, by + 1.15 * s, bz - rightZ * 0.27 * s + cosY * 0.15 * s,
-                    0.075 * s, 0.44 * s, yaw + 0.18, 0.10, 8, shirtColor);
+            // Левая поддерживающая рука тянется вперёд к цевью винтовки!
+            r.drawOrientedWorldCylinder(bx - rightX * 0.24 * s + sinY * 0.10 * s, by + 1.21 * s, bz - rightZ * 0.24 * s + cosY * 0.10 * s,
+                    0.066 * s, 0.058 * s, 0.28 * s, yaw + 0.42, 0.35, 8, shirtColor);
+            r.drawOrientedWorldCylinder(bx - rightX * 0.06 * s + sinY * 0.31 * s, by + 1.16 * s, bz - rightZ * 0.06 * s + cosY * 0.31 * s,
+                    0.055 * s, 0.048 * s, 0.28 * s, yaw + 0.62, -0.08, 8, shirtColor);
+            r.drawWorldEllipsoid(bx + rightX * 0.08 * s + sinY * 0.43 * s, by + 1.16 * s, bz + rightZ * 0.08 * s + cosY * 0.43 * s,
+                    0.046 * s, 0.044 * s, 0.050 * s, 8, 4, bootsColor);
         }
-        r.drawOrientedWorldCylinder(bx + rightX * 0.26 * s + sinY * 0.16 * s, by + 1.14 * s, bz + rightZ * 0.26 * s + cosY * 0.16 * s,
-                0.075 * s, 0.45 * s, yaw - 0.12, 0.10, 8, shirtColor);
+        // Правая стреляющая рука удерживает пистолетную рукоять у плеча
+        r.drawOrientedWorldCylinder(bx + rightX * 0.24 * s + sinY * 0.06 * s, by + 1.20 * s, bz + rightZ * 0.24 * s + cosY * 0.06 * s,
+                0.066 * s, 0.058 * s, 0.26 * s, yaw - 0.16, 0.42, 8, shirtColor);
+        r.drawOrientedWorldCylinder(bx + rightX * 0.17 * s + sinY * 0.20 * s, by + 1.14 * s, bz + rightZ * 0.17 * s + cosY * 0.20 * s,
+                0.054 * s, 0.046 * s, 0.22 * s, yaw - 0.10, -0.15, 8, shirtColor);
 
-        // ГЛАДКАЯ КРУГЛАЯ ГОЛОВА И ТАКТИЧЕСКИЙ ШЛЕМ С ГУРО-ЗАТЕНЕНИЕМ (НИКАКИХ КУБИЧЕСКИХ ГОЛОВ!)
-        r.drawWorldEllipsoid(bx, by + 1.56 * s, bz, 0.175 * s, 0.195 * s, 0.175 * s, 12, 6, helmetCol);
-        r.drawWorldEllipsoid(bx, by + 1.62 * s, bz, 0.195 * s, 0.145 * s, 0.195 * s, 12, 5, helmetCol);
-        r.drawOrientedWorldBox(bx + sinY * 0.155 * s, by + 1.57 * s, bz + cosY * 0.155 * s,
-                0.23 * s, 0.085 * s, 0.06 * s, yaw, 0.0, Renderer3D.TEX_SOLID, visorColor);
+        // 4. Реалистичная анатомическая голова по фракциям (Ops-Core FAST с ПНВ у CT, балаклава/арафатка у T, «Алтын» у Босса)!
+        r.drawWorldCylinder(bx, by + 1.36 * s, bz, 0.095 * s, 0.088 * s, 0.09 * s, 10, Renderer3D.TEX_SOLID, bootsColor);
+        double hy = by + 1.55 * s;
+        if (jug) {
+            // Тяжёлый титановый шлем «Алтын» с опущенным стальным забралом и узкой бронещелью!
+            r.drawWorldEllipsoid(bx, hy + 0.02 * s, bz, 0.165 * s, 0.175 * s, 0.170 * s, 12, 7, helmetCol);
+            r.drawOrientedWorldBox(bx + sinY * 0.135 * s, hy + 0.01 * s, bz + cosY * 0.135 * s,
+                    0.24 * s, 0.15 * s, 0.06 * s, yaw, 0.0, Renderer3D.TEX_SOLID, 0x36404C);
+            r.drawOrientedWorldBox(bx + sinY * 0.162 * s, hy + 0.025 * s, bz + cosY * 0.162 * s,
+                    0.18 * s, 0.032 * s, 0.025 * s, yaw, 0.0, Renderer3D.TEX_SOLID, goggleCol);
+        } else if (ct) {
+            // Боец спецназа CT: тёмная балаклава, переносица, очки Oakley, шлем Ops-Core FAST, наушники и сдвоенный ПНВ!
+            r.drawWorldEllipsoid(bx, hy, bz, 0.128 * s, 0.150 * s, 0.134 * s, 12, 7, bootsColor);
+            r.drawWorldEllipsoid(bx + sinY * 0.106 * s, hy + 0.012 * s, bz + cosY * 0.106 * s, 0.084 * s, 0.030 * s, 0.042 * s, 8, 4, skinTone);
+            r.drawOrientedWorldBox(bx + sinY * 0.120 * s, hy + 0.018 * s, bz + cosY * 0.120 * s,
+                    0.175 * s, 0.048 * s, 0.050 * s, yaw, 0.0, Renderer3D.TEX_SOLID, goggleCol);
+            r.drawWorldEllipsoid(bx - sinY * 0.01 * s, hy + 0.062 * s, bz - cosY * 0.01 * s,
+                    0.146 * s, 0.118 * s, 0.154 * s, 12, 7, helmetCol);
+            // Наушники ComTac + бинокулярный ПНВ на лбу шлема
+            r.drawWorldEllipsoid(bx - rightX * 0.138 * s, hy - 0.005 * s, bz - rightZ * 0.138 * s, 0.034 * s, 0.058 * s, 0.048 * s, 8, 5, pouchColor);
+            r.drawWorldEllipsoid(bx + rightX * 0.138 * s, hy - 0.005 * s, bz + rightZ * 0.138 * s, 0.034 * s, 0.058 * s, 0.048 * s, 8, 5, pouchColor);
+            r.drawOrientedWorldCylinder(bx + sinY * 0.155 * s - rightX * 0.038 * s, hy + 0.095 * s, bz + cosY * 0.155 * s - rightZ * 0.038 * s,
+                    0.022 * s, 0.024 * s, 0.085 * s, yaw, -0.22, 8, bootsColor);
+            r.drawOrientedWorldCylinder(bx + sinY * 0.155 * s + rightX * 0.038 * s, hy + 0.095 * s, bz + cosY * 0.155 * s + rightZ * 0.038 * s,
+                    0.022 * s, 0.024 * s, 0.085 * s, yaw, -0.22, 8, bootsColor);
+        } else {
+            // Террорист (Phoenix балаклава с прорезью глаз или куфия/очки у Снайпера!)
+            r.drawWorldEllipsoid(bx, hy, bz, 0.130 * s, 0.154 * s, 0.136 * s, 12, 7, helmetCol);
+            if (sniper) {
+                r.drawWorldEllipsoid(bx - sinY * 0.015 * s, hy + 0.035 * s, bz - cosY * 0.015 * s, 0.148 * s, 0.138 * s, 0.152 * s, 12, 6, helmetCol);
+                r.drawWorldEllipsoid(bx + sinY * 0.105 * s, hy - 0.005 * s, bz + cosY * 0.105 * s, 0.088 * s, 0.058 * s, 0.046 * s, 8, 5, skinTone);
+                r.drawOrientedWorldBox(bx + sinY * 0.122 * s, hy + 0.018 * s, bz + cosY * 0.122 * s,
+                        0.175 * s, 0.044 * s, 0.045 * s, yaw, 0.0, Renderer3D.TEX_SOLID, goggleCol);
+            } else {
+                // Вырез для глаз в вязаной балаклаве Phoenix Connexion
+                r.drawWorldEllipsoid(bx + sinY * 0.108 * s, hy + 0.016 * s, bz + cosY * 0.108 * s, 0.088 * s, 0.034 * s, 0.045 * s, 9, 4, skinTone);
+                r.drawWorldEllipsoid(bx + sinY * 0.122 * s - rightX * 0.038 * s, hy + 0.018 * s, bz + cosY * 0.122 * s - rightZ * 0.038 * s, 0.016 * s, 0.014 * s, 0.014 * s, 6, 4, 0x1A1E24);
+                r.drawWorldEllipsoid(bx + sinY * 0.122 * s + rightX * 0.038 * s, hy + 0.018 * s, bz + cosY * 0.122 * s + rightZ * 0.038 * s, 0.016 * s, 0.014 * s, 0.014 * s, 6, 4, 0x1A1E24);
+            }
+        }
 
-        // Оружие в руках с круглым стволом
-        double gunCenterX = bx + rightX * 0.15 * s + sinY * 0.36 * s;
-        double gunCenterY = by + 1.15 * s;
-        double gunCenterZ = bz + rightZ * 0.15 * s + cosY * 0.36 * s;
-        r.drawOrientedWorldBox(gunCenterX - sinY * 0.10 * s, gunCenterY, gunCenterZ - cosY * 0.10 * s,
-                0.07 * s, 0.12 * s, 0.36 * s, yaw, 0.0, Renderer3D.TEX_SOLID, gunAccent);
-        r.drawOrientedWorldCylinder(gunCenterX + sinY * 0.22 * s, gunCenterY + 0.02 * s, gunCenterZ + cosY * 0.22 * s,
-                (jug ? 0.045 : 0.028) * s, (jug ? 0.62 : 0.48) * s, yaw, 0.0, 8, gunColor);
+        // 5. Детализированное 3D-оружие у плеча (приклад, ствольная коробка, магазин, оптика/коллиматор и ствол/глушитель)!
+        double gunCenterX = bx + rightX * 0.135 * s + sinY * 0.34 * s;
+        double gunCenterY = by + 1.19 * s;
+        double gunCenterZ = bz + rightZ * 0.135 * s + cosY * 0.34 * s;
+        // Приклад в правое плечо
+        r.drawOrientedWorldBox(gunCenterX - sinY * 0.22 * s, gunCenterY - 0.015 * s, gunCenterZ - cosY * 0.22 * s,
+                0.046 * s, 0.095 * s, 0.20 * s, yaw, 0.0, Renderer3D.TEX_SOLID, ct ? gunMetal : gunBody);
+        // Ствольная коробка
+        r.drawOrientedWorldBox(gunCenterX, gunCenterY, gunCenterZ,
+                0.058 * s, 0.098 * s, 0.32 * s, yaw, 0.0, Renderer3D.TEX_SOLID, ct ? gunBody : gunMetal);
+        // Цевьё
+        r.drawOrientedWorldBox(gunCenterX + sinY * 0.20 * s, gunCenterY + 0.005 * s, gunCenterZ + cosY * 0.20 * s,
+                0.050 * s, 0.068 * s, 0.22 * s, yaw, 0.0, Renderer3D.TEX_SOLID, gunBody);
+        // Магазин (рожковый у штурмовиков, короб у пулемётчика Juggernaut!)
+        if (jug) {
+            r.drawOrientedWorldBox(gunCenterX + sinY * 0.04 * s, gunCenterY - 0.10 * s, gunCenterZ + cosY * 0.04 * s,
+                    0.13 * s, 0.14 * s, 0.13 * s, yaw, 0.0, Renderer3D.TEX_SOLID, 0x3D5236);
+        } else if (!sniper) {
+            r.drawOrientedWorldBox(gunCenterX + sinY * 0.06 * s, gunCenterY - 0.11 * s, gunCenterZ + cosY * 0.06 * s,
+                    0.038 * s, 0.16 * s, 0.068 * s, yaw, 0.32, Renderer3D.TEX_SOLID, ct ? 0x2E343C : 0x9E5224);
+        }
+        // Оптика снайпера AWP или коллиматор спецназа CT
+        if (sniper) {
+            r.drawOrientedWorldCylinder(gunCenterX + sinY * 0.02 * s, gunCenterY + 0.082 * s, gunCenterZ + cosY * 0.02 * s,
+                    0.026 * s, 0.030 * s, 0.30 * s, yaw, 0.0, 9, gunMetal);
+        } else if (ct) {
+            r.drawOrientedWorldBox(gunCenterX - sinY * 0.02 * s, gunCenterY + 0.070 * s, gunCenterZ - cosY * 0.02 * s,
+                    0.044 * s, 0.048 * s, 0.095 * s, yaw, 0.0, Renderer3D.TEX_SOLID, gunMetal);
+        }
+        // Ствол / тактический глушитель M4A1-S
+        double barrelLen = (jug ? 0.54 : (sniper ? 0.62 : 0.42)) * s;
+        r.drawOrientedWorldCylinder(gunCenterX + sinY * (0.24 * s + barrelLen * 0.5), gunCenterY + 0.018 * s, gunCenterZ + cosY * (0.24 * s + barrelLen * 0.5),
+                (jug ? 0.036 : (ct ? 0.024 : 0.018)) * s, barrelLen, yaw, 0.0, 9, gunMetal);
 
         // Лазерный целеуказатель элитного снайпера!
         if (sniper && state == State.ENGAGE) {
             Vec3 muz = getMuzzleWorldPosition();
-            Vec3 laserEnd = muz.add(new Vec3(sinY * 8.0, -0.05, cosY * 8.0));
+            Vec3 laserEnd = muz.add(new Vec3(sinY * 9.5, -0.05, cosY * 9.5));
             r.draw3DLine(muz, laserEnd, 0xFF2E38, 1);
         }
 
         if (muzzleFlashTimer > 0.0) {
             Vec3 muz = getMuzzleWorldPosition();
-            r.drawTranslucentSphereSprite(muz.x, muz.y, muz.z, 0.18 * s, ct ? 0x70E8FF : 0xFFCA3A, 0.92);
+            r.drawTranslucentSphereSprite(muz.x, muz.y, muz.z, 0.19 * s, ct ? 0x88ECFF : 0xFFCA3A, 0.92);
         }
     }
 

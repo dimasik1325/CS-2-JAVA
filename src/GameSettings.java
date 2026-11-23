@@ -5,7 +5,7 @@ import java.io.FileOutputStream;
 import java.util.Properties;
 
 /**
- * Центральное хранилище настроек графики, оптимизации и карьеры CS-2 JAVA 7.0
+ * Центральное хранилище настроек графики, оптимизации и карьеры CS-2 JAVA 8.0
  * (Hyper-Turbo Multi-Core Engine & Pro Graphics Studio Edition):
  * - 20+ профессиональных настроек графики CS2 (Пресеты, 1:1 / 540p..1080p, Авто-FPS Dynamic Res,
  *   FXAA Turbo / Span FXAA 3.11, Резкость CAS, Насыщенность Digital Vibrance, Яркость, LOD геометрии,
@@ -14,7 +14,7 @@ import java.util.Properties;
  */
 public class GameSettings {
 
-    public static final int CONFIG_VERSION = 7;
+    public static final int CONFIG_VERSION = 8;
 
     public enum QualityPreset {
         ESPORTS("Киберспорт (Макс. FPS)"),
@@ -106,10 +106,10 @@ public class GameSettings {
     }
 
     public enum RenderDistanceMode {
-        SHORT_48("48 м (Макс. FPS)", 48.0),
-        MEDIUM_68("68 м (Стандарт)", 68.0),
-        FAR_88("88 м (Далеко)", 88.0),
-        EXTREME_115("115 м (Вся арена)", 115.0);
+        SHORT_48("64 м (Макс. FPS)", 64.0),
+        MEDIUM_68("88 м (Стандарт)", 88.0),
+        FAR_88("112 м (Далеко)", 112.0),
+        EXTREME_115("140 м (Вся арена 68×68)", 140.0);
 
         public final String label;
         public final double meters;
@@ -232,19 +232,23 @@ public class GameSettings {
     }
 
     public enum MapTheme {
-        INFERNO("Inferno", "Старый город • Фонтан", new Color(235, 118, 52)),
-        DUST_II("Dust II", "Песчаный каньон • Мид", new Color(228, 182, 78)),
-        MIRAGE("Mirage", "Королевский дворец", new Color(214, 96, 132)),
-        NUKE("Nuke", "Реакторный комплекс", new Color(66, 178, 245));
+        INFERNO("Inferno", "DE_INFERNO", "Банан • Фонтан • 2-эт. Апартаменты", "68×68м • 2 этажа • Узкий Банан", new Color(242, 122, 54)),
+        DUST_II("Dust II", "DE_DUST2", "Длина А • Коробка • Тёмка B", "68×68м • Плато А • Крытый тоннель", new Color(235, 188, 76)),
+        MIRAGE("Mirage", "DE_MIRAGE", "Окно Снайпера • Дворец • Маркет", "68×68м • Снайп. Окно • Зал Дворца", new Color(224, 98, 138)),
+        NUKE("Nuke", "DE_NUKE", "Улица • Силос • Мостки Девятка", "68×68м • 2 яруса • Heaven + Реактор", new Color(64, 192, 255));
 
         public final String shortName;
+        public final String codeName;
         public final String subtitle;
+        public final String layoutBadge;
         public final Color accent;
         public final String label;
 
-        MapTheme(String shortName, String subtitle, Color accent) {
+        MapTheme(String shortName, String codeName, String subtitle, String layoutBadge, Color accent) {
             this.shortName = shortName;
+            this.codeName = codeName;
             this.subtitle = subtitle;
+            this.layoutBadge = layoutBadge;
             this.accent = accent;
             this.label = shortName + " (" + subtitle.split(" • ")[0] + ")";
         }
@@ -315,7 +319,7 @@ public class GameSettings {
 
     private static final String SETTINGS_FILE = "settings.properties";
 
-    // --- РАСШИРЕННЫЕ НАСТРОЙКИ ГРАФИКИ И ОПТИМИЗАЦИИ CS-2 JAVA 7.0 ---
+    // --- РАСШИРЕННЫЕ НАСТРОЙКИ ГРАФИКИ И ОПТИМИЗАЦИИ CS-2 JAVA 8.0 ---
     public QualityPreset qualityPreset = QualityPreset.HIGH;
     public ResolutionScale resolutionScale = ResolutionScale.NATIVE_WINDOW;
     public DynamicResolutionMode dynamicResolution = DynamicResolutionMode.OFF;
@@ -597,7 +601,7 @@ public class GameSettings {
                 if (!savePending) return;
                 savePending = false;
                 try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                    snapshot.store(fos, "CS-2 JAVA 7.0 Hyper-Turbo & Pro Graphics Studio Configuration");
+                    snapshot.store(fos, "CS-2 JAVA 8.0 Hyper-Turbo & Pro Graphics Studio Configuration");
                 } catch (Throwable ignored) {
                 }
             }
@@ -612,7 +616,7 @@ public class GameSettings {
         synchronized (saveLock) {
             savePending = false;
             try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
-                snapshot.store(fos, "CS-2 JAVA 7.0 Hyper-Turbo & Pro Graphics Studio Configuration");
+                snapshot.store(fos, "CS-2 JAVA 8.0 Hyper-Turbo & Pro Graphics Studio Configuration");
             } catch (Throwable ignored) {
             }
         }
