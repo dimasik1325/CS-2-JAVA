@@ -602,6 +602,19 @@ public class Bot {
                 moveZ += (oz / d) * push;
             }
         }
+        // 11.2 FIX: союзники не лезут в камеру — персональное пространство вокруг игрока
+        if (player != null && player.isAlive()) {
+            double ox = position.x - player.getPosition().x;
+            double oz = position.z - player.getPosition().z;
+            double d2 = ox * ox + oz * oz;
+            double minSep = 1.35;
+            if (d2 > 1e-6 && d2 < minSep * minSep) {
+                double d = Math.sqrt(d2);
+                double push = (minSep - d) * 5.0;
+                moveX += (ox / d) * push;
+                moveZ += (oz / d) * push;
+            }
+        }
 
         // 11.0 SMART BOTS: обход стен — «усики»-рейкасты поворачивают движение вдоль препятствия
         double esp = Math.sqrt(moveX * moveX + moveZ * moveZ);
@@ -1148,6 +1161,9 @@ public class Bot {
     }
 
     public void render(Renderer3D r) {
+        // 11.2 FIX: бот вплотную к камере (союзник «влез в лицо») не рисуется —
+        // его плечо/руки занимали пол-экрана и убивали FPS огромным overdraw
+        if (r.distanceToCamera(position.x, position.y + 1.0, position.z) < 1.7) return;
         if (useGlbModels && renderGlb(r)) return;
         double s = getModelScale();
         if (!r.isSphereVisible(position.x, position.y + 0.92 * s, position.z, 1.62 * s)) {

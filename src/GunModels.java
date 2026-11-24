@@ -90,10 +90,12 @@ public final class GunModels {
                     else if (n.contains("brown") || n.contains("red")) c = skin.accent;
                     else if (n.contains("grey_light") || n.contains("white")) c = skin.accent;
                     else if (n.contains("black_lighter")) c = skin.trim;
+                    // 11.2: чёрная фурнитура — тёмный тон СКИНА (не синяя «перчатка» 0x1C2026)
+                    else if (n.contains("black")) c = Renderer3D.shadeColor(skin.primary, 0.42);
                 } else {
                     if (spec.tint != 0 && (n.contains("grey_dark") || n.contains("grey_darker")))
                         c = n.contains("darker") ? Renderer3D.shadeColor(spec.tint, 0.8) : spec.tint;
-                    if (spec.furniture != 0 && (n.contains("brown") || n.contains("red") || n.contains("black_lighter")))
+                    if (spec.furniture != 0 && (n.contains("brown") || n.contains("red") || n.contains("black")))
                         c = spec.furniture;
                 }
                 out[i] = c;
@@ -112,11 +114,13 @@ public final class GunModels {
     /** Тёмные PBR-цвета Flat Guns поднимаются до читаемых в софтверном рендере. */
     static int liftColor(String name, int rgb) {
         String n = name.toLowerCase();
-        if (n.contains("black_lighter")) return 0x2C3138;
-        if (n.contains("black")) return 0x1C2026;
-        if (n.contains("grey_darker")) return 0x3A4048;
-        if (n.contains("grey_dark")) return 0x4E555E;
-        if (n.contains("grey_light")) return 0x80878F;
+        if (n.contains("black_lighter")) return 0x463B2C;
+        // 11.2: чёрная фурнитура (рукоять/магазин/приклад) — тёплое оружейное дерево-полимер.
+        // Раньше был 0x1C2026 (синий отсвет) — в кадре читалось как «рука в перчатке»!
+        if (n.contains("black")) return 0x3A2E20;
+        if (n.contains("grey_darker")) return 0x46403A;
+        if (n.contains("grey_dark")) return 0x5A544C;
+        if (n.contains("grey_light")) return 0x847C6E;
         if (n.contains("white")) return 0xC4C9CF;
         if (n.contains("brass") || n.contains("yellow")) return 0xC8962E;
         if (n.contains("brown")) return 0x8A4A26;

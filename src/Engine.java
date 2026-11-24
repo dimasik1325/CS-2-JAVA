@@ -51,6 +51,9 @@ public class Engine extends JPanel implements Runnable {
     private static final long serialVersionUID = 1L;
 
     public static final int DEFAULT_WINDOW_WIDTH = 1280;
+    // 11.2 FPS-FIX: максимальный размер буфера кадра (мониторы 1440p/4K масштабируются автоматически)
+    public static final int MAX_FRAMEBUFFER_W = 1920;
+    public static final int MAX_FRAMEBUFFER_H = 1080;
     public static final int DEFAULT_WINDOW_HEIGHT = 720;
     private static final double ROUND_TIME_SECONDS = 100.0;
 
@@ -2962,15 +2965,20 @@ public class Engine extends JPanel implements Runnable {
     }
 
     private void renderOffscreenSwap(int outW, int outH) {
+        // 11.2 FPS-FIX: весь кадр (3D + HUD) рендерим в буфер не больше 1920x1080.
+        // На мониторах 1440p/4K худ и финальное масштабирование раньше рисовали в нативе —
+        // это и давало лаги «даже на мощном ПК даже на низких». paintComponent сам растянет буфер.
+        int effW = Math.min(outW, MAX_FRAMEBUFFER_W);
+        int effH = Math.min(outH, MAX_FRAMEBUFFER_H);
         BufferedImage target;
         if (nextBufferIsA) {
-            if (frameBufferA == null || frameBufferA.getWidth() != outW || frameBufferA.getHeight() != outH) {
-                frameBufferA = new BufferedImage(outW, outH, BufferedImage.TYPE_INT_RGB);
+            if (frameBufferA == null || frameBufferA.getWidth() != effW || frameBufferA.getHeight() != effH) {
+                frameBufferA = new BufferedImage(effW, effH, BufferedImage.TYPE_INT_RGB);
             }
             target = frameBufferA;
         } else {
-            if (frameBufferB == null || frameBufferB.getWidth() != outW || frameBufferB.getHeight() != outH) {
-                frameBufferB = new BufferedImage(outW, outH, BufferedImage.TYPE_INT_RGB);
+            if (frameBufferB == null || frameBufferB.getWidth() != effW || frameBufferB.getHeight() != effH) {
+                frameBufferB = new BufferedImage(effW, effH, BufferedImage.TYPE_INT_RGB);
             }
             target = frameBufferB;
         }
@@ -2978,7 +2986,7 @@ public class Engine extends JPanel implements Runnable {
         long t0 = System.nanoTime();
         Graphics2D g = target.createGraphics();
         try {
-            renderCompleteFrame(g, outW, outH);
+            renderCompleteFrame(g, effW, effH);
         } finally {
             g.dispose();
         }

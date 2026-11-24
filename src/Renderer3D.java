@@ -2326,7 +2326,60 @@ public class Renderer3D {
         double invSc = sc > 1e-9 ? 1.0 / sc : 1.0;
         double flip = viewSpace ? viewFlipX : 1.0;
 
-        for (int v = 0; v < nv; v++) {
+        // 11.2 FPS-FIX: скиннинг и трансформ вершин распараллелены по диапазонам индексов
+        // (каждая вершина пишет только в свой slot — гонок нет)
+        if (multiCoreEnabled && WORKER_THREADS > 1 && nv >= 2600) {
+            final int chunk = (nv + NUM_BANDS - 1) / NUM_BANDS;
+            runParallelBands(NUM_BANDS, band -> {
+                int v0 = band * chunk;
+                int v1 = Math.min(nv, v0 + chunk);
+                transformMeshVertices(v0, v1, P, N, W, J, single, skin,
+                        a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, c3,
+                        invSc, flip, viewSpace, cosYaw, sinYaw, cosPitch, sinPitch,
+                        camX, camY, camZ, meshVx, meshVy, meshVz, meshL, lightBoost);
+            });
+        } else {
+            transformMeshVertices(0, nv, P, N, W, J, single, skin,
+                    a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, c3,
+                    invSc, flip, viewSpace, cosYaw, sinYaw, cosPitch, sinPitch,
+                    camX, camY, camZ, meshVx, meshVy, meshVz, meshL, lightBoost);
+        }
+
+        double det = a0 * (b1 * c2 - b2 * c1) - a1 * (b0 * c2 - b2 * c0) + a2 * (b0 * c1 - b1 * c0);
+        boolean swap = (det < 0) ^ (flip < 0);
+        int nColors = colors.length;
+        int[] tinted = meshTintCache.length >= nColors ? meshTintCache : (meshTintCache = new int[nColors * 2]);
+        for (int i = 0; i < nColors; i++) tinted[i] = multiplyColors(colors[i], lightTintColor);
+        boolean fog = fogEnabled && !viewSpace;
+        int count = subset != null ? subset.length : d.nt;
+        final int[] I = d.idx;
+        final byte[] M = d.mat;
+        for (int q = 0; q < count; q++) {
+            int t = subset != null ? subset[q] : q;
+            int i0 = I[t * 3], i1 = I[t * 3 + 1], i2 = I[t * 3 + 2];
+            if (swap) { int tmp = i1; i1 = i2; i2 = tmp; }
+            int mi = M[t] & 0xFF;
+            int col = tinted[mi < nColors ? mi : 0];
+            clipAndEnqueueTri(meshVx[i0], meshVy[i0], meshVz[i0], 0, 0, meshL[i0],
+                    meshVx[i1], meshVy[i1], meshVz[i1], 1, 0, meshL[i1],
+                    meshVx[i2], meshVy[i2], meshVz[i2], 1, 1, meshL[i2],
+                    TEX_SOLID, col, true, fog, 2);
+        }
+    }
+
+    /** Трансформ+скиннинг диапазона вершин [v0,v1) — выделено для параллельного запуска. */
+    private void transformMeshVertices(int v0, int v1,
+                                       float[] P, float[] N, float[] W, byte[] J, boolean[] single, float[] skin,
+                                       double a0, double a1, double a2, double a3,
+                                       double b0, double b1, double b2, double b3,
+                                       double c0, double c1, double c2, double c3,
+                                       double invSc, double flip, boolean viewSpace,
+                                       double cosYaw, double sinYaw, double cosPitch, double sinPitch,
+                                       double camX, double camY, double camZ,
+                                       float[] meshVx, float[] meshVy, float[] meshVz, float[] meshL,
+                                       double lightBoost) {
+        int nv = v1;
+        for (int v = v0; v < nv; v++) {
             int pv = v * 3;
             double x = P[pv], y = P[pv + 1], z = P[pv + 2];
             double nx = N[pv], ny = N[pv + 1], nz = N[pv + 2];
@@ -2383,27 +2436,6 @@ public class Renderer3D {
             if (nl > 1e-9) { wnx /= nl; wny /= nl; wnz /= nl; }
             meshVx[v] = (float) vx; meshVy[v] = (float) vy; meshVz[v] = (float) vz;
             meshL[v] = (float) (computeSmoothLightFactor(wnx, wny, wnz) * lightBoost);
-        }
-
-        double det = a0 * (b1 * c2 - b2 * c1) - a1 * (b0 * c2 - b2 * c0) + a2 * (b0 * c1 - b1 * c0);
-        boolean swap = (det < 0) ^ (flip < 0);
-        int nColors = colors.length;
-        int[] tinted = meshTintCache.length >= nColors ? meshTintCache : (meshTintCache = new int[nColors * 2]);
-        for (int i = 0; i < nColors; i++) tinted[i] = multiplyColors(colors[i], lightTintColor);
-        boolean fog = fogEnabled && !viewSpace;
-        int count = subset != null ? subset.length : d.nt;
-        final int[] I = d.idx;
-        final byte[] M = d.mat;
-        for (int q = 0; q < count; q++) {
-            int t = subset != null ? subset[q] : q;
-            int i0 = I[t * 3], i1 = I[t * 3 + 1], i2 = I[t * 3 + 2];
-            if (swap) { int tmp = i1; i1 = i2; i2 = tmp; }
-            int mi = M[t] & 0xFF;
-            int col = tinted[mi < nColors ? mi : 0];
-            clipAndEnqueueTri(meshVx[i0], meshVy[i0], meshVz[i0], 0, 0, meshL[i0],
-                    meshVx[i1], meshVy[i1], meshVz[i1], 1, 0, meshL[i1],
-                    meshVx[i2], meshVy[i2], meshVz[i2], 1, 1, meshL[i2],
-                    TEX_SOLID, col, true, fog, 2);
         }
     }
     private int[] meshTintCache = new int[16];

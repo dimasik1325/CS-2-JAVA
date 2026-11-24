@@ -14,13 +14,13 @@ import java.util.Properties;
  */
 public class GameSettings {
 
-    public static final int CONFIG_VERSION = 11;
+    public static final int CONFIG_VERSION = 12;
 
     public enum QualityPreset {
         ESPORTS("Киберспорт (Макс. FPS)"),
         LOW("Низкое (Турбо)"),
         MEDIUM("Среднее (Баланс HD)"),
-        HIGH("Высокое (1:1 Native + FXAA)"),
+        HIGH("Высокое (HD 720p + FXAA + Авто-FPS)"),
         ULTRA("Ультра (1:1 + CAS + Макс.)");
 
         public final String title;
@@ -481,7 +481,8 @@ public class GameSettings {
                 fpsLimit = 0;
                 break;
             case LOW:
-                resolutionScale = ResolutionScale.HIGH_1280;
+                // 11.2 FPS-FIX: низкие — это реально низкие: 960x540 + авто-FPS
+                resolutionScale = ResolutionScale.LOW_854;
                 dynamicResolution = DynamicResolutionMode.TARGET_60;
                 antiAliasingMode = AntiAliasingMode.FXAA_TURBO;
                 textureQuality = TextureQualityMode.BILINEAR_MIP;
@@ -519,8 +520,10 @@ public class GameSettings {
                 multiCoreRendering = true;
                 break;
             case HIGH:
-                resolutionScale = ResolutionScale.NATIVE_WINDOW;
-                dynamicResolution = DynamicResolutionMode.OFF;
+                // 11.2 FPS-FIX: фиксированные 720p + динамическое разрешение —
+                // раньше NATIVE_WINDOW рендерил 3D в разрешении окна (на 1440p/4K — слайд-шоу)
+                resolutionScale = ResolutionScale.HIGH_1280;
+                dynamicResolution = DynamicResolutionMode.TARGET_60;
                 antiAliasingMode = AntiAliasingMode.FXAA_TURBO;
                 textureQuality = TextureQualityMode.BILINEAR_MIP;
                 geometryLod = GeometryLodMode.BALANCED;
@@ -574,6 +577,12 @@ public class GameSettings {
             qualityPreset = parseEnum(p.getProperty("qualityPreset"), QualityPreset.class, qualityPreset);
             resolutionScale = parseEnum(p.getProperty("resolutionScale"), ResolutionScale.class, resolutionScale);
             dynamicResolution = parseEnum(p.getProperty("dynamicResolution"), DynamicResolutionMode.class, dynamicResolution);
+            // 11.2 FPS-МИГРАЦИЯ (config < 12): у пресета HIGH было NATIVE_WINDOW — на 1440p/4K
+            // это рендер 3D в разрешении окна и слайд-шоу даже на мощных ПК. Переводим на 720p+авто-FPS.
+            if (ver < 12 && qualityPreset == QualityPreset.HIGH && resolutionScale == ResolutionScale.NATIVE_WINDOW) {
+                resolutionScale = ResolutionScale.HIGH_1280;
+                dynamicResolution = DynamicResolutionMode.TARGET_60;
+            }
             antiAliasingMode = parseEnum(p.getProperty("antiAliasingMode"), AntiAliasingMode.class, antiAliasingMode);
             textureQuality = parseEnum(p.getProperty("textureQuality"), TextureQualityMode.class, textureQuality);
             geometryLod = parseEnum(p.getProperty("geometryLod"), GeometryLodMode.class, geometryLod);
