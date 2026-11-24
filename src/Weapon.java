@@ -1081,7 +1081,8 @@ public class Weapon {
         r.drawViewModelBox(kx, ky - 0.112, kz + 0.252, 0.005, 0.013, 0.046, rotX + 1.28, rotY, rotZ, kx, ky, kz, Renderer3D.TEX_SOLID, bladeEdge);
     }
 
-    // ===================== 11.0: GLB-ОРУЖИЕ ОТ 1-ГО ЛИЦА (руки убраны в 11.2) =====================
+    // ===================== 11.0: GLB-ОРУЖИЕ И РУКИ ОТ 1-ГО ЛИЦА =====================
+    private static CharacterRig fpRig;
     private static final CharacterRig.Params FP_PARAMS = new CharacterRig.Params();
     private final double[] glbView = new double[12];
     private final double[] glbTmp = new double[3];
@@ -1089,29 +1090,64 @@ public class Weapon {
     private boolean renderGlbModel(Renderer3D r, double ox, double oy, double oz,
                                    double rotX, double rotY, double rotZ,
                                    GameSettings.WeaponSkin skin, boolean drawHands) {
-        // 11.2: РУКИ ОТ ПЕРВОГО ЛИЦА УБРАНЫ (решение игрока) — рисуем ТОЛЬКО модель оружия
         GunModels.Gun gun = GunModels.get(type);
         if (gun == null) {
-            // нож/Zeus/RPG7 — процедурные модели без рук
+            // 11.3: нож/Zeus/RPG7 — процедурные модели + нормальные GLB-руки на рукоятях
+            if (!drawHands) return false;
+            if (fpRig == null) {
+                fpRig = CharacterRig.create(CharacterRig.Variant.CT_SWAT);
+                if (fpRig == null) return false;
+            }
+            double hx, hy, hz, hrx, hry, hrz, rearZ, rearY, foreZ, foreY;
+            boolean twoHanded = true;
             if (type == Weapon.Type.KNIFE) {
                 double[] kp = knifeHoldTransform(ox, oy, oz);
-                renderKnifeModel(r, ox, oy, oz, kp[3], kp[4], kp[5], skin, false);
+                hx = kp[0]; hy = kp[1]; hz = kp[2]; hrx = kp[3]; hry = kp[4]; hrz = kp[5];
+                rearZ = 0.010; rearY = 0.005; foreZ = 0.0; foreY = -0.118;
+                twoHanded = false;
+                renderKnifeModel(r, ox, oy, oz, hrx, hry, hrz, skin, false);
             } else if (type == Weapon.Type.ZEUS) {
+                hx = ox - 0.02; hy = oy + 0.01; hz = oz - 0.04;
+                hrx = rotX; hry = rotY; hrz = rotZ;
+                rearZ = 0.00; rearY = -0.062; foreZ = 0.095; foreY = -0.058;
                 renderZeusModel(r, ox, oy, oz, rotX, rotY, rotZ, skin, false);
             } else if (type == Weapon.Type.RPG7) {
+                hx = ox; hy = oy; hz = oz; hrx = rotX; hry = rotY; hrz = rotZ;
+                rearZ = 0.05; rearY = -0.058; foreZ = 0.21; foreY = -0.052;
                 renderRpg7Model(r, ox, oy, oz, rotX, rotY, rotZ, skin, false);
             } else {
                 return false;
             }
+            double fcx = Math.cos(hrx), fsx = Math.sin(hrx);
+            double fcy = Math.cos(hry), fsy = Math.sin(hry);
+            double fcz = Math.cos(hrz), fsz = Math.sin(hrz);
+            double[] R = {
+                    fcz * fcy, fcz * fsy * fsx - fsz * fcx, fcz * fsy * fcx + fsz * fsx,
+                    fsz * fcy, fsz * fsy * fsx + fcz * fcx, fsz * fsy * fcx - fcz * fsx,
+                    -fsy,      fcy * fsx,                   fcy * fcx};
+            for (int i = 0; i < 3; i++) {
+                glbView[i * 4] = R[i * 3]; glbView[i * 4 + 1] = R[i * 3 + 1]; glbView[i * 4 + 2] = R[i * 3 + 2];
+            }
+            glbView[3] = hx; glbView[7] = hy; glbView[11] = hz;
+            CharacterRig.Params p = FP_PARAMS;
+            p.recoil = recoilKick;
+            p.reload = -1.0;
+            p.death = -1;
+            p.flash = false;
+            fpRig.renderFirstPersonHold(r, glbView, p, skin, twoHanded, rearZ, rearY, foreZ, foreY);
             if (muzzleFlashTimer > 0.0) {
                 if (type == Weapon.Type.ZEUS) {
-                    r.drawViewModelBox(ox - 0.02, oy + 0.036, oz + 0.17, 0.095, 0.095, 0.04, 0.0, 0.0, 0.4,
-                            ox - 0.02, oy + 0.01, oz - 0.04, Renderer3D.TEX_SOLID, 0x48F5FF);
+                    r.drawViewModelBox(hx, hy + 0.026, hz + 0.21, 0.095, 0.095, 0.04, 0.0, 0.0, 0.4,
+                            hx, hy, hz, Renderer3D.TEX_SOLID, 0x48F5FF);
                 } else if (type == Weapon.Type.RPG7) {
-                    renderMuzzleFlash3D(r, ox, oy + 0.025, oz + 0.44, 0.24);
+                    renderMuzzleFlash3D(r, hx, hy + 0.025, hz + 0.44, 0.24);
                 }
             }
             return true;
+        }
+        if (drawHands && fpRig == null) {
+            fpRig = CharacterRig.create(CharacterRig.Variant.CT_SWAT);
+            if (fpRig == null) return false;
         }
         double cx = Math.cos(rotX), sx = Math.sin(rotX);
         double cy = Math.cos(rotY), sy = Math.sin(rotY);
@@ -1144,11 +1180,17 @@ public class Weapon {
         p.reload = (reloading && reloadDuration > 0.0) ? 1.0 - reloadTimer / reloadDuration : -1.0;
         p.death = -1;
         p.flash = false;
-        // 11.2: рисуем только оружие (руки убраны по решению игрока), анимация затвора/перезарядки остаётся
-        CharacterRig.animateGun(gun, p);
-        int[] cols = gun.colors(skin, null);
-        r.drawMesh(gun.model, 0, gun.pose.skin, glbView, cols, true, null, 1.15);
-        CharacterRig.drawAttachments(r, gun, glbView, true, skin);
+        // 11.3: руки вернулись — GLB-руки/перчатки держат рукоять (тёплые цвета, не «синие»),
+        // порядок: руки → оружие → насадки (руки не перекрывают затвор и ствол)
+        if (drawHands) {
+            fpRig.renderFirstPerson(r, gun, glbView, p, skin, true);
+        } else {
+            p.recoil = 0; p.reload = -1;
+            CharacterRig.animateGun(gun, p);
+            int[] cols = gun.colors(skin, null);
+            r.drawMesh(gun.model, 0, gun.pose.skin, glbView, cols, true, null, 1.15);
+            CharacterRig.drawAttachments(r, gun, glbView, true, skin);
+        }
         if (muzzleFlashTimer > 0.0 && drawHands) {
             double[] m = gun.muzzle;
             CharacterRig.gunViewPoint(glbView, m[0], m[1], m[2] + CharacterRig.extraMuzzle(gun) + 0.01, glbTmp);

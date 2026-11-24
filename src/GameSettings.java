@@ -14,13 +14,13 @@ import java.util.Properties;
  */
 public class GameSettings {
 
-    public static final int CONFIG_VERSION = 12;
+    public static final int CONFIG_VERSION = 13;
 
     public enum QualityPreset {
         ESPORTS("Киберспорт (Макс. FPS)"),
         LOW("Низкое (Турбо)"),
         MEDIUM("Среднее (Баланс HD)"),
-        HIGH("Высокое (HD 720p + FXAA + Авто-FPS)"),
+        HIGH("Высокое (До 1080p + FXAA + Авто-FPS)"),
         ULTRA("Ультра (1:1 + CAS + Макс.)");
 
         public final String title;
@@ -520,9 +520,9 @@ public class GameSettings {
                 multiCoreRendering = true;
                 break;
             case HIGH:
-                // 11.2 FPS-FIX: фиксированные 720p + динамическое разрешение —
-                // раньше NATIVE_WINDOW рендерил 3D в разрешении окна (на 1440p/4K — слайд-шоу)
-                resolutionScale = ResolutionScale.HIGH_1280;
+                // 11.3 FPS+ЧЁТКОСТЬ: рендерим 3D прямо в размер буфера (до 1920x1080, кап движка) + авто-FPS.
+                // В 11.2 был фиксированный 720p → двойная растяжка (720p→1080p→окно) = «прозрачные/мыльные» текстуры.
+                resolutionScale = ResolutionScale.NATIVE_WINDOW;
                 dynamicResolution = DynamicResolutionMode.TARGET_60;
                 antiAliasingMode = AntiAliasingMode.FXAA_TURBO;
                 textureQuality = TextureQualityMode.BILINEAR_MIP;
@@ -581,6 +581,12 @@ public class GameSettings {
             // это рендер 3D в разрешении окна и слайд-шоу даже на мощных ПК. Переводим на 720p+авто-FPS.
             if (ver < 12 && qualityPreset == QualityPreset.HIGH && resolutionScale == ResolutionScale.NATIVE_WINDOW) {
                 resolutionScale = ResolutionScale.HIGH_1280;
+                dynamicResolution = DynamicResolutionMode.TARGET_60;
+            }
+            // 11.3 МИГРАЦИЯ (config 12): 720p давал двойную растяжку (мыло/«прозрачные текстуры») —
+            // возвращаем чёткий рендер до 1080p с авто-FPS (кап движка не даст слайд-шоу).
+            if (ver < 13 && qualityPreset == QualityPreset.HIGH && resolutionScale == ResolutionScale.HIGH_1280) {
+                resolutionScale = ResolutionScale.NATIVE_WINDOW;
                 dynamicResolution = DynamicResolutionMode.TARGET_60;
             }
             antiAliasingMode = parseEnum(p.getProperty("antiAliasingMode"), AntiAliasingMode.class, antiAliasingMode);

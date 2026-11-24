@@ -45,8 +45,10 @@ public final class CharacterRig {
     // 11.0: тактические перчатки от первого лица — материал кожи кистей перекрашивается в цвет перчаток
     private int skinMatIndex = -1;
     private final int[] fpArmColors;
-    private static final int GLOVE_CT = 0x2A2F38, GLOVE_T = 0x4C3B27, GLOVE_JUGG = 0x1F2329;
-    private static final int PLATE_CT = 0x39424E, PLATE_T = 0x634E30, PLATE_JUGG = 0x2B313A;
+    // 11.3: тёплая кожаная гамма перчаток — руки читаются руками (сине-серые 0x2A2F38/0x39424E
+    // визуально сливались с фурнитурой и выглядели «сломанными синими руками»)
+    private static final int GLOVE_CT = 0x4A3A28, GLOVE_T = 0x4C3B27, GLOVE_JUGG = 0x332B22;
+    private static final int PLATE_CT = 0x5A4A36, PLATE_T = 0x634E30, PLATE_JUGG = 0x3D3428;
     private static final int STRAP_COL = 0xB08F5C;
     private final double[] tmp = new double[3];
     private final double[] tmp2 = new double[3];
@@ -88,6 +90,12 @@ public final class CharacterRig {
             boolean ct = (v == Variant.CT_SWAT || v == Variant.CT_SOLDIER);
             int glove = (v == Variant.JUGGERNAUT) ? GLOVE_JUGG : (ct ? GLOVE_CT : GLOVE_T);
             fpArmColors[skinMatIndex] = glove;
+            // 11.3: перчатка в GLB = материал Swat_Black (был 0x2A2D33 — тёмно-синий!),
+            // красим в тёплый кожаный цвет; рукав «Swat» — тёплый серо-оливковый
+            for (int i = 0; i < m.matNames.length; i++) {
+                if ("Swat_Black".equalsIgnoreCase(m.matNames[i])) fpArmColors[i] = glove;
+                                else if ("Swat".equalsIgnoreCase(m.matNames[i])) fpArmColors[i] = 0x6B5B3E;
+            }
         }
     }
 
@@ -748,7 +756,7 @@ public final class CharacterRig {
             double rotX = -Math.asin(Math.max(-1, Math.min(1, dy)));
             double rotY = Math.atan2(dx, dz);
             r.drawViewModelCylinder(cx, cy, cz, 0.031 * sc, 0.032 * sc, 0.098 * sc,
-                    rotX, rotY, 0.0, cx, cy, cz, 12, 0x1C2027);
+                    rotX, rotY, 0.0, cx, cy, cz, 12, 0xFFFF00);
             r.drawViewModelCylinder(cx - dx * 0.034 * sc, cy - dy * 0.034 * sc, cz - dz * 0.034 * sc,
                     0.033 * sc, 0.033 * sc, 0.020 * sc, rotX, rotY, 0.0, cx, cy, cz, 12, STRAP_COL);
         }
@@ -770,7 +778,7 @@ public final class CharacterRig {
                 double rotX = -Math.asin(Math.max(-1, Math.min(1, dy)));
                 double rotY = Math.atan2(dx, dz);
                 r.drawViewModelCylinder(cx, cy, cz, 0.030 * sc, 0.031 * sc, 0.098 * sc,
-                        rotX, rotY, 0.0, cx, cy, cz, 12, 0x1C2027);
+                        rotX, rotY, 0.0, cx, cy, cz, 12, 0xFFFF00);
                 r.drawViewModelCylinder(cx - dx * 0.034 * sc, cy - dy * 0.034 * sc, cz - dz * 0.034 * sc,
                         0.032 * sc, 0.032 * sc, 0.020 * sc, rotX, rotY, 0.0, cx, cy, cz, 12, STRAP_COL);
             }

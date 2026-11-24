@@ -295,6 +295,7 @@ public class Engine extends JPanel implements Runnable {
     private final float[] frameMsHistory = new float[120];
     private int frameMsCursor = 0;
     private double dynamicResScaleFactor = 1.0;
+    private double lastLogicMs = 0.0;
     private int dynResAdjustCounter = 0;
     private int graphicsSubPage = 0;
 
@@ -1422,7 +1423,9 @@ public class Engine extends JPanel implements Runnable {
                     updateMenuBackgroundScene(dt);
                 } else if (currentScreen == AppScreen.IN_GAME) {
                     if (!paused) {
+                        long logicT0 = System.nanoTime();
                         updateGame(dt);
+                        lastLogicMs = (System.nanoTime() - logicT0) / 1_000_000.0;
                     }
                 } else {
                     // В Главном меню боты патрулируют арену для живого фона!
@@ -2992,7 +2995,10 @@ public class Engine extends JPanel implements Runnable {
         }
         long elapsedNs = System.nanoTime() - t0;
         double ms = elapsedNs / 1_000_000.0;
-        recordFrameTelemetryAndDynamicRes(ms);
+        // 11.3: динамическое разрешение меряет ПОЛНЫЙ кадр (логика+рендер) — тогда TARGET_60
+        // честно держит 60 FPS целиком, а не только отрисовку
+        double fullMs = ms + Math.max(0.0, lastLogicMs);
+        recordFrameTelemetryAndDynamicRes(fullMs);
         this.displayedFrame = target;
         this.nextBufferIsA = !this.nextBufferIsA;
     }
