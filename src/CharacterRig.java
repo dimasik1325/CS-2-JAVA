@@ -242,15 +242,50 @@ public final class CharacterRig {
     /** IK рук к рукояти и цевью оружия, матрица которого уже лежит в gunXf (координаты модели персонажа). */
     void armsToGun(Params p, GunModels.Gun gun, boolean pistol) {
         boolean fp = fpArmScale > 0.0;
+        if (idxR == null) {
+            idxR = collectNamed(model, "Index.R");
+            int[] mid = collectNamed(model, "Middle.R"), rng = collectNamed(model, "Ring.R"), pnk = collectNamed(model, "Pinky.R");
+            java.util.ArrayList<Integer> all = new java.util.ArrayList<>();
+            for (int[] arr : new int[][]{mid, rng, pnk}) for (int j : arr) all.add(j);
+            wrapR = new int[all.size()];
+            for (int i = 0; i < wrapR.length; i++) wrapR[i] = all.get(i);
+        }
+        if (procHold) {
+            // 11.1: процедурное оружие (нож/Zeus/RPG7) — хват по заданным точкам рукоятей
+            gunPoint(0.006, procRearY, procRearZ, tmp);
+            pose.solveTwoBoneIK(jUaR, jLaR, jHandR, tmp[0], tmp[1], tmp[2], 0.7, -1.0, -0.35);
+            if (procTwoHand) {
+                gunPoint(0.0, procForeY, procForeZ, tmp);
+                pose.solveTwoBoneIK(jUaL, jLaL, jHandL, tmp[0], tmp[1], tmp[2], -0.8, -1.0, -0.4);
+            }
+            if (fp) {
+                double hs = 1.0 / fpArmScale;
+                pose.scl[jHandR] = hs;
+                if (procTwoHand) pose.scl[jHandL] = hs;
+            }
+            double[] gr = {0, 1, -1, 0, 1, 0, 1, 0, 0};          // правая: пальцы +Z, ладонь -X
+            double[] glR = {0, 1, 0, 0, 0, 1, 1, 0, 0};          // левая (винтовочная опора)
+            setHandFrame(jHandR, jLaR, gr);
+            if (procTwoHand) setHandFrame(jHandL, jLaL, glR);
+            curlPalm(wrapR, 0.92);
+            curlPalm(idxR, 0.22);
+            curlPalm(thumbsR, 0.50);
+            if (procTwoHand) {
+                curlPalm(fingersL, 0.95);
+                curlPalm(thumbsL, 0.30);
+            }
+            pose.compute();
+            return;
+        }
         // запястье правой руки: у нижнего торца рукояти (кисть тянется вверх вдоль рукояти)
         gunPoint(0.006, fp ? (pistol ? -0.115 : -0.112) : -0.060, fp ? (pistol ? -0.070 : -0.078) : -0.075, tmp);
         pose.solveTwoBoneIK(jUaR, jLaR, jHandR, tmp[0], tmp[1], tmp[2], 0.7, -1.0, -0.35);
         double[] fg = gun.foregrip;
         double reload = p.reload;
         if (reload >= 0 && gun.jMag >= 0) {
-            // левая рука уходит к магазину и обратно
+            // левая рука уходит к магазину и обратно (11.1: компактнее — без растяжки руки поперёк экрана)
             double w = Math.sin(Math.min(1, reload) * Math.PI);
-            gunPoint(-0.03 - 0.12 * w, gun.magPivot[1] - 0.06 - 0.18 * w, gun.magPivot[2] - 0.05, tmp);
+            gunPoint(-0.03 - 0.07 * w, gun.magPivot[1] - 0.05 - 0.11 * w, gun.magPivot[2] - 0.04, tmp);
         } else if (pistol) {
             gunPoint(fp ? -0.032 : -0.028, fp ? -0.105 : -0.100, fp ? -0.080 : -0.040, tmp);
         } else {
@@ -518,6 +553,7 @@ public final class CharacterRig {
 
     private int[] armTris;
     private MeshModel armMesh;   // подмножество: скиннинг только вершин рук
+    private MeshModel armMeshR;  // 11.1: только правая рука (нож — одноручный хват)
     private static final double EYE_Y = 1.64, EYE_Z = 0.02;
     /** Трюк FPS-ригов: руки длиннее пропорций тела (масштаб относительно точки у груди). */
     private static final double FP_ARM_SCALE = 1.32, FP_PIVOT_Y = 0.90;
@@ -587,10 +623,12 @@ public final class CharacterRig {
 
     private void buildFirstPersonPose(GunModels.Gun gun, double[] gunView, Params p,
                                       GameSettings.WeaponSkin skin, boolean drawArms) {
-        animateGun(gun, p);
-        gunColors = gun.colors(skin, gunColors);
-        if (drawArms) { fpArmScale = FP_ARM_SCALE; }
-        if (fpArmScale > 0.0) {
+        if (gun != null) {
+            animateGun(gun, p);
+            gunColors = gun.colors(skin, gunColors);
+        }
+        if (drawArms) {
+            fpArmScale = FP_ARM_SCALE;
             if (armTris == null) {
                 armTris = model.trianglesOfJoints(0, j -> {
                     String n = model.jointNames[j];
@@ -598,6 +636,14 @@ public final class CharacterRig {
                             || n.startsWith("Ring") || n.startsWith("Pinky") || n.startsWith("Thumb");
                 });
                 armMesh = model.extractSubset(0, armTris);
+            }
+            if (armMeshR == null) {
+                int[] armTrisR = model.trianglesOfJoints(0, j -> {
+                    String n = model.jointNames[j];
+                    return (n.contains("Arm") || n.startsWith("Hand") || n.startsWith("Index") || n.startsWith("Middle")
+                            || n.startsWith("Ring") || n.startsWith("Pinky") || n.startsWith("Thumb")) && n.endsWith(".R");
+                });
+                armMeshR = model.extractSubset(0, armTrisR);
             }
             // стойка стрелка: плечи развёрнуты, корпус чуть наклонён
             pose.reset();
@@ -611,9 +657,35 @@ public final class CharacterRig {
             System.arraycopy(gunView, 0, gunXf, 0, 12);
             gunXf[7] += EYE_Y;
             gunXf[11] += EYE_Z;
-            boolean pistol = gun.spec.file.contains("pistol");
+            boolean pistol = (gun != null) && gun.spec.file.contains("pistol");
             armsToGun(p, gun, pistol);
             fpArmScale = 0.0;
+        }
+    }
+
+    // 11.1: процедурное оружие (нож/Zeus/RPG7) — руки через GLB-риг
+    private boolean procHold = false, procTwoHand = true;
+    private double procRearZ = 0.0, procRearY = -0.112, procForeZ = 0.0, procForeY = -0.118;
+
+    /**
+     * 11.1: GLB-руки (перчатки) для процедурного оружия. holdView — матрица хвата в пространстве
+     * камеры (локальные координаты: Z вдоль ствола/клинка), rearZ/rearY — точка правой кисти,
+     * foreZ/foreY — левой (twoHanded=false — одноручный хват ножа).
+     */
+    public void renderFirstPersonHold(Renderer3D r, double[] holdView, Params p,
+                                      GameSettings.WeaponSkin skin, boolean twoHanded,
+                                      double rearZ, double rearY, double foreZ, double foreY) {
+        procHold = true; procTwoHand = twoHanded;
+        procRearZ = rearZ; procRearY = rearY; procForeZ = foreZ; procForeY = foreY;
+        try {
+            buildFirstPersonPose(null, holdView, p, skin, true);
+            // buildFirstPersonPose сбрасывает fpArmScale — рисуем безусловно (drawArms=true)
+            double sc = FP_ARM_SCALE, ty = FP_PIVOT_Y * (1 - sc) - EYE_Y;
+            double[] armXf = {sc, 0, 0, 0, 0, sc, 0, ty, 0, 0, sc, -EYE_Z};
+            r.drawMesh(twoHanded ? armMesh : armMeshR, 0, pose.skin, armXf, fpArmColors, true, null, 1.08);
+            drawFpGloves(r, armXf, sc, twoHanded);
+        } finally {
+            procHold = false;
         }
     }
 
@@ -642,6 +714,10 @@ public final class CharacterRig {
      * манжета на запястье (цилиндр вдоль предплечья) и светлый ремешок.
      */
     private void drawFpGloves(Renderer3D r, double[] armXf, double sc) {
+        drawFpGloves(r, armXf, sc, true);
+    }
+
+    private void drawFpGloves(Renderer3D r, double[] armXf, double sc, boolean twoHanded) {
         if (jHandR < 0 || jLaR < 0) return;
         double[] gv = gunXf;
         // оси оружия в пространстве камеры (столбцы поворота gunXf), нормализованные
@@ -678,7 +754,7 @@ public final class CharacterRig {
         }
 
         // ---- левая рука: тыльная сторона смотрит вниз (кисть держит цевьё снизу)
-        if (jHandL >= 0 && jLaL >= 0) {
+        if (twoHanded && jHandL >= 0 && jLaL >= 0) {
             double[] wL = jointView(jHandL, armXf, new double[3]);
             double[] eL = jointView(jLaL, armXf, tmpE);
             double qx = wL[0] + az[0] * 0.040 * sc - ay[0] * 0.024 * sc;

@@ -560,9 +560,10 @@ public class Weapon {
         if (reloading && reloadDuration > 0.0) {
             double progress = 1.0 - (reloadTimer / reloadDuration);
             double wave = Math.sin(progress * Math.PI);
-            rotZ = 0.50 * wave;
-            rotX = 0.25 * wave;
-            reloadDropY = -0.085 * wave;
+            // 11.1: компактная перезарядка — меньше завал и просадка, рука не «растягивается»
+            rotZ = 0.36 * wave;
+            rotX = 0.16 * wave;
+            reloadDropY = -0.055 * wave;
         }
 
         double adsShiftX = adsActive ? -0.155 : 0.0;
@@ -1034,39 +1035,40 @@ public class Weapon {
         }
     }
 
-    private void renderKnifeModel(Renderer3D r, double ox, double oy, double oz,
-                                  double overrideRotX, double overrideRotY, double overrideRotZ,
-                                  GameSettings.WeaponSkin skin, boolean drawHands) {
+    /** 11.1: трансформ хвата керамбита (позиция рукояти + углы) — общий для рук и корпуса. */
+    private double[] knifeHoldTransform(double ox, double oy, double oz) {
         double dur = heavySlash ? 0.36 : 0.26;
         double slashPhase = (slashTimer > 0.0) ? (1.0 - slashTimer / dur) : 0.0;
         double swing = Math.sin(slashPhase * Math.PI);
-
         double inspectSpin = 0.0;
         if (inspectTimer > 0.0) {
             double p = 1.0 - inspectTimer / INSPECT_DURATION;
             inspectSpin = p * Math.PI * 4.0; // Двойной оборот Керамбита на указательном пальце [F]!
         }
-
         double kx = ox - 0.02 - swing * (heavySlash ? 0.11 : 0.19);
         double ky = oy - 0.01 + swing * 0.06;
         double kz = oz - 0.08 + swing * (heavySlash ? 0.22 : 0.13);
+        return new double[]{
+                kx, ky, kz,
+                -0.30 + swing * 0.62 + inspectSpin,
+                -0.24 - swing * (heavySlash ? 0.35 : 0.85),
+                0.16 + swing * 0.45};
+    }
 
-        double rotX = drawHands ? (-0.30 + swing * 0.62 + inspectSpin) : overrideRotX;
-        double rotY = drawHands ? (-0.24 - swing * (heavySlash ? 0.35 : 0.85)) : overrideRotY;
-        double rotZ = drawHands ? (0.16 + swing * 0.45) : overrideRotZ;
+    private void renderKnifeModel(Renderer3D r, double ox, double oy, double oz,
+                                  double overrideRotX, double overrideRotY, double overrideRotZ,
+                                  GameSettings.WeaponSkin skin, boolean drawHands) {
+        double[] kp = knifeHoldTransform(ox, oy, oz);
+        double kx = kp[0], ky = kp[1], kz = kp[2];
+        double rotX = drawHands ? kp[3] : overrideRotX;
+        double rotY = drawHands ? kp[4] : overrideRotY;
+        double rotZ = drawHands ? kp[5] : overrideRotZ;
 
         boolean custom = (skin != GameSettings.WeaponSkin.STANDARD);
         int handle     = custom ? skin.trim    : 0x1A1E26;
         int ringGold   = 0xF2C648;
         int bladeSteel = custom ? skin.primary : 0xD6E0EC;
         int bladeEdge  = custom ? skin.accent  : 0xFF427C;
-
-        if (drawHands) {
-            drawTacticalHandsAndGloves(r, kx + 0.02, ky + 0.052, kz, -0.02, -1.0, false, -0.26 + swing * 0.42, rotY, rotZ, skin);
-            // Левая рука в тактической стойке ближнего боя с часами слева!
-            r.drawViewModelCylinder(ox - 0.25, oy - 0.14, oz - 0.05, 0.042, 0.035, 0.24, 0.35, 0.55, 0.15, ox, oy, oz, 10, 0x243447);
-            r.drawViewModelBox(ox - 0.17, oy - 0.07, oz + 0.04, 0.044, 0.042, 0.064, 0.20, 0.35, 0.10, ox, oy, oz, Renderer3D.TEX_SOLID, 0x1D222B);
-        }
 
         // Кольцо Керамбита + текстурированная G10 рукоять с заклёпками + хищный изогнутый клинок с долом!
         r.drawViewModelCylinder(kx, ky - 0.010, kz - 0.034, 0.023, 0.023, 0.013, rotX + 1.57, rotY, rotZ, kx, ky, kz, 14, ringGold);
@@ -1089,7 +1091,59 @@ public class Weapon {
                                    double rotX, double rotY, double rotZ,
                                    GameSettings.WeaponSkin skin, boolean drawHands) {
         GunModels.Gun gun = GunModels.get(type);
-        if (gun == null) return false;
+        if (gun == null) {
+            // 11.1: нож/Zeus/RPG7 — процедурные модели, но руки теперь GLB-перчатки
+            // (старые нарисованные синие «лапши» больше не показываем!)
+            if (!drawHands) return false;
+            if (fpRig == null) {
+                fpRig = CharacterRig.create(CharacterRig.Variant.CT_SWAT);
+                if (fpRig == null) return false;
+            }
+            double hx, hy, hz, hrx, hry, hrz, rearZ, rearY, foreZ, foreY;
+            boolean twoHanded = true;
+            if (type == Weapon.Type.KNIFE) {
+                double[] kp = knifeHoldTransform(ox, oy, oz);
+                hx = kp[0]; hy = kp[1]; hz = kp[2]; hrx = kp[3]; hry = kp[4]; hrz = kp[5];
+                rearZ = 0.010; rearY = 0.005; foreZ = 0.0; foreY = -0.118;
+                twoHanded = false;
+                renderKnifeModel(r, ox, oy, oz, hrx, hry, hrz, skin, false);
+            } else if (type == Weapon.Type.ZEUS) {
+                hx = ox - 0.02; hy = oy + 0.01; hz = oz - 0.04;
+                hrx = rotX; hry = rotY; hrz = rotZ;
+                rearZ = 0.00; rearY = -0.062; foreZ = 0.095; foreY = -0.058;
+                renderZeusModel(r, ox, oy, oz, rotX, rotY, rotZ, skin, false);
+            } else {
+                hx = ox; hy = oy; hz = oz; hrx = rotX; hry = rotY; hrz = rotZ;
+                rearZ = 0.05; rearY = -0.058; foreZ = 0.21; foreY = -0.052;
+                renderRpg7Model(r, ox, oy, oz, rotX, rotY, rotZ, skin, false);
+            }
+            double fcx = Math.cos(hrx), fsx = Math.sin(hrx);
+            double fcy = Math.cos(hry), fsy = Math.sin(hry);
+            double fcz = Math.cos(hrz), fsz = Math.sin(hrz);
+            double[] R = {
+                    fcz * fcy, fcz * fsy * fsx - fsz * fcx, fcz * fsy * fcx + fsz * fsx,
+                    fsz * fcy, fsz * fsy * fsx + fcz * fcx, fsz * fsy * fcx - fcz * fsx,
+                    -fsy,      fcy * fsx,                   fcy * fcx};
+            for (int i = 0; i < 3; i++) {
+                glbView[i * 4] = R[i * 3]; glbView[i * 4 + 1] = R[i * 3 + 1]; glbView[i * 4 + 2] = R[i * 3 + 2];
+            }
+            glbView[3] = hx; glbView[7] = hy; glbView[11] = hz;
+            CharacterRig.Params p = FP_PARAMS;
+            p.recoil = recoilKick;
+            p.reload = -1.0;
+            p.death = -1;
+            p.flash = false;
+            fpRig.renderFirstPersonHold(r, glbView, p, skin, twoHanded, rearZ, rearY, foreZ, foreY);
+            if (muzzleFlashTimer > 0.0) {
+                if (type == Weapon.Type.ZEUS) {
+                    r.drawViewModelBox(hx, hy + 0.026, hz + 0.21, 0.095, 0.095, 0.04, 0.0, 0.0, 0.4,
+                            hx, hy, hz, Renderer3D.TEX_SOLID, 0x48F5FF);
+                } else if (type == Weapon.Type.RPG7) {
+                    renderMuzzleFlash3D(r, hx, hy + 0.025, hz + 0.44, 0.24);
+                }
+            }
+            return true;
+        }
         if (drawHands && fpRig == null) {
             fpRig = CharacterRig.create(CharacterRig.Variant.CT_SWAT);
             if (fpRig == null) return false;
